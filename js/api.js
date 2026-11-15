@@ -8,25 +8,18 @@
  *
  * The submitted time is not sent: the server recomputes it from the button steps.
  * Sending it would only invite the server to disagree with the client.
+ *
+ * An upload needs a signed-in player, because a run belongs to an account. A
+ * guest's runs still queue, and are sent once they sign in.
  */
 
-const API = (() => {
-  // Same origin by default, which is what the bundled server does. When the game
-  // is hosted somewhere static (GitHub Pages, itch.io) and the API lives on
-  // another host, point at it with <meta name="sling-api" content="https://...">.
-  const meta = typeof document !== 'undefined'
-    && document.querySelector('meta[name="sling-api"]');
-  const native = typeof window !== 'undefined' && window.SlingDriftNative
-    && window.SlingDriftNative.apiBase && window.SlingDriftNative.apiBase();
-  const base = (meta && meta.content) || native
-    || (typeof window !== 'undefined' && window.SLING_API_BASE);
-  return base ? String(base).replace(/\/$/, '') : './api';
-})();
-const QUEUE_KEY = 'slingdrift.queue.v1';
+import { supabaseUrl, supabaseAnonKey, authToken } from './account.js';
+
+const QUEUE_KEY = 'slingdrift.queue.v2';
 const CLIENT_KEY = 'slingdrift.clientId.v1';
 const TIMEOUT = 8000;
 
-/** A stable per-device id, so the board can show one row per player per track. */
+/** A stable per-device id, kept so a guest's queue survives a reload. */
 export function clientId() {
   try {
     let id = localStorage.getItem(CLIENT_KEY);
@@ -50,24 +43,41 @@ function writeQueue(q) {
 /** Queue a finished run. Always succeeds - uploading is not the player's problem. */
 export function enqueue({ track, steps, name }) {
   const q = readQueue().filter((e) => !(e.track === track && e.steps === steps));
-  q.push({ track, steps, name, clientId: clientId(), at: Date.now() });
+  q.push({ track, steps, name, at: Date.now() });
   writeQueue(q);
   return q.length;
 }
 
 export const queueLength = () => readQueue().length;
 
+const endpoint = (fn) => `${supabaseUrl()}/functions/v1/${fn}`;
+
 async function post(entry) {
+  const token = await authToken();
+  // A guest cannot upload: the run has no account to belong to. Keep it queued
+  // rather than dropping it, so signing in later sends it.
+  if (!token) return { retry: true };
+
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), TIMEOUT);
   try {
-    const res = await fetch(`${API}/run`, {
+    const res = await fetch(endpoint('run'), {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(entry),
+      headers: {
+        apikey: supabaseAnonKey(),
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ track: entry.track, steps: entry.steps }),
       signal: ctl.signal,
     });
-    if (res.status === 422) return { drop: true };   // server proved it invalid
+    // 422: the server replayed the run and it was not a finish. Re-sending it
+    // cannot change that, so drop it instead of retrying forever.
+    if (res.status === 422) return { drop: true };
+    // 401: the token went stale mid-queue. Retry, and the next flush refreshes.
+    if (res.status === 401) return { retry: true };
+    // 409: signed in but with no username yet. Retry once a name exists.
+    if (res.status === 409) return { retry: true };
     if (!res.ok) return { retry: true };
     return { ok: true, body: await res.json() };
   } catch {
@@ -101,8 +111,14 @@ export async function fetchBoard(track, page = 1) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), TIMEOUT);
   try {
-    const q = `track=${track}&page=${page}&clientId=${encodeURIComponent(clientId())}`;
-    const res = await fetch(`${API}/board?${q}`, { signal: ctl.signal });
+    const token = await authToken();
+    const res = await fetch(`${endpoint('board')}?track=${track}&page=${page}`, {
+      headers: {
+        apikey: supabaseAnonKey(),
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+      signal: ctl.signal,
+    });
     if (!res.ok) return null;
     return await res.json();
   } catch {

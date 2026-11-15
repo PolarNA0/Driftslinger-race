@@ -10,7 +10,8 @@ import { CAR_COLOURS } from './render.js';
 import { enqueue, flush, fetchBoard, clientId, queueLength } from './api.js';
 import { encodeSteps } from './replay.js';
 import {
-  currentAccount, listAccounts, register, login, logout,
+  currentAccount, currentEmail, listAccounts, register, login, logout,
+  ensureProfile,
 } from './account.js';
 
 const $ = (id) => document.getElementById(id);
@@ -94,16 +95,28 @@ function buildAccountBar() {
   const bar = $('acct-bar');
   bar.innerHTML = '';
   const who = currentAccount();
+  const email = currentEmail();
+
   const label = document.createElement('span');
   label.className = 'acct__who';
-  label.textContent = who ? `Signed in as ${who}` : 'Playing as guest';
+  // Three states, not two: signed in with a leaderboard name, signed in without
+  // one yet, and a guest. The middle case is reachable when a project has email
+  // confirmation on and the profile was never finished.
+  label.textContent = who ? `Signed in as ${who}`
+    : email ? `Signed in as ${email} - pick a name to race`
+    : 'Playing as guest';
   bar.appendChild(label);
+
   const btn = document.createElement('button');
   btn.className = 'btn btn--small';
-  btn.textContent = who ? 'Switch' : 'Sign in';
-  btn.addEventListener('click', () => openAccount(who ? 'switch' : 'login'));
+  btn.textContent = who ? 'Switch' : email ? 'Pick a name' : 'Sign in';
+  btn.addEventListener('click', () => {
+    if (email && !who) openAccount('name');
+    else openAccount(who ? 'switch' : 'login');
+  });
   bar.appendChild(btn);
-  if (who) {
+
+  if (who || email) {
     const out = document.createElement('button');
     out.className = 'btn btn--small btn--ghost';
     out.textContent = 'Sign out';
@@ -444,33 +457,78 @@ function showHistory() {
 }
 
 // --- accounts ----------------------------------------------------------------
-let acctMode = 'login';   // 'login' | 'register'
+let acctMode = 'login';   // 'login' | 'register' | 'name'
 
 function openAccount(mode) {
-  acctMode = mode === 'register' ? 'register' : 'login';
-  $('acct-title').textContent = acctMode === 'register' ? 'Create an account' : 'Sign in';
-  $('acct-submit').textContent = acctMode === 'register' ? 'Create account' : 'Sign in';
+  acctMode = mode === 'register' ? 'register' : mode === 'name' ? 'name' : 'login';
+
+  // The username field is only needed to create an account, or to complete one
+  // after signing in without a name. On plain sign-in the email is the identity.
+  const wantsName = acctMode !== 'login';
+  $('acct-user').hidden = !wantsName;
+  $('acct-email').hidden = acctMode === 'name';
+  $('acct-sub').textContent = acctMode === 'name'
+    ? 'Signed in. Choose the name that will appear on the leaderboard.'
+    : acctMode === 'register'
+      ? 'Create an account to upload your times and race the shared leaderboard.'
+      : 'Sign in to upload your times and race the shared leaderboard.';
+
+  $('acct-title').textContent = acctMode === 'name' ? 'Pick a username'
+    : acctMode === 'register' ? 'Create an account' : 'Sign in';
+  $('acct-submit').textContent = acctMode === 'name' ? 'Save name'
+    : acctMode === 'register' ? 'Create account' : 'Sign in';
+  $('acct-toggle').hidden = acctMode === 'name';
   $('acct-toggle').textContent =
     acctMode === 'register' ? 'I already have an account' : 'Create an account';
   $('acct-error').textContent = '';
   $('acct-pass').value = '';
-  // Offer a name already on this device as a hint.
-  const known = listAccounts();
-  $('acct-user').placeholder = known.length ? `e.g. ${known[0]}` : 'Username';
+
+  if (acctMode === 'register') {
+    // Offer a name seen on this device as a hint, not as an account.
+    const known = listAccounts();
+    $('acct-user').placeholder = known.length ? `e.g. ${known[0]}` : 'Username';
+  }
+
   showOverlay('over-account');
-  setTimeout(() => $('acct-user').focus(), 30);
+  setTimeout(() => (wantsName ? $('acct-user') : $('acct-email')).focus(), 30);
 }
 
 async function submitAccount() {
   const user = $('acct-user').value;
+  const email = $('acct-email').value;
   const pass = $('acct-pass').value;
+
+  if (acctMode === 'name') {
+    const res = await ensureProfile(user);
+    if (!res.ok) { $('acct-error').textContent = res.error; return; }
+    afterSignIn();
+    return;
+  }
+
   const res = acctMode === 'register'
-    ? await register(user, pass)
-    : await login(user, pass);
+    ? await register(user, email, pass)
+    : await login(email, pass);
+
   if (!res.ok) { $('acct-error').textContent = res.error; return; }
+
+  // Registered but the project wants the email confirmed first.
+  if (res.pending) {
+    $('acct-error').textContent = 'Check your email to confirm, then sign in.';
+    $('acct-pass').value = '';
+    return;
+  }
+  // Signed in, but this account has no leaderboard name yet.
+  if (res.needsName) { openAccount('name'); return; }
+
+  afterSignIn();
+}
+
+function afterSignIn() {
   buildAccountBar();
   buildTrackList();
   showOverlay('menu');
+  // Anything raced as a guest can go up now that there is an account to hold it.
+  submitQueued(menuSeed);
 }
 
 // --- menu --------------------------------------------------------------------
@@ -558,7 +616,8 @@ $('acct-submit').addEventListener('click', submitAccount);
 $('acct-toggle').addEventListener('click', () => openAccount(acctMode === 'register' ? 'login' : 'register'));
 $('acct-close').addEventListener('click', () => showOverlay('menu'));
 $('acct-pass').addEventListener('keydown', (e) => { if (e.key === 'Enter') submitAccount(); });
-$('acct-user').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('acct-pass').focus(); });
+$('acct-email').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('acct-pass').focus(); });
+$('acct-user').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('acct-email').focus(); });
 
 for (const b of document.querySelectorAll('#ghost-list .mode')) {
   b.addEventListener('click', () => {

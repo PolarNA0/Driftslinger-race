@@ -8,6 +8,11 @@
      bundled server (server/server.mjs) serves. Set it to your API's URL when the
      game is hosted statically, e.g. on GitHub Pages. -->
 <meta name="sling-api" content="" />
+<!-- The Supabase project that holds accounts and the shared leaderboard. The key
+     is the *public anon* key: it is meant to be visible in the page, and row-level
+     security is what stops it writing anything it should not. -->
+<meta name="sling-supabase" content="https://pleotpbgzeohxbuxffiq.supabase.co" />
+<meta name="sling-supabase-key" content="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBsZW90cGJnemVvaHhidXhmZmlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ3NjkxOTIsImV4cCI6MjExMDM0NTE5Mn0.Q8Se4oWOQ55yj8J9EXcllSMBXpiEMtmpmQUhPeJHZbU" />
 <title>Sling Drift</title>
 <link rel="manifest" href="manifest.webmanifest" />
 <link rel="icon" href="icons/icon-192.png" />
@@ -118,10 +123,12 @@
   <div id="over-account" class="over" hidden>
     <div class="sheet">
       <h2 id="acct-title">Sign in</h2>
-      <p class="sub">Accounts are stored on this device, so each player keeps their own
-        scores and replays. Your password is hashed, never stored as plain text.</p>
+      <p id="acct-sub" class="sub">Sign in to upload your times and race the shared
+        leaderboard.</p>
       <input id="acct-user" class="field" placeholder="Username" autocomplete="username"
              autocapitalize="off" autocorrect="off" spellcheck="false" />
+      <input id="acct-email" class="field" type="email" placeholder="Email"
+             autocomplete="email" autocapitalize="off" autocorrect="off" spellcheck="false" hidden />
       <input id="acct-pass" class="field" type="password" placeholder="Password"
              autocomplete="current-password" />
       <p id="acct-error" class="err"></p>
@@ -163,7 +170,7 @@
       <button id="btn-play" class="btn btn--primary btn--big">Play</button>
       <button id="btn-board" class="btn">Leaderboard</button>
       <button id="btn-history" class="btn">History</button>
-      <p class="foot">Offline · no ads · your scores stay on this device</p>
+      <p class="foot">Offline play · no ads · sign in to race the shared board</p>
     </div>
   </div>
 </div>
