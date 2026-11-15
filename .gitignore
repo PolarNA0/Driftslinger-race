@@ -1,0 +1,17 @@
+# Build artefacts
+dist/
+build/
+*.apk
+*.aab
+
+# Android signing key - never commit this
+android/debug.keystore
+*.keystore
+*.jks
+
+# Leaderboard runtime data
+server/data/
+
+# OS noise
+.DS_Store
+Thumbs.db

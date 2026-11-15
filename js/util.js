@@ -1,0 +1,38 @@
+export const TAU = Math.PI * 2;
+export const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+export const lerp = (a, b, t) => a + (b - a) * t;
+
+/** Shortest signed angle from a to b, in (-PI, PI]. */
+export function angDiff(a, b) {
+  let d = (b - a) % TAU;
+  if (d > Math.PI) d -= TAU;
+  if (d <= -Math.PI) d += TAU;
+  return d;
+}
+
+/** Deterministic PRNG, so a seed always rebuilds the same road. */
+export function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+export const dist = (ax, ay, bx, by) => Math.hypot(bx - ax, by - ay);
+
+/** Distance from a point to a segment. */
+export function segDist(px, py, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const L = dx * dx + dy * dy;
+  const t = L ? clamp(((px - a.x) * dx + (py - a.y) * dy) / L, 0, 1) : 0;
+  return Math.hypot(px - (a.x + t * dx), py - (a.y + t * dy));
+}
+
+/**
+ * Format a distance that is already in metres. The pixel-to-metre conversion
+ * lives in CFG.pxPerMetre and happens once, at the point the score is computed -
+ * doing it again here would silently divide the score by 50.
+ */
+export const fmtDist = (metres) => `${Math.round(metres)} m`;

@@ -1,0 +1,17 @@
+<!doctype html><html><head><meta charset="utf-8"><title>reset sw</title></head>
+<body><pre id="o">resetting...</pre><script>
+(async()=>{
+  const out=document.getElementById('o'); const log=[];
+  const say=s=>{log.push(s);out.textContent=log.join('\n');};
+  try{
+    const regs=await navigator.serviceWorker.getRegistrations();
+    for(const r of regs){ await r.unregister(); }
+    say('unregistered '+regs.length+' service worker(s)');
+    const keys=await caches.keys();
+    for(const k of keys) await caches.delete(k);
+    say('deleted caches: '+keys.join(', ')||'none');
+    say('DONE');
+  }catch(e){ say('ERROR '+e.message); }
+  document.title='done';
+})();
+</script></body></html>

@@ -1,0 +1,73 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>inspect</title></head>
+<body style="margin:0;background:#000">
+<canvas id="view" width="420" height="700" style="display:none"></canvas>
+<pre id="out" style="color:#9f9;font:10px monospace;line-height:1.05"></pre>
+<script type="module">
+import { Track } from '/js/track.js';
+import { Car } from '/js/car.js';
+import { CFG } from '/js/config.js';
+import { Camera, Renderer } from '/js/render.js';
+
+// nearest-colour classification against the actual render palette
+const PAL = [
+  [' ', [11,13,18],   'background'],
+  ['.', [27,32,48],   'road'],
+  [':', [46,58,85],   'wall'],
+  ['-', [60,70,94],   'centre dash'],
+  ['o', [61,74,102],  'dim pole'],
+  ['O', [110,231,255],'pole (next)'],
+  ['@', [255,209,102],'car'],
+  ['~', [73,141,162], 'trail'],
+];
+function classify(r,g,b){
+  let best=null, bd=1e9;
+  for(const [ch,c] of PAL){
+    const d=(r-c[0])**2+(g-c[1])**2+(b-c[2])**2;
+    if(d<bd){bd=d;best=ch;}
+  }
+  return best;
+}
+const lines=[];
+try{
+  const track=new Track(1);
+  const car=new Car(); car.reset(track);
+  const cam=new Camera();
+  const cv=document.getElementById('view');
+  const r=new Renderer(cv);
+  for(let i=0;i<8000 && car.grabbed<3;i++){
+    const held = car.attached ? car.remaining>0
+      : Math.hypot(car.fillet.c.x-car.x,car.fillet.c.y-car.y)<=CFG.grabRange;
+    car.step(1/120, held);
+  }
+  cam.follow(car,0,true);
+  r.draw(car,cam,track);
+  const W=cv.width,H=cv.height;
+  const img=cv.getContext('2d').getImageData(0,0,W,H).data;
+  const COLS=60,ROWS=42;
+  for(let ry=0;ry<ROWS;ry++){
+    let row='';
+    for(let rx=0;rx<COLS;rx++){
+      let R=0,G=0,B=0,n=0;
+      const x0=Math.floor(rx*W/COLS),x1=Math.floor((rx+1)*W/COLS);
+      const y0=Math.floor(ry*H/ROWS),y1=Math.floor((ry+1)*H/ROWS);
+      for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++){
+        const i=(y*W+x)*4;R+=img[i];G+=img[i+1];B+=img[i+2];n++;
+      }
+      row+=classify(R/n,G/n,B/n);
+    }
+    lines.push(row);
+  }
+  // where is the car on screen?
+  const cx=Math.round(W/2),cy=Math.round(H/2);
+  const at=(x,y)=>{const i=(y*W+x)*4;return [img[i],img[i+1],img[i+2]];};
+  lines.push('');
+  lines.push('legend: space=bg . =road : =wall - =dash o=dim pole O=NEXT POLE @=CAR ~=trail');
+  lines.push('car grabbed='+car.grabbed+' attached='+car.attached);
+  lines.push('screen centre rgb='+at(cx,cy)+' (car should be here)');
+  lines.push('canvas='+W+'x'+H+'  roadWidth='+(CFG.roadHalfWidth*2)+'px  driftRadius='+CFG.driftRadius);
+}catch(e){lines.push('ERROR '+e.message+' '+(e.stack||''));}
+document.getElementById('out').textContent=lines.join('\n');
+document.title='inspect-ready';
+</script>
+</body></html>

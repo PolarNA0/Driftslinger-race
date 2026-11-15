@@ -1,0 +1,40 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>input path test</title>
+<style>body{margin:0;background:#111;color:#7CFC00;font:12px monospace}iframe{width:420px;height:700px;border:0}pre{padding:8px}</style></head>
+<body>
+<iframe id="f" src="/index.html"></iframe>
+<pre id="out">running...</pre>
+<script>
+const log=[]; const say=(s)=>{log.push(s);document.getElementById('out').textContent=log.join('\n');};
+const wait=(ms)=>new Promise(r=>setTimeout(r,ms));
+window.addEventListener('load', async () => {
+  const f=document.getElementById('f'), w=f.contentWindow, d=f.contentDocument;
+  await wait(1200);
+  try {
+    const api=w.__slingdrift, game=api.game;
+    api.startRun(1); await wait(200);
+    const cv=d.getElementById('view');
+    const CFG=(await import('/js/config.js?v='+Date.now())).CFG;
+    const rect=cv.getBoundingClientRect();
+    const cx=rect.left+rect.width/2, cy=rect.top+rect.height/2;
+    // A real player: hold while the pole is in range, release to fly. Drive via
+    // genuine pointer events on the canvas, exactly as a finger would.
+    const ev=(type,x,y)=>cv.dispatchEvent(new w.PointerEvent(type,{clientX:x,clientY:y,bubbles:true,cancelable:true,pointerId:1,pointerType:'touch'}));
+    let corners=0, guard=0, held=false;
+    while (game.car.alive && corners<40 && guard++<4000) {
+      const c=game.car;
+      const want = c.attached ? c.remaining>0
+        : Math.hypot(c.fillet.c.x-c.x,c.fillet.c.y-c.y)<=CFG.grabRange;
+      if (want!==held) { held=want; ev(want?'pointerdown':'pointerup',cx,cy); }
+      await wait(8);
+      corners=game.car.grabbed;
+    }
+    say('real pointer input: alive='+game.car.alive+' corners='+game.car.grabbed+' dist='+(game.car.distance/CFG.pxPerMetre).toFixed(0)+'m');
+    say('game.held tracked from real events: '+game.held);
+    const pass = game.car.grabbed>=40;
+    say('RESULT: '+(pass?'PASS':'FAIL'));
+  } catch(e){ say('ERROR: '+e.message+'\n'+(e.stack||'')); }
+  document.title='done';
+});
+</script>
+</body></html>

@@ -1,0 +1,103 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>slingdrift online test</title>
+<style>body{margin:0;background:#111;color:#7CFC00;font:12px monospace}iframe{width:420px;height:700px;border:0}pre{padding:8px}</style></head>
+<body>
+<iframe id="f" src="/index.html"></iframe>
+<pre id="out">running...</pre>
+<script>
+const log=[]; const say=(s)=>{log.push(s);document.getElementById('out').textContent=log.join('\n');};
+const wait=(ms)=>new Promise(r=>setTimeout(r,ms));
+let pass=0, fail=0;
+const ok=(c,m)=>{ if(c){pass++;say('  ok   '+m);} else {fail++;say('  FAIL '+m);} };
+
+window.addEventListener('load', async () => {
+  const f=document.getElementById('f'), w=f.contentWindow, d=f.contentDocument;
+  await wait(1500);
+  try {
+    const api=w.__slingdrift, game=api.game;
+    say('=== online leaderboard, end to end ===');
+    say('api: '+!!api+'  game: '+!!game);
+    // Start from a clean device so a leftover queue from an earlier page load
+    // cannot make the first assertion lie. The API is cross-origin here (the game
+    // is on 12001, the API on 12000), which is how GitHub Pages will run it.
+    w.localStorage.clear();
+
+    // Start empty, and prove it.
+    const empty = await api.fetchBoard(1,1);
+    ok(empty && empty.total === 0, 'server board starts empty');
+    ok(api.queueLength() === 0, 'queue starts empty');
+
+    // Play a real run on track 1 through the real game loop.
+    api.startRun(1);
+    await wait(150);
+    ok(game.state === 'running', 'the run is actually running');
+    const CFG = (await import('/js/config.js?v='+Date.now())).CFG;
+    // Drive the reference line: hold while the orbit is inside the corner arc.
+    for (let i=0; i<4000 && game.state==='running'; i++) {
+      const car = game.car;
+      let held;
+      if (car.attached) held = car.remaining > 0.02;
+      else { const fl=car.fillet; held = Math.hypot(fl.c.x-car.x, fl.c.y-car.y) <= CFG.grabRange; }
+      game.setHeld(held);
+      await wait(4);
+    }
+    ok(game.state === 'finished', 'the run finished (state='+game.state+')');
+    const time = game.time;
+    say('  ran track 1 in '+time.toFixed(4)+'s with '+game.steps.length+' steps');
+
+    // The finish handler queues and sends. Give the upload a moment.
+    await wait(2000);
+    ok(api.queueLength() === 0, 'the run was sent and the queue is empty');
+
+    const board = await api.fetchBoard(1,1);
+    ok(board.total === 1, 'the run is on the server board (total='+board.total+')');
+    ok(Math.abs(board.rows[0].time - time) < 1e-9,
+       'server time matches the run exactly ('+board.rows[0].time.toFixed(4)+' vs '+time.toFixed(4)+')');
+    ok(board.rows[0].watchable, 'the stored run is watchable');
+    ok(typeof board.rows[0].steps === 'string' && board.rows[0].steps.length > 0,
+       'the row carries the button steps for the ghost');
+    ok(board.you === 1, 'the server reports the player at rank 1 (you='+board.you+')');
+
+    // The ghost replays from those steps and reproduces the same time.
+    ok(game.loadStepsReplay(1, board.rows[0].steps), 'the stored run can be replayed as a ghost');
+    // A loaded replay starts at zero; the time only appears once it is simulated,
+    // so play it out and check where it lands.
+    if (!game.running) game.run();
+    game.start();
+    for (let i=0; i<6000 && game.state==='running'; i++) await wait(4);
+    ok(game.state === 'finished', 'the ghost replay finishes (state='+game.state+')');
+    ok(Math.abs(game.time - time) < 1e-9,
+       'the replayed ghost reproduces the time exactly ('+game.time.toFixed(4)+' vs '+time.toFixed(4)+')');
+
+    // Offline behaviour: stop the network, queue a run, and check it is kept.
+    say('--- offline queue ---');
+    const realFetch = w.fetch;
+    w.fetch = () => Promise.reject(new TypeError('offline'));
+    api.enqueue({ track: 3, steps: '10'.repeat(600), name: 'Offline' });
+    const sent = await api.flush();
+    ok(sent === null, 'a flush with no network returns nothing');
+    ok(api.queueLength() === 1, 'the run stays queued while offline (len='+api.queueLength()+')');
+    w.fetch = realFetch;
+    // Coming back online should drain it.
+    await api.flush();
+    ok(api.queueLength() === 0, 'the queue drains when the network returns');
+
+    // A local board still renders when the server is unreachable.
+    say('--- board still works offline ---');
+    w.fetch = () => Promise.reject(new TypeError('offline'));
+    api.showLeaderboard(1);
+    await wait(400);
+    const rows = d.getElementById('lb-rows').children.length;
+    ok(rows > 0, 'the board still renders rows offline (rows='+rows+')');
+    w.fetch = realFetch;
+
+    say('');
+    say(pass+' passed, '+fail+' failed');
+  } catch (e) {
+    say('THREW: '+(e && e.stack || e));
+    say(pass+' passed, '+fail+' failed');
+  }
+  window.__done = true;
+});
+</script>
+</body></html>

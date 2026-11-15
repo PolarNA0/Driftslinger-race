@@ -1,0 +1,30 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>slingdrift preview</title>
+<style>html,body{margin:0;background:#000}iframe{width:100vw;height:100vh;border:0}</style></head>
+<body>
+<iframe id="f" src="/index.html"></iframe>
+<script>
+const wait=(ms)=>new Promise(r=>setTimeout(r,ms));
+window.addEventListener('load', async () => {
+  const f=document.getElementById('f'), w=f.contentWindow;
+  await wait(1200);
+  const api=w.__slingdrift, game=api.game;
+  const CFG=(await import('/js/config.js?v='+Date.now())).CFG;
+  api.startRun(1);
+  await wait(150);
+  // Drive a clean line to a good moment, then hold the frame.
+  const c=game.car;
+  for(let i=0;i<6000 && c.grabbed<7;i++){
+    const held=c.attached?c.remaining>0:Math.hypot(c.fillet.c.x-c.x,c.fillet.c.y-c.y)<=CFG.grabRange;
+    c.step(1/120,held);
+  }
+  game.state='paused';                 // freeze the sim
+  game.camera.follow(c,0,true);
+  game.renderer.draw(game.car, game.camera, game.track);  // one clean frame
+  game.stop();
+  await wait(200);
+  game.renderer.draw(game.car, game.camera, game.track);
+  document.title='frame-ready';
+});
+</script>
+</body></html>

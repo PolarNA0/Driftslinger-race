@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+<meta name="theme-color" content="#0b0d12" />
+<!-- Where the leaderboard API lives. Empty means same origin, which is what the
+     bundled server (server/server.mjs) serves. Set it to your API's URL when the
+     game is hosted statically, e.g. on GitHub Pages. -->
+<meta name="sling-api" content="" />
+<title>Sling Drift</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="icon" href="icons/icon-192.png" />
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Sling Drift" />
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+<div id="app">
+  <canvas id="view"></canvas>
+
+  <div class="hud">
+    <div class="hud__left">
+      <div id="hud-dist" class="hud__dist">0 m</div>
+      <div id="hud-sub" class="hud__sub">best 0 m</div>
+    </div>
+    <div class="hud__right">
+      <button id="btn-pause" class="iconbtn" aria-label="Pause">II</button>
+    </div>
+  </div>
+
+  <button id="btn-restart-round" class="roundbtn" aria-label="Restart run" hidden>
+    <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true">
+      <path d="M12 5V2L7.5 6 12 10V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z" fill="currentColor"/>
+    </svg>
+  </button>
+
+  <div id="hint" class="hint">
+    <span class="hint__ring"></span>
+    <p>Hold anywhere to swing</p>
+  </div>
+
+  <div id="watch-badge" class="watch" hidden>
+    <span id="watch-label" class="watch__label">Watching</span>
+    <button id="btn-watch-exit" class="btn btn--small">Exit</button>
+    <button id="btn-watch-close" class="watch__x" aria-label="Dismiss">&times;</button>
+  </div>
+
+  <div id="over-pause" class="over" hidden>
+    <div class="sheet">
+      <h2>Paused</h2>
+      <button id="btn-resume" class="btn btn--primary">Resume</button>
+      <button id="btn-restart" class="btn">Restart run</button>
+      <button id="btn-menu" class="btn btn--ghost">Main menu</button>
+    </div>
+  </div>
+
+  <div id="over-dead" class="over" hidden>
+    <div class="sheet">
+      <p id="dead-tag" class="tag">Crashed</p>
+      <h2 id="dead-dist" class="big">0 m</h2>
+      <p id="dead-sub" class="sub">best 0 m</p>
+      <button id="btn-again" class="btn btn--primary">Try again</button>
+      <button id="btn-menu2" class="btn btn--ghost">Main menu</button>
+    </div>
+  </div>
+
+  <div id="over-finish" class="over" hidden>
+    <div class="sheet">
+      <p id="finish-tag" class="tag">Finished</p>
+      <h2 id="finish-time" class="big">0.000s</h2>
+      <p id="finish-sub" class="sub">best --</p>
+      <p id="finish-rank" class="rank"></p>
+      <button id="btn-finish-wr" class="btn">Watch world record</button>
+      <button id="btn-finish-board" class="btn">Leaderboard</button>
+      <button id="btn-watch" class="btn">Watch my replay</button>
+      <button id="btn-finish-again" class="btn btn--primary">Run it again</button>
+      <button id="btn-finish-menu" class="btn btn--ghost">Main menu</button>
+    </div>
+  </div>
+
+  <div id="over-replay-done" class="over" hidden>
+    <div class="sheet">
+      <p id="replay-tag" class="tag">Replay</p>
+      <h2 class="big">Finished</h2>
+      <p id="replay-sub" class="sub">That run, replayed.</p>
+      <button id="btn-replay-again" class="btn btn--primary">Watch again</button>
+      <button id="btn-replay-board" class="btn">Leaderboard</button>
+      <button id="btn-replay-menu" class="btn btn--ghost">Main menu</button>
+    </div>
+  </div>
+
+  <div id="over-board" class="over" hidden>
+    <div class="sheet sheet--wide">
+      <h2 id="lb-title" class="lb__title">Track 1</h2>
+      <p id="lb-note" class="sub">Set a time to join</p>
+      <button id="lb-wr" class="wr" hidden>
+        <span class="wr__crown">WR</span>
+        <span id="lb-wr-name" class="wr__name">--</span>
+        <span id="lb-wr-time" class="wr__time">--</span>
+        <span class="wr__play">Watch</span>
+      </button>
+      <div id="lb-rows" class="lb"></div>
+      <div class="pager">
+        <button id="lb-prev" class="btn btn--small">Prev</button>
+        <input id="lb-page" class="pager__input" type="number" min="1" value="1"
+               inputmode="numeric" aria-label="Page number" />
+        <span id="lb-pages" class="pager__of">/ 1</span>
+        <button id="lb-next" class="btn btn--small">Next</button>
+      </div>
+      <p id="lb-ghost-note" class="foot">Tap any ghost to watch its run.</p>
+      <button id="btn-board-close" class="btn btn--primary">Back</button>
+    </div>
+  </div>
+
+  <div id="over-account" class="over" hidden>
+    <div class="sheet">
+      <h2 id="acct-title">Sign in</h2>
+      <p class="sub">Accounts are stored on this device, so each player keeps their own
+        scores and replays. Your password is hashed, never stored as plain text.</p>
+      <input id="acct-user" class="field" placeholder="Username" autocomplete="username"
+             autocapitalize="off" autocorrect="off" spellcheck="false" />
+      <input id="acct-pass" class="field" type="password" placeholder="Password"
+             autocomplete="current-password" />
+      <p id="acct-error" class="err"></p>
+      <button id="acct-submit" class="btn btn--primary">Sign in</button>
+      <button id="acct-toggle" class="btn btn--ghost">Create an account</button>
+      <button id="acct-close" class="btn btn--ghost">Back</button>
+    </div>
+  </div>
+
+  <div id="over-history" class="over" hidden>
+    <div class="sheet sheet--wide">
+      <h2 id="hist-title" class="lb__title">History</h2>
+      <p id="hist-sub" class="sub">Your finished runs</p>
+      <div id="hist-rows" class="lb"></div>
+      <button id="btn-history-close" class="btn btn--primary">Back</button>
+    </div>
+  </div>
+
+  <div id="menu" class="over over--menu" hidden>
+    <div class="sheet sheet--wide">
+      <h1 class="brand">SLING<span>DRIFT</span></h1>
+      <p class="tag">Hold to swing round the poles. Let go to fly. Don't leave the road.</p>
+      <div id="acct-bar" class="acct"></div>
+      <h3>Mode</h3>
+      <div id="mode-list" class="modes">
+        <button class="mode is-active" data-mode="speedrun">Speedrun<small>~10s track, beat the clock</small></button>
+        <button class="mode" data-mode="endless">Endless<small>survive as long as you can</small></button>
+      </div>
+      <h3>Ghost</h3>
+      <div id="ghost-list" class="modes">
+        <button class="mode is-active" data-ghost="off">Off<small>just you and the clock</small></button>
+        <button class="mode" data-ghost="wr">World record<small>race the fastest ghost</small></button>
+        <button class="mode" data-ghost="self">Your best<small>race your own ghost</small></button>
+      </div>
+      <h3>Your car</h3>
+      <div id="car-list" class="cars"></div>
+      <h3>Pick a track</h3>
+      <div id="seed-list" class="seeds"></div>
+      <button id="btn-play" class="btn btn--primary btn--big">Play</button>
+      <button id="btn-board" class="btn">Leaderboard</button>
+      <button id="btn-history" class="btn">History</button>
+      <p class="foot">Offline · no ads · your scores stay on this device</p>
+    </div>
+  </div>
+</div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
