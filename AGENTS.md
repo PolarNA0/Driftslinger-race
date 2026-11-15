@@ -288,3 +288,18 @@ confirmation email before they can sign in. `site_url` was left at
 the dashboard (Authentication -> URL Configuration) before real players sign up.
 `@example.com` addresses are rejected by Supabase as a reserved domain, so use a
 real domain for test accounts.
+
+### Where the client finds the project
+
+`index.html` carries two meta tags, `sling-supabase` (the project URL) and
+`sling-supabase-key` (the public anon key). `js/account.js` reads them; there is no
+build step and no secret, because the anon key is designed to be visible and RLS is
+what constrains it. To point the game at a different project, change those two tags.
+
+`js/api.js` reads the older `sling-api` tag, which `tools/build-pages.mjs` still
+rewrites for the GitHub Pages build. That tag is now only about the *old* same-origin
+API and does nothing for the Supabase path; leave it empty.
+
+The player's session lives in `localStorage` under `slingdrift.session.v2`, and the
+upload queue under `slingdrift.queue.v2`. Bumping either suffix deliberately
+invalidates whatever the old shape was, which is why the versions are there.
