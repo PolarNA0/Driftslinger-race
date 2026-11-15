@@ -105,6 +105,25 @@ export class Game {
     return true;
   }
 
+  /**
+   * Race a ghost that is a real run rather than a baked one.
+   *
+   * A real world record has no ghost id to regenerate it from, so its steps come
+   * from the board. Everything else matches setGhostReplay: same lockstep clock.
+   */
+  setGhostSteps(seed, steps, name, time) {
+    if (typeof steps !== 'string' || !steps) return false;
+    const track = new Track(seed, trackOpts(seed));
+    const car = new Car();
+    car.reset(track);
+    this.ghostCar = car;
+    this.ghostSteps = decodeSteps(steps);
+    this.ghostIndex = 0;
+    this.ghostName = name;
+    this.ghostTime = time;
+    return true;
+  }
+
   clearGhost() {
     this.ghostCar = null;
     this.ghostSteps = null;

@@ -106,13 +106,19 @@ export async function flush() {
   return last;
 }
 
-/** Fetch one page of a track's board, or null when offline. */
-export async function fetchBoard(track, page = 1) {
+/**
+ * The real runs on a track, or null when offline.
+ *
+ * This is not a page of a board: it is every real run on the track, for the game
+ * to merge into its own ghost field. The field supplies the depth, so there is
+ * nothing to paginate here.
+ */
+export async function fetchBoard(track) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), TIMEOUT);
   try {
     const token = await authToken();
-    const res = await fetch(`${endpoint('board')}?track=${track}&page=${page}`, {
+    const res = await fetch(`${endpoint('board')}?track=${track}`, {
       headers: {
         apikey: supabaseAnonKey(),
         ...(token ? { authorization: `Bearer ${token}` } : {}),
@@ -120,7 +126,8 @@ export async function fetchBoard(track, page = 1) {
       signal: ctl.signal,
     });
     if (!res.ok) return null;
-    return await res.json();
+    const body = await res.json();
+    return Array.isArray(body?.rows) ? body.rows : null;
   } catch {
     return null;
   } finally {

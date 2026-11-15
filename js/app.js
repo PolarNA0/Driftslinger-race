@@ -214,19 +214,37 @@ function onGameChange(g, extra) {
     showOverlay('over-finish');
     $('hint').hidden = true;
     showRoundButton(false);
-    // Queue the run, then try to send it. The local board is already correct, so
-    // this only ever adds a real rank on top of it.
+    // Queue the run, then try to send it. The board is re-read afterwards so the
+    // record and the rank reflect the real runs, not just the baked field.
     enqueue({ track: g.seed, steps: encodeSteps(g.steps), name: playerName() });
     submitQueued(g.seed);
   }
 }
 
-/** Send queued runs and, if one lands, show the player's real server rank. */
-async function submitQueued(seed) {
-  const res = await flush();
-  if (!res || res.track !== seed) return;
+/**
+ * Refresh the finish screen against the merged board.
+ *
+ * A new record changes what "Watch world record" points at, and the player's rank
+ * is a position in the merged board rather than in the baked field alone, so both
+ * are recomputed once the real runs are in.
+ */
+async function refreshFinish(seed) {
+  await loadReals(seed);
+  if (game.seed !== seed) return;                // the player moved on
+  const reals = boardRealsSeed === seed ? boardReals : [];
+  const best = getBestTime(seed);
+  const listed = reals.some((r) => r.you);
+  const me = best == null || listed ? null : { name: playerName(), time: best };
+  const page = boardPage(seed, 1, { player: me, reals });
   const el = $('finish-rank');
-  if (el) el.textContent = `${fmtRank(res.rank)} of ${fmtCount(res.total)} online`;
+  if (el && page.playerRank) el.textContent = `${fmtRank(page.playerRank)} on Track ${seed}`;
+  $('btn-finish-wr').hidden = !worldRecord(seed, reals);
+}
+
+/** Send queued runs, then refresh the finish screen against the merged board. */
+async function submitQueued(seed) {
+  await flush();
+  refreshFinish(seed);
 }
 
 function onTick(g) {
@@ -285,8 +303,11 @@ function startRun(seed) {
 function applyGhost(seed) {
   if (menuMode !== 'speedrun' || ghostMode === 'off') return;
   if (ghostMode === 'self') { game.setGhostSelf(seed); return; }
-  const wr = worldRecord(seed);
-  if (wr) game.setGhostReplay(seed, wr.ghostId, wr.name, wr.time);
+  const wr = worldRecord(seed, boardRealsSeed === seed ? boardReals : []);
+  if (!wr) return;
+  // A real record has steps, a baked one has an id; race whichever it is.
+  if (wr.steps) game.setGhostSteps(seed, wr.steps, wr.name, wr.time);
+  else game.setGhostReplay(seed, wr.ghostId, wr.name, wr.time);
 }
 
 function watchOwnReplay(seed) {
@@ -343,11 +364,22 @@ function watchGhostSteps(seed, steps, name, time) {
 }
 
 // --- leaderboard -------------------------------------------------------------
+// The real runs for the track currently on screen, as the server last returned
+// them. Kept so re-rendering (a page turn, a resize) does not refetch.
+let boardReals = [];
+let boardRealsSeed = null;
+
 function renderBoard() {
   const seed = boardSeed;
   const best = getBestTime(seed);
   const me = best == null ? null : { name: playerName(), time: best };
-  const page = boardPage(seed, boardPageNo, { player: me });
+  // The player is only handed in when the server has not listed them, so they are
+  // not drawn twice.
+  const listed = boardRealsSeed === seed && boardReals.some((r) => r.you);
+  const page = boardPage(seed, boardPageNo, {
+    player: listed ? null : me,
+    reals: boardRealsSeed === seed ? boardReals : [],
+  });
   boardPageNo = page.page;
 
   $('lb-title').textContent = `Track ${seed}`;
@@ -355,50 +387,62 @@ function renderBoard() {
     ? `You are ${fmtRank(page.playerRank)} of ${fmtCount(page.total)}`
     : `${fmtCount(page.total)} racers · set a time to join`;
 
-  // World-record banner: the fastest ghost, and the way to watch it.
-  const wr = worldRecord(seed);
-  $('lb-wr').hidden = !wr;
-  if (wr) {
-    $('lb-wr-name').textContent = wr.name;
-    $('lb-wr-time').textContent = fmtTime(wr.time);
-    $('lb-wr').dataset.ghostId = String(wr.ghostId);
-    $('lb-wr').dataset.name = wr.name;
-    $('lb-wr').dataset.time = String(wr.time);
-  }
-
+  const wr = worldRecord(seed, boardRealsSeed === seed ? boardReals : []);
+  renderWrBanner(wr);
   drawBoardRows(seed, page.rows, page.page, page.pages);
-  // Then, if the server has real runs for this track, swap in the real board.
-  // Local rendering happens first so the board is never blank while it loads.
-  overlayOnline(seed, page.page);
+
+  // Then fetch the real runs and re-render with them merged in. The local board
+  // is drawn first so it is never blank while that loads.
+  loadReals(seed);
 }
 
-/** Replace the local board with the server's, when the server has entries. */
-async function overlayOnline(seed, pageNo) {
-  const online = await fetchBoard(seed, pageNo);
-  if (!online || !online.rows || !online.rows.length) return;
+/** Put the world record in the banner, and wire it up to be watched. */
+function renderWrBanner(wr) {
+  $('lb-wr').hidden = !wr;
+  if (!wr) return;
+  $('lb-wr-name').textContent = wr.name;
+  $('lb-wr-time').textContent = fmtTime(wr.time);
+  const el = $('lb-wr');
+  el.dataset.ghostId = wr.ghostId == null ? '' : String(wr.ghostId);
+  el.dataset.name = wr.name;
+  el.dataset.time = String(wr.time);
+  el.dataset.real = wr.real ? '1' : '';
+  // A real record has no ghost id - it replays from its stored steps.
+  el.dataset.steps = wr.steps || '';
+}
+
+/** Fetch the track's real runs and re-render the board with them merged in. */
+async function loadReals(seed) {
+  const rows = await fetchBoard(seed);
   if (boardSeed !== seed) return;              // the player moved on
-  $('lb-note').textContent = online.you
-    ? `You are ${fmtRank(online.you)} of ${fmtCount(online.total)} online`
-    : `${fmtCount(online.total)} online · set a time to join`;
-  drawBoardRows(seed, online.rows, online.page, online.pages);
+  boardReals = rows || [];
+  boardRealsSeed = seed;
+  renderBoard();
 }
 
 function drawBoardRows(seed, rows, pageNo, pages) {
   const body = $('lb-rows');
   body.innerHTML = '';
   for (const r of rows) {
-    // Only a run with real steps behind it can be watched: a baked head row is
-    // regenerated from its ghost id, an online row replays its stored steps, and
-    // the player's own best is on the device. A generated row has no ghost, so it
-    // is a plain row - offering "Watch" on a run that does not exist would be a lie.
-    const canWatch = r.you || r.watchable;
+    // Only a run with something to replay can be watched: a baked head row is
+    // regenerated from its ghost id, a real row replays its stored steps, and the
+    // player's own best is on the device. A generated row has neither, so it is a
+    // plain row - offering "Watch" on a run that does not exist would be a lie.
+    // A real row whose steps the server did not send is in the same position.
+    const canWatch = r.you || (r.real ? !!r.steps : r.watchable);
     const row = document.createElement(canWatch ? 'button' : 'div');
-    row.className = 'lb__row' + (r.you ? ' is-you' : '') + (canWatch ? '' : ' is-plain');
+    row.className = 'lb__row'
+      + (r.you ? ' is-you' : '')
+      + (r.real ? ' is-real' : '')
+      + (canWatch ? '' : ' is-plain');
+    // A real run's time carries a green dot, so the real rows stand out from the
+    // ghost field without hiding it.
+    const dot = r.real ? '<span class="lb__dot" title="Real player"></span>' : '';
     const action = r.you ? 'Replay' : canWatch ? 'Watch' : '';
     row.innerHTML =
       `<span class="lb__rank">${fmtCount(r.rank)}</span>` +
       `<span class="lb__name">${r.name}</span>` +
-      `<span class="lb__time">${fmtTime(r.time)}</span>` +
+      `<span class="lb__time">${dot}${fmtTime(r.time)}</span>` +
       `<span class="lb__play">${action}</span>`;
     if (canWatch) {
       row.addEventListener('click', () => {
@@ -421,6 +465,7 @@ function setBoardPager(pageNo, pages) {
 
 function showLeaderboard(seed) {
   boardSeed = seed;
+  if (boardRealsSeed !== seed) { boardReals = []; boardRealsSeed = null; }
   const best = getBestTime(seed);
   boardPageNo = best == null ? 1 : pageForRank(playerRank(seed, best));
   renderBoard();
@@ -575,8 +620,7 @@ $('btn-finish-again').addEventListener('click', () => startRun(game.seed));
 $('btn-finish-menu').addEventListener('click', toMenu);
 $('btn-finish-board').addEventListener('click', () => showLeaderboard(game.seed));
 $('btn-finish-wr').addEventListener('click', () => {
-  const wr = worldRecord(game.seed);
-  if (wr) watchGhost(game.seed, wr.ghostId, wr.name, wr.time);
+  watchWorldRecord(game.seed, worldRecord(game.seed, boardRealsSeed === game.seed ? boardReals : []));
 });
 $('btn-watch').addEventListener('click', () => watchOwnReplay(game.seed));
 $('btn-restart-round').addEventListener('click', (e) => { e.stopPropagation(); startRun(game.seed); });
@@ -606,9 +650,18 @@ $('lb-page').addEventListener('change', () => {
   boardPageNo = Number.isFinite(n) ? n : 1;
   renderBoard();
 });
+/** Watch a world record, whether it is a real run (steps) or a baked ghost (id). */
+function watchWorldRecord(seed, wr) {
+  if (!wr) return;
+  if (wr.steps) watchGhostSteps(seed, wr.steps, wr.name, wr.time);
+  else watchGhost(seed, wr.ghostId, wr.name, wr.time);
+}
+
 $('lb-wr').addEventListener('click', () => {
   const el = $('lb-wr');
-  watchGhost(boardSeed, Number(el.dataset.ghostId), el.dataset.name, Number(el.dataset.time));
+  const steps = el.dataset.steps;
+  if (steps) watchGhostSteps(boardSeed, steps, el.dataset.name, Number(el.dataset.time));
+  else watchGhost(boardSeed, Number(el.dataset.ghostId), el.dataset.name, Number(el.dataset.time));
 });
 
 // Accounts.

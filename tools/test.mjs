@@ -485,5 +485,89 @@ console.log('the leaderboard pages and ranks correctly');
   ok(s.rankOf(1, 'nobody') === null, 'an unknown client id should have no rank');
 }
 
+
+console.log('real runs merge into the ghost field as one board');
+{
+  const wr = worldRecord(1, []);
+  const real = (name, time, steps = '01'.repeat(20)) => ({ name, time, steps });
+
+  // A run under the record takes rank 1, is flagged real, and the ghost that was
+  // the record is still there right behind it - the field is not replaced.
+  const fast = real('Real', wr.time - 0.05);
+  const p = boardPage(1, 1, { reals: [fast] });
+  ok(p.rows[0].rank === 1 && p.rows[0].name === 'Real', 'a real run under the WR should top the board');
+  ok(p.rows[0].real === true, 'the real row should be flagged real');
+  ok(p.rows[0].watchable === true, 'a real run with steps should be watchable');
+  ok(p.rows[1].real !== true, 'the ghost field should still be under it');
+  ok(p.total === ghostCount(1) + 1, 'the field should grow by one, not shrink to one');
+
+  // The merged board is sorted, whatever order the runs arrive in.
+  const mid = real('Mid', wr.time + 0.4);
+  const slow = real('Slow', wr.time + 2);
+  const many = boardPage(1, 1, { reals: [slow, mid, fast] });
+  for (let i = 1; i < many.rows.length; i++) {
+    ok(many.rows[i].time >= many.rows[i - 1].time, `merged board not sorted at ${i}`);
+  }
+
+  // A run slower than the entire field lands after it, not partway up. This is
+  // the bug the old merge had: it placed by ghost count and ignored the tail.
+  const turtle = real('Turtle', 9999);
+  const all = boardPage(1, 1, { reals: [turtle] });
+  const last = boardPage(1, all.pages, { reals: [turtle] });
+  const found = last.rows.find((r) => r.real);
+  ok(found && found.rank === all.total, `a run past the field should rank last, got ${found && found.rank}`);
+  ok(found && found.rank === last.rows[last.rows.length - 1].rank, 'and it should be the final row');
+
+  // Two runs on the same time both appear, with distinct ranks. They tie the same
+  // ghost, so they sit adjacent to it rather than on top of each other.
+  const a = real('A', wr.time + 1), b = real('B', wr.time + 1);
+  const tiePage = pageForRank(playerRank(1, a.time));
+  const seenReal = new Map();
+  for (let pg = tiePage - 1; pg <= tiePage + 1; pg++) {
+    if (pg < 1) continue;
+    for (const r of boardPage(1, pg, { reals: [a, b] }).rows) {
+      if (r.real) seenReal.set(r.name, r.rank);
+    }
+  }
+  ok(seenReal.has('A') && seenReal.has('B'), `both tied runs should be shown, saw ${[...seenReal.keys()]}`);
+  ok(seenReal.get('A') !== seenReal.get('B'), 'tied runs should have distinct ranks');
+
+  // The rank boardPage reports is the rank the player's own row carries, and their
+  // row appears on exactly the page that rank falls on.
+  const mine = { ...real('Me', wr.time + 0.5), you: true };
+  const anyPage = boardPage(1, 1, { reals: [mine] });
+  ok(anyPage.playerRank !== null, 'a signed-in player with a time should have a rank');
+  const minePage = boardPage(1, pageForRank(anyPage.playerRank), { reals: [mine] });
+  const myRow = minePage.rows.find((r) => r.you);
+  ok(!!myRow, 'the signed-in player should appear on their own page');
+  ok(myRow && myRow.rank === anyPage.playerRank,
+    `their row should carry rank ${anyPage.playerRank}, got ${myRow && myRow.rank}`);
+  ok(minePage.rows.filter((r) => r.you).length === 1, 'they should appear exactly once');
+
+  // The world record follows the real runs, and a real record is watchable by
+  // steps rather than by a ghost id.
+  const rw = worldRecord(1, [fast]);
+  ok(rw.real === true && rw.name === 'Real', 'the WR should be the real run');
+  ok(rw.steps === fast.steps && rw.watchable, 'a real WR should replay from its steps');
+  ok(worldRecord(1, []).real === false, 'with no real runs the WR is the baked ghost');
+}
+
+console.log('a replay of a real run reproduces its time');
+{
+  // The board hands the game a real run's steps; replaying them must land on the
+  // time shown. This is what "watch" relies on, and what broke when a real row
+  // was watched as a baked ghost.
+  const run = simulateGhost(1, 746);
+  ok(!!run, 'the reference ghost should simulate');
+  const fromSteps = new Car();
+  fromSteps.reset(new Track(1, trackOpts(1)));
+  const steps = decodeSteps(run.replay.steps);
+  let i = 0;
+  while (fromSteps.alive && i < steps.length) fromSteps.step(1 / 120, steps[i++]);
+  ok(fromSteps.finished, 'replaying stored steps should finish');
+  ok(Math.abs(fromSteps.time - run.time) < 1e-9,
+    `replayed time ${fromSteps.time} should equal ${run.time}`);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

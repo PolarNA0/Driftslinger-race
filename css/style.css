@@ -152,7 +152,14 @@ h3 { margin: 14px 0 4px; font-size: 13px; text-transform: uppercase; letter-spac
 .lb__rank { color: var(--dim); font-variant-numeric: tabular-nums; }
 .lb__row.is-you .lb__rank { color: var(--accent); }
 .lb__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lb__time { font-variant-numeric: tabular-nums; }
+.lb__time { font-variant-numeric: tabular-nums; display: inline-flex; align-items: center; gap: 6px; }
+/* The green dot marks a run a real player actually set, as opposed to the ghost
+   field behind it. It sits on the time so a real row is obvious at a glance. */
+.lb__dot {
+  width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto;
+  background: #38d96b; box-shadow: 0 0 6px rgba(56,217,107,0.85);
+}
+.lb__row.is-real .lb__name { color: #eafff1; }
 
 /* --- accounts ------------------------------------------------------------- */
 .acct {
