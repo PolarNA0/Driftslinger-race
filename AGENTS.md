@@ -252,3 +252,39 @@ at `speed`, and re-check that a wide grab is not faster than a clean one
 Any change to `drift` or `fly` invalidates `js/ghostdata.js`: the baked ghosts are
 real runs of the real physics. Re-run `node tools/bake-ghosts.mjs` after a physics
 change, or every ghost fails to reproduce its claimed time.
+
+## The shared leaderboard runs on Supabase
+
+Accounts and uploaded times live in a Supabase project, not on the device. The
+schema is `supabase/migrations/0001_init.sql`; the two Edge Functions are `run`
+(verify and store an upload) and `board` (serve a page of a track's board).
+
+The design rule that matters: **a client never sends a time.** It sends the button
+steps, and `run` replays them through the game's own physics to find out what the
+run was worth. A forged time has nothing to attach to. Keep it that way - the
+moment a time becomes an input, the board is worthless.
+
+Three consequences worth knowing before editing:
+
+- **The physics is vendored into the function.** Deno cannot import across the
+  function directory, so `tools/sync-physics.mjs` copies `js/{config,util,track,
+  car,tracks}.js` into `supabase/functions/_shared/physics/`. Never edit those
+  copies; edit `js/` and re-run the script. `node tools/sync-physics.mjs --check`
+  fails if they are stale, so run it in CI.
+- **Runs are stored as whole ticks, not seconds.** The clock is `ticks / 120`
+  exactly. The client's own accumulated `car.time` drifts by ~4e-15 over a run,
+  which is enough to reorder a tie; the step count does not drift.
+- **The database enforces access, not just the function.** RLS is on with read
+  policies for the board and *no* insert or update policy on `runs`, so a client
+  POSTing straight to PostgREST gets a 42501. `submit_run` is security-definer and
+  revoked from `anon`/`authenticated`, so only the service role can write. If you
+  add a write path, add it as a function, not a policy.
+
+### Auth settings that bite
+
+`mailer_autoconfirm` is **false** on this project: a new player must click the
+confirmation email before they can sign in. `site_url` was left at
+`http://localhost:3000`, so confirmation links point at a dead host - set both in
+the dashboard (Authentication -> URL Configuration) before real players sign up.
+`@example.com` addresses are rejected by Supabase as a reserved domain, so use a
+real domain for test accounts.
