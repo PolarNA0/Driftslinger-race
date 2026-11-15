@@ -37,18 +37,19 @@ for (const item of ITEMS) {
   await cp(src, join(OUT, item), { recursive: true });
 }
 
-// Point the copy at the API. An empty value keeps it same-origin, which is right
-// for a local preview and wrong for Pages, so say so loudly.
+// Point the copy at the API. An empty value leaves the game same-origin, which
+// only works when the server also serves the files; on a static host it just
+// means the board stays local.
 const index = await readFile(join(OUT, 'index.html'), 'utf8');
-const patched = index.replace(
-  /<meta name="sling-api" content="[^"]*" \/>/,
-  `<meta name="sling-api" content="${api}" />`,
-);
-if (patched === index) {
+const TAG = /<meta name="sling-api" content="[^"]*" \/>/;
+// Test the pattern rather than comparing before and after: when the API is empty
+// the replacement is identical to the original, which is not an error.
+if (!TAG.test(index)) {
   console.error('could not find the sling-api meta tag in index.html');
   process.exit(1);
 }
-await writeFile(join(OUT, 'index.html'), patched);
+await writeFile(join(OUT, 'index.html'),
+  index.replace(TAG, `<meta name="sling-api" content="${api}" />`));
 
 // Pages runs Jekyll by default, which ignores files starting with an underscore.
 await writeFile(join(OUT, '.nojekyll'), '');
