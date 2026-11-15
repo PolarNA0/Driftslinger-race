@@ -35,7 +35,7 @@ cp -r css js icons "$OUT/assets/www/"
   --java "$OUT/gen" \
   --min-sdk-version 24 \
   --target-sdk-version 34 \
-  --version-code 2 --version-name 1.1 \
+  --version-code 3 --version-name 1.2 \
   "$OUT/res.zip"
 
 # 3. Compile the Java, dex it, and fold the dex into the APK.

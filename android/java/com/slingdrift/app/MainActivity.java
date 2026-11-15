@@ -35,8 +35,10 @@ public class MainActivity extends Activity {
 
     private static final String ORIGIN = "https://appassets.androidplatform.net/assets/www/";
 
-    // The leaderboard API. Empty means the app has no board to talk to: runs are
-    // still queued on the device and sent if this is ever set and rebuilt.
+    // Legacy hook: the old same-origin leaderboard API used to be pointed at from
+    // here. Uploads now go to Supabase, whose URL and anon key are read from the
+    // meta tags in the bundled index.html, so this stays empty. It is still
+    // exposed to the page as SlingDriftNative.apiBase() for older builds.
     private static final String API_BASE = "";
 
     private WebView webView;
