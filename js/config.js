@@ -52,7 +52,7 @@ export const CFG = {
   // --- speedrun ---------------------------------------------------------
   // A speedrun track is a finite, fixed road you race the clock on. The opening
   // straight is CFG.leadIn and each corner adds about 203px, so at 290px/s a
-  // corner costs about 0.70s. The twenty time-attack tracks live in tracks.js;
+  // corner costs about 0.70s. The twenty-five time-attack tracks live in tracks.js;
   // this is only the fallback shape and the shared constants.
   speedrunCorners: 11,
   speedrunFinish: 460, // fallback closing straight, px, when no target time is

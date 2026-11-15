@@ -15,7 +15,7 @@ run ends. Two modes: **speedrun** (a finite ~10s track, scored by time) and
   (arc-length per point). Takes `opts` (`corners`, `radius`, `leadIn`,
   `finishLen`, `segLens`, `targetTime`) so a finite track can have its own shape;
   endless play passes none and gets the uniform `CFG` lengths.
-- `js/tracks.js` — the twenty time-attack tracks. `trackDef(n)` is a pure
+- `js/tracks.js` — the twenty-five time-attack tracks. `trackDef(n)` is a pure
   function of the track number: radius, corner count, lead-in and the straight
   rhythm all come out of `n`, so a track is identical on every device (which the
   leaderboard and replays rely on). `targetTime` makes `Track.buildFinish` size

@@ -157,7 +157,7 @@ export class Track {
     // clock lands on it. The car starts `speedrunStartFrac` into the lead-in, so
     // the run is the road left after the start divided by speed. This is exact -
     // a clean line drives the centreline, and the road's own length is known -
-    // which is why the twenty tracks can each be pinned to their target.
+    // which is why the twenty-five tracks can each be pinned to their target.
     let len = this.finishLen;
     if (this.targetTime !== null) {
       const startS = CFG.speedrunStartFrac * this.leadIn;

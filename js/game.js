@@ -21,7 +21,7 @@ const MAX_STEPS = 8;
  *
  * Three modes:
  *   endless  - an infinite road, scored by distance. The original feel.
- *   speedrun - one of the twenty fixed tracks, scored by time.
+ *   speedrun - one of the twenty-five fixed tracks, scored by time.
  *   replay   - a saved speedrun re-simulated from its button steps, driven by
  *              the game rather than the player. Read-only.
  *

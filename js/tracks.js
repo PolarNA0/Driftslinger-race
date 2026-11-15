@@ -1,7 +1,7 @@
 import { CFG } from './config.js';
 
 /**
- * The twenty time-attack tracks.
+ * The twenty-five time-attack tracks.
  *
  * Each track is a fixed road: its straight-length rhythm (the "winds"), its
  * corner radius (how wide the wiggles are), how many corners it has and how long
