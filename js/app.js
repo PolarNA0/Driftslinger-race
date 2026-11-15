@@ -6,9 +6,14 @@ import {
 } from './storage.js';
 import { TRACK_COUNT } from './tracks.js';
 import { boardPage, pageForRank, playerRank, worldRecord } from './leaderboard.js';
-import { CAR_COLOURS } from './render.js';
+import { CAR_COLOURS, hexToRgb, rgbToHex } from './render.js';
+import {
+  loadSettings, saveZoom, saveRope, saveAdmin, saveWebhook, isAdminCode, validWebhook,
+  clampZoom, DEFAULT_ROPE_HEX,
+} from './settings.js';
 import { enqueue, flush, fetchBoard, clientId, queueLength } from './api.js';
 import { encodeSteps } from './replay.js';
+import { postWebhook } from './discord.js';
 import {
   currentAccount, currentEmail, listAccounts, register, login, logout,
   ensureProfile,
@@ -44,6 +49,12 @@ let carSkin = Number(getPref('carSkin', 0));
 if (!Number.isInteger(carSkin) || carSkin < 0 || carSkin >= CAR_COLOURS.length) carSkin = 0;
 game.carSkin = carSkin;
 
+// Player settings: zoom, hook colour, and the admin flag. Applied to the renderer
+// now so the very first frame already honours them.
+const settings = loadSettings();
+game.renderer.setZoom(settings.zoom);
+game.renderer.setRopeColour(settings.ropeRgb);
+
 // Leaderboard view state, and what (if anything) we are currently watching.
 let boardSeed = 1;
 let boardPageNo = 1;
@@ -67,8 +78,10 @@ function hideWatchBadge() { $('watch-badge').hidden = true; }
 const playerName = () => currentAccount() || 'You';
 
 // --- menu lists --------------------------------------------------------------
+/** The car skins, drawn into whichever container holds them (the Settings sheet). */
 function buildCarList() {
-  const list = $('car-list');
+  const list = $('set-car');
+  if (!list) return;
   list.innerHTML = '';
   CAR_COLOURS.forEach((c, i) => {
     const b = document.createElement('button');
@@ -214,6 +227,14 @@ function onGameChange(g, extra) {
     showOverlay('over-finish');
     $('hint').hidden = true;
     showRoundButton(false);
+    // Report against the record as it stood *before* this run was sent. Nothing
+    // has been uploaded yet, so the board still holds the old record and the
+    // position is this run's own, not the best time's.
+    const reals = boardRealsSeed === g.seed ? boardReals : [];
+    const wrBefore = worldRecord(g.seed, reals);
+    const runRank = playerRank(g.seed, g.time);
+    reportRecord(g.seed, g.time, runRank, wrBefore ? g.time < wrBefore.time : false,
+      wrBefore ? g.time - wrBefore.time : 0);
     // Queue the run, then try to send it. The board is re-read afterwards so the
     // record and the rank reflect the real runs, not just the baked field.
     enqueue({ track: g.seed, steps: encodeSteps(g.steps), name: playerName() });
@@ -501,6 +522,103 @@ function showHistory() {
   showOverlay('over-history');
 }
 
+// --- settings ----------------------------------------------------------------
+/** Draw the settings sheet from the saved values, and show it. */
+function showSettings() {
+  $('set-zoom').value = String(Math.round(settings.zoom * 100));
+  $('set-zoom-val').textContent = `${Math.round(settings.zoom * 100)}%`;
+  $('set-rope').value = settings.rope;
+  $('set-error').textContent = '';
+  $('set-hook-status').textContent = '';
+  buildCarList();
+  renderAdmin();
+  showOverlay('over-settings');
+}
+
+/** The admin block only exists for an admin; everyone else sees the login button. */
+function renderAdmin() {
+  $('set-admin').hidden = !settings.admin;
+  $('set-admin-login').hidden = settings.admin;
+  $('set-admin-form').hidden = true;
+  $('set-code').value = '';
+  if (settings.admin) $('set-hook').value = settings.webhook;
+}
+
+function setZoomFromSlider() {
+  const pct = Number($('set-zoom').value) / 100;
+  saveZoom(pct);
+  settings.zoom = clampZoom(pct);
+  $('set-zoom-val').textContent = `${Math.round(settings.zoom * 100)}%`;
+  game.renderer.setZoom(settings.zoom);
+}
+
+function setRopeFromPicker(hex) {
+  saveRope(hex);
+  settings.rope = loadSettings().rope;
+  settings.ropeRgb = hexToRgb(settings.rope);
+  $('set-rope').value = settings.rope;
+  game.renderer.setRopeColour(settings.ropeRgb);
+}
+
+function tryAdminLogin() {
+  if (!isAdminCode($('set-code').value)) {
+    $('set-error').textContent = 'Wrong code.';
+    return;
+  }
+  saveAdmin(true);
+  settings.admin = true;
+  $('set-error').textContent = '';
+  renderAdmin();
+}
+
+function saveWebhookFromField() {
+  const url = $('set-hook').value;
+  if (!validWebhook(url)) {
+    $('set-hook-status').textContent = 'That does not look like a Discord webhook URL.';
+    return;
+  }
+  saveWebhook(url);
+  settings.webhook = url.trim();
+  $('set-hook-status').textContent = 'Saved.';
+}
+
+/** Send a test line, so the admin can see the webhook actually works. */
+async function sendWebhookTest() {
+  const url = $('set-hook').value.trim() || settings.webhook;
+  if (!validWebhook(url)) {
+    $('set-hook-status').textContent = 'Save a webhook URL first.';
+    return;
+  }
+  $('set-hook-status').textContent = 'Sending...';
+  const sent = await postWebhook(url, `Sling Drift tracker is connected. ${playerName()} set this up.`);
+  $('set-hook-status').textContent = sent
+    ? 'Sent. Check the channel.'
+    : 'Discord did not accept it. Check the URL.';
+}
+
+/**
+ * Tell the record channel about a finished run.
+ *
+ * Only an admin with a webhook posts, and only on a speedrun - an endless run has
+ * no position to report. A world record gets its own line, since that is the one
+ * worth interrupting a channel for.
+ */
+async function reportRecord(seed, time, position, beatRecord, delta) {
+  if (!settings.admin || !settings.webhook) return;
+  const msg = beatRecord
+    ? `${playerName()} beat the world record on track ${seed} with ${time.toFixed(3)}`
+    : `${playerName()} took position ${position} on track ${seed} with ${time.toFixed(3)}`
+      + ` [wr +${delta.toFixed(3)}]`;
+  await postWebhook(settings.webhook, msg);
+}
+
+function signOutAdmin() {
+  saveAdmin(false);
+  settings.admin = false;
+  renderAdmin();
+  $('set-error').textContent = '';
+}
+
 // --- accounts ----------------------------------------------------------------
 let acctMode = 'login';   // 'login' | 'register' | 'name'
 
@@ -612,6 +730,20 @@ window.addEventListener('keyup', (e) => {
 $('btn-play').addEventListener('click', () => startRun(menuSeed));
 $('btn-board').addEventListener('click', () => showLeaderboard(menuSeed));
 $('btn-history').addEventListener('click', showHistory);
+$('btn-settings').addEventListener('click', showSettings);
+$('btn-settings-close').addEventListener('click', () => showOverlay('menu'));
+$('set-zoom').addEventListener('input', setZoomFromSlider);
+$('set-rope').addEventListener('input', () => setRopeFromPicker($('set-rope').value));
+$('set-rope-reset').addEventListener('click', () => setRopeFromPicker(DEFAULT_ROPE_HEX));
+$('set-admin-open').addEventListener('click', () => {
+  $('set-admin-form').hidden = false;
+  $('set-code').focus();
+});
+$('set-admin-go').addEventListener('click', tryAdminLogin);
+$('set-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') tryAdminLogin(); });
+$('set-admin-out').addEventListener('click', signOutAdmin);
+$('set-hook-save').addEventListener('click', saveWebhookFromField);
+$('set-hook-test').addEventListener('click', sendWebhookTest);
 $('btn-history-close').addEventListener('click', () => showOverlay('menu'));
 $('btn-board-close').addEventListener('click', () => { showOverlay('menu'); });
 $('btn-again').addEventListener('click', () => startRun(game.seed));

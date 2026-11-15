@@ -138,6 +138,55 @@
     </div>
   </div>
 
+  <div id="over-settings" class="over" hidden>
+    <div class="sheet sheet--wide">
+      <h2 id="set-title">Settings</h2>
+      <p id="set-sub" class="sub">These are yours alone - they stay on this device.</p>
+
+      <h3>Zoom</h3>
+      <div class="set__row">
+        <input id="set-zoom" class="set__range" type="range" min="60" max="180"
+               step="5" value="100" aria-label="Zoom" />
+        <span id="set-zoom-val" class="set__val">100%</span>
+      </div>
+
+      <h3>Car colour</h3>
+      <div id="set-car" class="cars"></div>
+
+      <h3>Hook colour</h3>
+      <div class="set__row">
+        <input id="set-rope" class="set__color" type="color" value="#ffffff"
+               aria-label="Hook colour" />
+        <button id="set-rope-reset" class="btn btn--small btn--ghost">Reset</button>
+      </div>
+
+      <div id="set-admin" hidden>
+        <h3>Admin</h3>
+        <p class="sub">Signed in as an admin. The Discord record tracker posts here.</p>
+        <input id="set-hook" class="field" type="url" placeholder="Discord webhook URL"
+               autocapitalize="off" autocorrect="off" spellcheck="false" />
+        <p id="set-hook-status" class="err"></p>
+        <div class="set__row">
+          <button id="set-hook-save" class="btn btn--small btn--primary">Save webhook</button>
+          <button id="set-hook-test" class="btn btn--small">Send test</button>
+          <button id="set-admin-out" class="btn btn--small btn--ghost">Sign out</button>
+        </div>
+      </div>
+
+      <p id="set-error" class="err"></p>
+      <div id="set-admin-login">
+        <button id="set-admin-open" class="btn btn--ghost">Admin login</button>
+        <div id="set-admin-form" hidden>
+          <input id="set-code" class="field" type="password" inputmode="numeric"
+                 placeholder="Admin code" autocomplete="off" />
+          <button id="set-admin-go" class="btn btn--small btn--primary">Sign in</button>
+        </div>
+      </div>
+
+      <button id="btn-settings-close" class="btn btn--primary">Back</button>
+    </div>
+  </div>
+
   <div id="over-history" class="over" hidden>
     <div class="sheet sheet--wide">
       <h2 id="hist-title" class="lb__title">History</h2>
@@ -163,13 +212,12 @@
         <button class="mode" data-ghost="wr">World record<small>race the fastest ghost</small></button>
         <button class="mode" data-ghost="self">Your best<small>race your own ghost</small></button>
       </div>
-      <h3>Your car</h3>
-      <div id="car-list" class="cars"></div>
       <h3>Pick a track</h3>
       <div id="seed-list" class="seeds"></div>
       <button id="btn-play" class="btn btn--primary btn--big">Play</button>
       <button id="btn-board" class="btn">Leaderboard</button>
       <button id="btn-history" class="btn">History</button>
+      <button id="btn-settings" class="btn">Settings</button>
       <p class="foot">Offline play · no ads · sign in to race the shared board</p>
     </div>
   </div>

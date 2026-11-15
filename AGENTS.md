@@ -303,3 +303,20 @@ API and does nothing for the Supabase path; leave it empty.
 The player's session lives in `localStorage` under `slingdrift.session.v2`, and the
 upload queue under `slingdrift.queue.v2`. Bumping either suffix deliberately
 invalidates whatever the old shape was, which is why the versions are there.
+
+### Settings and the admin code
+
+`js/settings.js` owns zoom, the hook colour and the admin flag. All three are
+preferences in `slingdrift.prefs.v1`, so they are per-device and need no account.
+
+The admin code (`0404`) is checked in the client. That is a lock on a cupboard, not
+a safe: the code ships in `js/settings.js`, so anyone who opens devtools can read it.
+It exists to keep the Discord webhook field out of a normal player's way. Do not
+treat "admin" as a security boundary - if anything that matters ever hangs off it,
+gate it on the server instead.
+
+The record tracker posts straight from the browser to the Discord webhook
+(`js/discord.js`). Discord's webhook endpoint reflects the Origin and allows POST,
+so no Edge Function is needed. The webhook URL is the credential: whoever holds it
+can post to the channel, so it lives only in the admin's own settings and is only
+ever sent to discord.com. `validWebhook` pins the host and path for that reason.

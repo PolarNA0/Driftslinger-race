@@ -11,6 +11,8 @@ import {
 } from '../js/leaderboard.js';
 import { simulateGhost, ghostPolicy } from '../js/ghostrun.js';
 import { makeReplay, decodeSteps } from '../js/replay.js';
+import { hexToRgb, rgbToHex, MIN_ZOOM, MAX_ZOOM } from '../js/render.js';
+import { isAdminCode, clampZoom, validWebhook, loadSettings } from '../js/settings.js';
 
 const DT = 1 / 60;
 const seeds = [1, 2, 3, 7, 11, 42, 99, 123, 777, 2024];
@@ -567,6 +569,61 @@ console.log('a replay of a real run reproduces its time');
   ok(fromSteps.finished, 'replaying stored steps should finish');
   ok(Math.abs(fromSteps.time - run.time) < 1e-9,
     `replayed time ${fromSteps.time} should equal ${run.time}`);
+}
+
+console.log('settings: the admin code, zoom and webhook checks hold');
+{
+  // The admin code is compared as a string, so the leading zero is not lost.
+  ok(isAdminCode('0404'), 'the admin code should be accepted');
+  ok(isAdminCode(' 0404 '), 'surrounding space should be forgiven');
+  ok(!isAdminCode('404'), 'a numeric reading of the code must not work');
+  ok(!isAdminCode(404), 'nor a number with no leading zero');
+  ok(!isAdminCode(''), 'an empty code must not work');
+  ok(!isAdminCode('04040'), 'a longer code must not work');
+
+  // Zoom is clamped to what the renderer can actually draw.
+  ok(clampZoom(1) === 1, 'zoom 1 is the default and must be unchanged');
+  ok(clampZoom(0.1) === MIN_ZOOM, 'zoom below the floor should clamp up');
+  ok(clampZoom(9) === MAX_ZOOM, 'zoom above the ceiling should clamp down');
+  ok(clampZoom('0.5') === MIN_ZOOM, 'a numeric string should be read as a number');
+  ok(clampZoom('nonsense') === 1, 'a non-number should fall back to 1');
+  ok(clampZoom(NaN) === 1, 'NaN should fall back to 1');
+
+  // A webhook URL is only a Discord webhook if it is https on discord.com's
+  // webhook path. This is what stops a typo pointing the sender at another host.
+  const good = 'https://discord.com/api/webhooks/123456789012345678/abcdefghijklmnop';
+  ok(validWebhook(good), 'a real-shaped Discord webhook should be accepted');
+  ok(validWebhook('https://discord.com/api/v10/webhooks/1/abc'), 'a versioned path should be accepted');
+  ok(validWebhook('https://discordapp.com/api/webhooks/1/abc'), 'the legacy host should be accepted');
+  ok(!validWebhook('http://discord.com/api/webhooks/1/abc'), 'plain http must be rejected');
+  ok(!validWebhook('https://evil.com/api/webhooks/1/abc'), 'another host must be rejected');
+  ok(!validWebhook('https://discord.com.evil.com/api/webhooks/1/abc'), 'a lookalike host must be rejected');
+  ok(!validWebhook('https://discord.com/api/webhooks/1'), 'a missing token must be rejected');
+  ok(!validWebhook('https://discord.com/'), 'the bare host must be rejected');
+  ok(!validWebhook('not a url'), 'garbage must be rejected');
+  ok(!validWebhook(''), 'empty must be rejected');
+}
+
+console.log('settings: colours round-trip, and malformed values are repaired');
+{
+  // The colour picker deals in hex; the renderer deals in channels. Both ways
+  // must agree or the hook is drawn a different colour from the one chosen.
+  ok(hexToRgb('#ffffff').join(',') === '255,255,255', 'white should parse');
+  ok(hexToRgb('#000000').join(',') === '0,0,0', 'black should parse');
+  ok(hexToRgb('38d96b').join(',') === '56,217,107', 'a bare hex should parse');
+  ok(hexToRgb('not a colour').join(',') === '255,255,255', 'a bad value should fall back to white');
+  ok(hexToRgb('#fff').join(',') === '255,255,255', 'a short hex should fall back to white');
+  for (const hex of ['#ffffff', '#000000', '#38d96b', '#123456', '#aabbcc']) {
+    ok(rgbToHex(hexToRgb(hex)) === hex, `${hex} should survive a round trip`);
+  }
+
+  // A device with nothing saved gets sane defaults rather than undefined.
+  const s = loadSettings();
+  ok(s.zoom === 1, 'the default zoom should be 1');
+  ok(s.rope === '#ffffff', 'the default hook colour should be white');
+  ok(s.ropeRgb.join(',') === '255,255,255', 'and it should be handed to the renderer as white');
+  ok(s.admin === false, 'nobody is an admin by default');
+  ok(s.webhook === '', 'and there is no webhook by default');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

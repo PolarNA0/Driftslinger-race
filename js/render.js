@@ -42,6 +42,24 @@ export const themeFor = (seed) => THEMES[(((seed | 0) - 1) % THEMES.length + THE
 const ROPE = [255, 255, 255];
 const POLE_NEXT = [255, 255, 255];
 
+// How far the camera may be pulled in or out, as a multiple of the default
+// framing. Wide enough to matter, narrow enough that the road never leaves the
+// frame or shrinks to a thread.
+export const MIN_ZOOM = 0.6;
+export const MAX_ZOOM = 1.8;
+
+/** `#rrggbb` -> `[r, g, b]`. Falls back to white on anything malformed. */
+export function hexToRgb(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex).trim());
+  if (!m) return [255, 255, 255];
+  const n = parseInt(m[1], 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+/** `[r, g, b]` -> `#rrggbb`. */
+export const rgbToHex = (c) =>
+  '#' + c.map((v) => Math.round(clamp(v, 0, 255)).toString(16).padStart(2, '0')).join('');
+
 /**
  * The car skins. Kept to a handful of flat colours that all read clearly against
  * every road theme - the body must stay brighter than the darkest tarmac and
@@ -93,6 +111,8 @@ export class Renderer {
     this.ctx = canvas.getContext('2d');
     this.theme = themeFor(seed);
     this.car = CAR_COLOURS[0];
+    this.zoom = 1;               // player's framing multiplier, see setZoom
+    this.rope = ROPE;            // the hook line's colour, see setRopeColour
     this.resize();
   }
 
@@ -102,6 +122,18 @@ export class Renderer {
   setCar(index) {
     const n = CAR_COLOURS.length;
     this.car = CAR_COLOURS[(((index | 0) % n) + n) % n];
+  }
+
+  /** The player's zoom, as a multiple of the default framing, clamped to range. */
+  setZoom(z) {
+    const n = Number(z);
+    this.zoom = Number.isFinite(n) ? clamp(n, MIN_ZOOM, MAX_ZOOM) : 1;
+    this.resize();
+  }
+
+  /** The hook line's colour, as `[r, g, b]`. */
+  setRopeColour(c) {
+    this.rope = Array.isArray(c) && c.length === 3 ? c : ROPE;
   }
 
   resize() {
@@ -114,8 +146,9 @@ export class Renderer {
     this.dpr = dpr;
     this.anchorY = this.h * CAR_ANCHOR;
     // Derive the zoom from the screen width so the road keeps the same share of
-    // the frame on any device, which is what the real game does.
-    this.scale = (this.w * ROAD_W_FRAC) / (2 * CFG.roadHalfWidth);
+    // the frame on any device, which is what the real game does. The player's own
+    // zoom multiplies that, so it means the same thing on every screen.
+    this.scale = (this.w * ROAD_W_FRAC) / (2 * CFG.roadHalfWidth) * this.zoom;
   }
 
   /**
@@ -285,7 +318,7 @@ export class Renderer {
     const { ctx } = this;
     const a = this.toScreen(cam, car.x, car.y);
     const b = this.toScreen(cam, car.fillet.c.x, car.fillet.c.y);
-    ctx.strokeStyle = rgb(ROPE);
+    ctx.strokeStyle = rgb(this.rope);
     ctx.lineWidth = 2.5;
     ctx.beginPath();
     ctx.moveTo(a.x, a.y);
