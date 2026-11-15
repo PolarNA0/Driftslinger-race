@@ -1,0 +1,7 @@
+# Godot import cache and exported builds - both are generated, not source.
+.godot/
+build/
+
+# Android export intermediates
+android/
+*.idsig
