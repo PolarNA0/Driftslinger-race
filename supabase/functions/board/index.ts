@@ -11,6 +11,11 @@
 //
 // `steps` travels with each row so a real run can be watched. A baked ghost is
 // regenerated from its id, but a real run has no id to regenerate from.
+//
+// `steps` lives on `runs`, not on the `leaderboard` view - the view carries the
+// rank, the seconds and the name, and nothing else. So this reads both: the view
+// for the ranking the game trusts, and `runs` for the button sequence. Asking the
+// view for `steps` fails outright, which is why the two reads are separate.
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { json, preflight, bearer } from '../_shared/http.ts';
@@ -39,30 +44,69 @@ Deno.serve(async (req) => {
     return json({ error: 'bad track' }, 400);
   }
 
+  // The ranked board, from the view that owns the ranking rules.
   const { data, error } = await anon
     .from('leaderboard')
-    .select('username, seconds, steps, user_id')
+    .select('rank, username, seconds, ticks, user_id')
     .eq('track', track)
-    .order('seconds', { ascending: true })
+    .order('rank', { ascending: true })
     .limit(MAX_ROWS);
 
   if (error) return json({ error: 'board unavailable' }, 500);
 
+  // The button sequences, keyed by user. `runs` holds one row per player per
+  // track, so this joins back onto the board one-to-one.
+  const { data: runRows, error: runErr } = await anon
+    .from('runs')
+    .select('user_id, steps')
+    .eq('track', track);
+
+  if (runErr) return json({ error: 'board unavailable' }, 500);
+
+  const stepsFor = new Map((runRows ?? []).map((r) => [r.user_id, r.steps]));
+
   // A signed-in caller also learns which row is theirs, so the game can mark it
   // without a second request. Read with the caller's token so RLS applies.
   let me: string | null = null;
+  let myRank: number | null = null;
   const token = bearer(req);
   if (token) {
     const { data: auth } = await anon.auth.getUser(token);
-    if (auth?.user) me = auth.user.id;
+    if (auth?.user) {
+      me = auth.user.id;
+      const { data: mine } = await anon
+        .from('leaderboard')
+        .select('rank')
+        .eq('track', track)
+        .eq('user_id', me)
+        .maybeSingle();
+      myRank = mine?.rank ?? null;
+    }
   }
 
-  const rows = (data ?? []).map((r) => ({
-    name: r.username,
-    time: r.seconds,
-    steps: r.steps,
-    you: me !== null && r.user_id === me,
-  }));
+  const rows = (data ?? []).map((r) => {
+    const steps = stepsFor.get(r.user_id) ?? null;
+    return {
+      rank: r.rank,
+      name: r.username,
+      time: r.seconds,
+      // A run is only watchable if its steps actually travelled. A row with no
+      // steps still ranks; it just cannot be replayed.
+      steps,
+      watchable: !!steps,
+      you: me !== null && r.user_id === me,
+    };
+  });
 
-  return json({ rows });
+  // The pagination fields are kept because the older paginated client reads them
+  // for its "you are #N" line and its page count. The current client ignores
+  // them and merges `rows` into its own field instead.
+  const total = rows.length;
+  return json({
+    rows,
+    page: 1,
+    pages: 1,
+    total,
+    you: myRank,
+  });
 });

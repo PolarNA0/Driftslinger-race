@@ -304,6 +304,28 @@ The player's session lives in `localStorage` under `slingdrift.session.v2`, and 
 upload queue under `slingdrift.queue.v2`. Bumping either suffix deliberately
 invalidates whatever the old shape was, which is why the versions are there.
 
+### The `leaderboard` view has no `steps`
+
+`public.leaderboard` is a view over `runs` joined to `profiles`, and it carries
+`track, user_id, username, ticks, seconds, created_at, rank` - and nothing else.
+`steps` lives on `runs`, the table underneath.
+
+This matters because the obvious-looking query is wrong:
+
+```ts
+// Fails with "column steps does not exist", so the whole board 500s.
+.from('leaderboard').select('username, seconds, steps')
+```
+
+The board function therefore reads twice: the view for the ranking the game
+trusts, and `runs` for the button sequence, joined on `user_id`. `runs` holds one
+row per player per track, so that join is one-to-one. RLS allows the public read
+on both, so the anon key is enough and no service key is needed.
+
+The failure mode is worth remembering: the wrong query does not degrade, it takes
+the entire board down with a 500. If the board ever goes blank, check the select
+list before anything else.
+
 ### Settings and the admin code
 
 `js/settings.js` owns zoom, the hook colour and the admin flag. All three are
