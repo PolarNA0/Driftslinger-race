@@ -1,0 +1,34 @@
+name: Deploy Supabase functions
+
+# Pushes the Edge Functions whenever their source changes, so a backend fix ships
+# with the commit that makes it rather than waiting for someone to run the CLI by
+# hand. Only the `board` function is deployed: `run` is what verifies and stores
+# runs, and it has not changed since it was first deployed.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/functions/**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      # A management token, from supabase.com/dashboard/account/tokens. It is a
+      # repository secret rather than something passed in by hand, because the
+      # token is long-lived and a manual step is one that gets forgotten.
+      #
+      # --yes is required: a hosted change refuses to proceed without it, and CI
+      # has no one to answer the prompt. --remote is the current spelling of what
+      # used to be --project-ref.
+      - name: Deploy board
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase functions deploy board --remote=pleotpbgzeohxbuxffiq --yes

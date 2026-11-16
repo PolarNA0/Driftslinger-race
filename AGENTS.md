@@ -304,6 +304,34 @@ The player's session lives in `localStorage` under `slingdrift.session.v2`, and 
 upload queue under `slingdrift.queue.v2`. Bumping either suffix deliberately
 invalidates whatever the old shape was, which is why the versions are there.
 
+### Deploying the functions
+
+`supabase/functions/**` deploys itself: `.github/workflows/deploy-functions.yml`
+runs `supabase functions deploy board` on any push that touches that path. The
+management token lives in the `SUPABASE_ACCESS_TOKEN` repository secret, so no one
+has to paste one in by hand.
+
+Two things the CLI needs in CI. `--yes`, because a hosted change refuses to
+proceed without it and there is no one at a prompt to answer. And `--remote=<ref>`
+rather than `--project-ref`, which is deprecated and warns.
+
+Deploying by hand, if the workflow is ever unavailable:
+
+```bash
+export SUPABASE_ACCESS_TOKEN=...   # supabase.com/dashboard/account/tokens
+supabase functions deploy board --remote=pleotpbgzeohxbuxffiq --yes
+```
+
+A wrong deploy here does not degrade quietly. The board is what the game reads for
+real runs, so a function that 500s takes the whole leaderboard with it - which is
+exactly what the `steps`-on-the-view bug would have done. Check the endpoint after
+deploying:
+
+```bash
+curl -s "https://pleotpbgzeohxbuxffiq.supabase.co/functions/v1/board?track=1" \
+  -H "apikey: <anon key>" | head -c 300
+```
+
 ### The `leaderboard` view has no `steps`
 
 `public.leaderboard` is a view over `runs` joined to `profiles`, and it carries
