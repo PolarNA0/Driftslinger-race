@@ -728,11 +728,13 @@ console.log('tracker: a record reads with a minus delta, an improvement with a p
   ok(pos.message.includes('position 2'), 'and reports the position');
   ok(pos.message.includes('9.592'), 'and the time to three places');
 
-  // Equalling the record counts as a record (it is not behind it), and the delta
-  // is zero rather than a negative zero or a small positive.
-  const tie = T.recordMessage({ player: 'A', track: 1, time: 9.5746, rank: 1, wrBefore: 9.5746 });
-  ok(tie.isRecord, 'equalling the record is a record, not a run behind it');
-  ok(tie.message.includes('[WR -0.000]'), 'and reports a zero delta');
+  // Equalling the record is NOT beating it. The player shares the record's time
+  // but not its place at the top, so this is a position with a zero delta - not a
+  // "new world record by 0.000", which is what the old `<=` wrongly reported.
+  const tie = T.recordMessage({ player: 'A', track: 1, time: 9.5746, rank: 2, wrBefore: 9.5746 });
+  ok(!tie.isRecord, 'equalling the record is not a world record');
+  ok(tie.message.includes('[WR +0.000]'), `a tie carries a plus zero delta, got: ${tie.message}`);
+  ok(tie.message.includes('took position 2'), 'and reports the shared position, not a new record');
 
   // The admin can reword both, and the placeholders fill from the run.
   const custom = T.recordMessage(
@@ -743,6 +745,21 @@ console.log('tracker: a record reads with a minus delta, an improvement with a p
 
   // An unknown placeholder is left visible rather than silently blanked.
   ok(T.formatMessage('a {nope} b', {}) === 'a {nope} b', 'an unknown placeholder is left alone');
+
+  // The Edge Function's copy of this rule is TypeScript on Deno, so it cannot be
+  // imported here. Read it instead: a tie must be a `+` position there too, or the
+  // announcement that actually reaches Discord would still call a tie a record.
+  const { readFileSync } = await import('node:fs');
+  const edgeTracker = readFileSync(new URL('../supabase/functions/_shared/tracker.ts', import.meta.url), 'utf8');
+  const edgeRun = readFileSync(new URL('../supabase/functions/run/index.ts', import.meta.url), 'utf8');
+  ok(/runTicks < wrBeforeTicks/.test(edgeTracker),
+    'the Edge Function must treat only a strictly faster run as beating the record');
+  ok(!/runTicks <= wrBeforeTicks/.test(edgeTracker),
+    'the Edge Function must not treat a tie as a record');
+  ok(/run\.ticks < run\.wrBefore/.test(edgeRun),
+    'the Edge Function must not pick the WR wording on a tie');
+  ok(!/run\.ticks <= run\.wrBefore/.test(edgeRun),
+    'the Edge Function must not treat a tie as a record');
 }
 
 console.log('settings: the tracker messages load, and a blank one falls back');

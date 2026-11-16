@@ -128,7 +128,10 @@ async function announce(run: {
     .eq('id', run.userId)
     .maybeSingle();
 
-  const isRecord = run.wrBefore === null || run.ticks <= run.wrBefore;
+  // Strictly under the record is a new record; equalling it is only a place on the
+  // board, so it takes the position template (and a +0.000 delta) instead of
+  // claiming a new best by zero.
+  const isRecord = run.wrBefore === null || run.ticks < run.wrBefore;
   const template = isRecord
     ? (cfg?.wr_message || DEFAULT_WR_MESSAGE)
     : (cfg?.pos_message || DEFAULT_POS_MESSAGE);

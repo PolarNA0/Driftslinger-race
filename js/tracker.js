@@ -31,15 +31,17 @@ const fmtTime = (s) => Number(s).toFixed(3);
  * Build the message for a finished run.
  *
  * `wrBefore` is the record as it stood before this run was uploaded, or null when
- * the track had no record yet. A run at or under it is a world record and gets the
- * WR template with a minus delta; anything else gets the position template with a
- * plus delta against the same record (a non-record run cannot have moved it).
+ * the track had no record yet. A run strictly under it is a world record and gets
+ * the WR template with a minus delta; anything else - including a run that only
+ * equals it - gets the position template with a plus delta against the same
+ * record. Equalling the record is not beating it: it is a place on the board, not
+ * a new best, and reporting it as "beat the world record by 0.000" would be a lie.
  *
  * Returns `{ template, vars, message, isRecord }` so the caller can post the
  * message and a test can check the pieces.
  */
 export function recordMessage({ player, track, time, rank, wrBefore }, settings) {
-  const isRecord = wrBefore === null || time <= wrBefore;
+  const isRecord = wrBefore === null || time < wrBefore;
   const delta = wrBefore === null ? 0
     : isRecord ? wrBefore - time
     : time - wrBefore;

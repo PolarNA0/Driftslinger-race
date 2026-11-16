@@ -44,13 +44,15 @@ export const fmtTime = (seconds: number) => Number(seconds).toFixed(3);
  * How far a run is from the world record, and which way to show it.
  *
  * A run that beat the old record reports how much it beat it by, with a minus:
- * `[WR -0.017]`. Every other run reports how far behind the record it sits, with
- * a plus: `[WR +0.017]`. The magnitude is always positive; only the sign differs.
+ * `[WR -0.017]`. Every other run - including one that only equalled the record -
+ * reports how far behind the record it sits, with a plus: `[WR +0.000]`. Equalling
+ * the record is a place on the board, not a new best, so it must not read as
+ * "beat the record by 0.000". The magnitude is always positive; only the sign differs.
  */
 export function recordDelta(
   runTicks: number, wrBeforeTicks: number | null, wrAfterTicks: number | null,
 ): { sign: '-' | '+'; delta: number } {
-  if (wrBeforeTicks !== null && runTicks <= wrBeforeTicks) {
+  if (wrBeforeTicks !== null && runTicks < wrBeforeTicks) {
     return { sign: '-', delta: (wrBeforeTicks - runTicks) / 120 };
   }
   const wr = wrAfterTicks ?? runTicks;
