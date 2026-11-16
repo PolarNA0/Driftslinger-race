@@ -26,9 +26,19 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # Installs the Android SDK (and the platform/build-tools Godot's prebuilt
-      # export template links against) and exports ANDROID_HOME for later steps.
-      - uses: android-actions/setup-android@v3
+      # ubuntu-latest ships the Android SDK, so accept the licences and install
+      # the platform and build-tools the export template needs rather than
+      # pulling in a setup action. (android-actions/setup-android@v3 fails on the
+      # runner's preinstalled sdkmanager with "Wrong version".)
+      - name: Set up the Android SDK
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" \
+            "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       # Godot's Android export needs a debug keystore at a path the editor
       # settings point at. keytool ships with the JDK installed above.
@@ -61,11 +71,20 @@ jobs:
 
       - name: Build the APK
         working-directory: godot
-        env:
-          JAVA_HOME: ${{ env.JAVA_HOME }}
-          ANDROID_HOME: ${{ env.ANDROID_HOME }}
         run: |
           set -euo pipefail
+          # Godot reads the Android toolchain paths from the editor settings, so
+          # write them for this runner before exporting.
+          SETTINGS_DIR="$HOME/.config/godot"
+          mkdir -p "$SETTINGS_DIR"
+          {
+            printf '[gd_resource type="EditorSettings" load_steps=1 format=3]\n\n'
+            printf '[resource]\n'
+            printf 'export/android/debug_keystore = "%s/keystores/debug.keystore"\n' "$HOME"
+            printf 'export/android/debug_keystore_pass = "android"\n'
+            printf 'export/android/java_sdk_path = "%s"\n' "$JAVA_HOME"
+            printf 'export/android/android_sdk_path = "%s"\n' "$ANDROID_HOME"
+          } > "$SETTINGS_DIR/editor_settings-4.5.tres"
           godot --headless --path . --import
           mkdir -p build/android
           godot --headless --path . --export-debug "Android" build/android/drift-slinger.apk
