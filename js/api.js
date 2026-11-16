@@ -13,7 +13,7 @@
  * guest's runs still queue, and are sent once they sign in.
  */
 
-import { supabaseUrl, supabaseAnonKey, authToken } from './account.js';
+import { supabaseUrl, supabaseAnonKey, authToken, currentUserId } from './account.js';
 
 const QUEUE_KEY = 'slingdrift.queue.v2';
 const CLIENT_KEY = 'slingdrift.clientId.v1';
@@ -104,6 +104,48 @@ export async function flush() {
   }
   writeQueue(keep);
   return last;
+}
+
+/**
+ * The signed-in player's own best runs, keyed by track, or null when offline.
+ *
+ * A player's times live on the server, but the game reads its records from
+ * localStorage. On a device that never made the run - a reinstall, a second
+ * phone, a cleared cache - signing in would otherwise show nothing even though
+ * the account holds the times. This pulls them back down so the account is the
+ * source of truth, not the device.
+ *
+ * Reads the `runs` table directly with the caller's token. RLS allows any reader
+ * to see any run, so this filters to this user explicitly; that is a query
+ * narrowing, not a security boundary.
+ */
+export async function fetchMyRuns() {
+  const me = currentUserId();
+  if (!me) return null;
+
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), TIMEOUT);
+  try {
+    const token = await authToken();
+    if (!token) return null;
+    const res = await fetch(
+      `${supabaseUrl()}/rest/v1/runs?user_id=eq.${me}&select=track,ticks,steps`,
+      {
+        headers: { apikey: supabaseAnonKey(), authorization: `Bearer ${token}` },
+        signal: ctl.signal,
+      },
+    );
+    if (!res.ok) return null;
+    const rows = await res.json();
+    if (!Array.isArray(rows)) return null;
+    // One row per track, so this is the player's best by construction: the table
+    // keeps a single row per user per track and only ever lowers it.
+    return rows.map((r) => ({ track: r.track, time: r.ticks / 120, steps: r.steps ?? null }));
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**

@@ -1,5 +1,6 @@
 import { getPref, setPref } from './storage.js';
 import { hexToRgb, rgbToHex, MIN_ZOOM, MAX_ZOOM } from './render.js';
+import { DEFAULT_WR_MESSAGE, DEFAULT_POS_MESSAGE } from './tracker.js';
 
 /**
  * Player settings, and the admin login behind them.
@@ -24,6 +25,8 @@ const ZOOM_KEY = 'zoom';
 const ROPE_KEY = 'ropeColour';
 const ADMIN_KEY = 'admin';
 const WEBHOOK_KEY = 'discordWebhook';
+const WR_MSG_KEY = 'trackerWrMessage';
+const POS_MSG_KEY = 'trackerPosMessage';
 
 /** Clamp a zoom multiplier to the range the renderer accepts. */
 export function clampZoom(z) {
@@ -65,7 +68,14 @@ export function loadSettings() {
     ropeRgb: hexToRgb(rope),
     admin: getPref(ADMIN_KEY, false) === true,
     webhook: getPref(WEBHOOK_KEY, '') || '',
+    wrMessage: messageOr(getPref(WR_MSG_KEY, ''), DEFAULT_WR_MESSAGE),
+    posMessage: messageOr(getPref(POS_MSG_KEY, ''), DEFAULT_POS_MESSAGE),
   };
+}
+
+/** A saved template, or the default. A blank or non-string falls back. */
+function messageOr(value, fallback) {
+  return typeof value === 'string' && value.trim() ? value : fallback;
 }
 
 export const saveZoom = (z) => setPref(ZOOM_KEY, clampZoom(z));
@@ -74,5 +84,10 @@ export const saveRope = (hex) =>
 export const saveAdmin = (on) => setPref(ADMIN_KEY, !!on);
 export const saveWebhook = (url) => setPref(WEBHOOK_KEY, String(url).trim());
 
+/** Save the two tracker templates. A blank one falls back to the default. */
+export function saveTrackerMessages(wr, pos) {
+  setPref(WR_MSG_KEY, String(wr || '').trim());
+  setPref(POS_MSG_KEY, String(pos || '').trim());
+}
 export const DEFAULT_ROPE_HEX = DEFAULT_ROPE;
 export { rgbToHex, hexToRgb };

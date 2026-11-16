@@ -171,6 +171,19 @@
           <button id="set-hook-test" class="btn btn--small">Send test</button>
           <button id="set-admin-out" class="btn btn--small btn--ghost">Sign out</button>
         </div>
+
+        <h3>World record message</h3>
+        <input id="set-msg-wr" class="field" type="text"
+               autocapitalize="off" autocorrect="off" spellcheck="false" />
+        <h3>Position message</h3>
+        <input id="set-msg-pos" class="field" type="text"
+               autocapitalize="off" autocorrect="off" spellcheck="false" />
+        <p class="sub">Placeholders: {player} {track} {time} {rank} {delta}</p>
+        <div class="set__row">
+          <button id="set-msg-save" class="btn btn--small btn--primary">Save messages</button>
+          <button id="set-msg-reset" class="btn btn--small btn--ghost">Reset</button>
+        </div>
+        <p id="set-msg-status" class="err"></p>
       </div>
 
       <p id="set-error" class="err"></p>

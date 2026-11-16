@@ -65,6 +65,43 @@ export function saveBestTime(seed, time) {
   return prev;
 }
 
+/**
+ * Fold the server's copy of a player's times into the local records.
+ *
+ * The server holds the player's real bests; localStorage holds whatever this
+ * device happens to have seen. They can disagree in both directions - a fresh
+ * install has nothing, and an offline run may not have uploaded yet - so this
+ * takes the faster of the two per track rather than overwriting either way.
+ *
+ * Replays are filled in only where the device has none, so a locally watched
+ * ghost is never replaced by one fetched over the wire.
+ *
+ * Returns how many tracks changed, so the caller can skip a repaint when nothing
+ * moved.
+ */
+export function mergeServerTimes(runs) {
+  if (!Array.isArray(runs) || !runs.length) return 0;
+  const times = read(key('times.v1'), {});
+  const replays = read(key('replays.v1'), {});
+  let changed = 0;
+
+  for (const run of runs) {
+    if (!Number.isFinite(run?.time) || !Number.isFinite(run?.track)) continue;
+    const prev = times[run.track];
+    if (!Number.isFinite(prev) || run.time < prev) {
+      times[run.track] = run.time;
+      changed++;
+    }
+    if (run.steps && !replays[run.track]) {
+      replays[run.track] = { track: run.track, time: run.time, steps: run.steps };
+    }
+  }
+
+  if (changed) write(key('times.v1'), times);
+  write(key('replays.v1'), replays);
+  return changed;
+}
+
 // --- replays: the button steps of the best run per track ---------------------
 export function getReplay(seed) {
   const r = read(key('replays.v1'), {})[seed];

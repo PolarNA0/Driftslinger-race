@@ -679,5 +679,143 @@ console.log('account: a token refresh keeps the name, so the PBs stay visible');
   globalThis.fetch = realFetch;
 }
 
+console.log('tracker: a record reads with a minus delta, an improvement with a plus');
+{
+  const T = await import('../js/tracker.js');
+
+  // A world record: the run beat the record that stood before it, so the delta is
+  // how much it won by, and it is signed minus.
+  const wr = T.recordMessage({ player: 'Polar', track: 1, time: 9.3416, rank: 1, wrBefore: 9.3583 });
+  ok(wr.isRecord, 'beating the standing record is a world record');
+  ok(wr.message.includes('[WR -0.017]'), `a record carries a minus delta, got: ${wr.message}`);
+  ok(wr.message.startsWith('Polar set a new world record'), 'and uses the WR wording');
+
+  // The first run on a track has no record to beat: it is a record by default.
+  const first = T.recordMessage({ player: 'Polar', track: 4, time: 10.5, rank: 1, wrBefore: null });
+  ok(first.isRecord, 'the first run on a track is a world record');
+  ok(first.message.includes('[WR -0.000]'), 'with a zero delta');
+
+  // An ordinary improvement sits behind the record, so the delta is how far behind
+  // and it is signed plus - the same number the player sees on the board.
+  const pos = T.recordMessage({ player: 'Cola', track: 1, time: 9.5916, rank: 2, wrBefore: 9.5746 });
+  ok(!pos.isRecord, 'a run behind the record is not a world record');
+  ok(pos.message.includes('[WR +0.017]'), `a non-record carries a plus delta, got: ${pos.message}`);
+  ok(pos.message.includes('position 2'), 'and reports the position');
+  ok(pos.message.includes('9.592'), 'and the time to three places');
+
+  // Equalling the record counts as a record (it is not behind it), and the delta
+  // is zero rather than a negative zero or a small positive.
+  const tie = T.recordMessage({ player: 'A', track: 1, time: 9.5746, rank: 1, wrBefore: 9.5746 });
+  ok(tie.isRecord, 'equalling the record is a record, not a run behind it');
+  ok(tie.message.includes('[WR -0.000]'), 'and reports a zero delta');
+
+  // The admin can reword both, and the placeholders fill from the run.
+  const custom = T.recordMessage(
+    { player: 'Cola', track: 3, time: 9.9, rank: 4, wrBefore: 9.5 },
+    { posMessage: '{player} | T{track} | {time}s | P{rank} | {sign}{delta}' },
+  );
+  ok(custom.message === 'Cola | T3 | 9.900s | P4 | +0.400', `custom wording fills, got: ${custom.message}`);
+
+  // An unknown placeholder is left visible rather than silently blanked.
+  ok(T.formatMessage('a {nope} b', {}) === 'a {nope} b', 'an unknown placeholder is left alone');
+}
+
+console.log('settings: the tracker messages load, and a blank one falls back');
+{
+  const store = new Map();
+  const realLS = globalThis.localStorage;
+  globalThis.localStorage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: (k) => store.delete(k),
+    clear: () => store.clear(),
+  };
+  globalThis.document = { querySelector: () => null };
+  globalThis.window = {};
+
+  const S = await import('../js/settings.js');
+  const T = await import('../js/tracker.js');
+
+  const def = S.loadSettings();
+  ok(def.wrMessage === T.DEFAULT_WR_MESSAGE, 'the WR message defaults to the built-in wording');
+  ok(def.posMessage === T.DEFAULT_POS_MESSAGE, 'and so does the position message');
+
+  S.saveTrackerMessages('my {player} line', 'pos {rank}');
+  const saved = S.loadSettings();
+  ok(saved.wrMessage === 'my {player} line', 'a saved WR message reads back');
+  ok(saved.posMessage === 'pos {rank}', 'and a saved position message');
+
+  // Blanking a field must fall back to the default rather than posting nothing.
+  S.saveTrackerMessages('', '   ');
+  const blanked = S.loadSettings();
+  ok(blanked.wrMessage === T.DEFAULT_WR_MESSAGE, 'a blank WR message falls back to the default');
+  ok(blanked.posMessage === T.DEFAULT_POS_MESSAGE, 'a blank position message too');
+
+  globalThis.localStorage = realLS;
+}
+
+console.log('account: a signed-in player\'s times come back from the server');
+{
+  // The records live on the server, but the game reads them from localStorage. A
+  // reinstall or a second device would show nothing after signing in unless the
+  // server's copy is folded back in. This walks that path with a stubbed server.
+  const store = new Map();
+  const realLS = globalThis.localStorage;
+  const realFetch = globalThis.fetch;
+  globalThis.localStorage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: (k) => store.delete(k),
+    clear: () => store.clear(),
+  };
+  globalThis.document = { querySelector: () => null };
+  globalThis.window = { SLING_SUPABASE_URL: 'https://x.supabase.co', SLING_SUPABASE_ANON_KEY: 'k' };
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('/rest/v1/runs')) {
+      return { ok: true, json: async () => ([
+        { track: 1, ticks: 1120, steps: 'ab' },          // 9.3333s on track 1
+        { track: 2, ticks: 1200, steps: null },          // 10s on track 2
+      ]) };
+    }
+    return { ok: false, json: async () => ({}) };
+  };
+
+  const A = await import('../js/account.js');
+  const S = await import('../js/storage.js');
+  const Api = await import('../js/api.js');
+
+  localStorage.setItem('slingdrift.session.v2', JSON.stringify({
+    access_token: 't1', refresh_token: 'r1',
+    expires_at: Math.floor(Date.now() / 1000) + 3600,
+    user: { id: 'u1', email: 'p@example.com' }, username: 'Polar',
+  }));
+
+  ok(A.currentUserId() === 'u1', 'the signed-in user id should read back');
+
+  const runs = await Api.fetchMyRuns();
+  ok(Array.isArray(runs) && runs.length === 2, 'the server runs should come back');
+  ok(Math.abs(runs[0].time - 1120 / 120) < 1e-9, 'and be in seconds, not ticks');
+
+  // A device that has never seen these runs adopts them.
+  const changed = S.mergeServerTimes(runs);
+  ok(changed === 2, `a fresh device should adopt both times, got ${changed}`);
+  ok(Math.abs(S.getBestTime(1) - 1120 / 120) < 1e-9, 'track 1 now shows the server time');
+  ok(Math.abs(S.getBestTime(2) - 10) < 1e-9, 'track 2 now shows the server time');
+
+  // A local time that is faster must win: the merge takes the better of the two,
+  // never blindly overwriting the device with the server.
+  S.saveBestTime(1, 9.0);
+  const again = S.mergeServerTimes(runs);
+  ok(again === 0, 'a slower server time changes nothing');
+  ok(S.getBestTime(1) === 9.0, 'and the faster local time survives');
+
+  // A faster server time (another device) does win.
+  S.mergeServerTimes([{ track: 1, time: 8.5, steps: 'zz' }]);
+  ok(S.getBestTime(1) === 8.5, 'a faster server time replaces the local one');
+
+  globalThis.localStorage = realLS;
+  globalThis.fetch = realFetch;
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

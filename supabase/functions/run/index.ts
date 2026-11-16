@@ -12,6 +12,9 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { json, preflight, bearer } from '../_shared/http.ts';
 import { replayRun } from '../_shared/physics/verify.js';
+import {
+  DEFAULT_POS_MESSAGE, DEFAULT_WR_MESSAGE, formatMessage, messageVars, postWebhook,
+} from '../_shared/tracker.ts';
 
 // The service-role key bypasses RLS, which is the point: it is the only writer
 // allowed near the `runs` table. It is injected by the platform and never
@@ -75,6 +78,18 @@ Deno.serve(async (req) => {
     return json({ error: 'store failed' }, 500);
   }
 
+  // The tracker posts only on a genuine improvement, and only after the run is
+  // safely stored - a webhook failure must never cost a player their run. It is
+  // awaited so the serverless runtime is not torn down mid-post, but its result
+  // is not part of the response: whether Discord accepted the message has no
+  // bearing on the run.
+  if (data.improved) {
+    await announce({
+      userId: user.id, track, ticks: data.ticks, rank: data.rank,
+      wrBefore: data.wr_before ?? null, wrAfter: data.wr_after ?? null,
+    });
+  }
+
   return json({
     ok: true,
     time: data.ticks / 120,
@@ -83,3 +98,49 @@ Deno.serve(async (req) => {
     improved: data.improved,
   });
 });
+
+/**
+ * Post an improvement to the admin's Discord channel.
+ *
+ * The webhook and the two message templates live in `tracker_config`, set once by
+ * an admin, so this announces every player rather than only the admin. A world
+ * record gets the WR template and a minus delta; any other improvement gets the
+ * position template and a plus delta.
+ */
+async function announce(run: {
+  userId: string; track: number; ticks: number; rank: number;
+  wrBefore: number | null; wrAfter: number | null;
+}) {
+  const { data: cfg } = await admin
+    .from('tracker_config')
+    .select('webhook_url, wr_message, pos_message')
+    .eq('id', 1)
+    .maybeSingle();
+
+  const url = cfg?.webhook_url;
+  if (!url) return;                        // the tracker is off
+
+  // The player's name for the board, falling back to something readable if the
+  // profile read fails rather than dropping the announcement.
+  const { data: prof } = await admin
+    .from('profiles')
+    .select('username')
+    .eq('id', run.userId)
+    .maybeSingle();
+
+  const isRecord = run.wrBefore === null || run.ticks <= run.wrBefore;
+  const template = isRecord
+    ? (cfg?.wr_message || DEFAULT_WR_MESSAGE)
+    : (cfg?.pos_message || DEFAULT_POS_MESSAGE);
+
+  const vars = messageVars({
+    player: prof?.username ?? 'A player',
+    track: run.track,
+    ticks: run.ticks,
+    rank: run.rank,
+    wrBeforeTicks: run.wrBefore,
+    wrAfterTicks: run.wrAfter,
+  });
+
+  await postWebhook(url, formatMessage(template, vars));
+}

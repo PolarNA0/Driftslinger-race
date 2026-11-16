@@ -146,6 +146,12 @@ export function currentEmail() {
   return (s && s.user && s.user.email) || null;
 }
 
+/** The signed-in player's auth id, or null. Used to ask the server for their runs. */
+export function currentUserId() {
+  const s = readSession();
+  return (s && s.user && s.user.id) || null;
+}
+
 /**
  * Heal a session that is missing its username, and report the name.
  *

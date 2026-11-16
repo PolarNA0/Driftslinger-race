@@ -2,18 +2,19 @@ import { Game } from './game.js';
 import { fmtDist } from './util.js';
 import {
   getRecord, bestDistance, getBestTime, getReplay, getPref, setPref,
-  getRuns, allRuns,
+  getRuns, allRuns, mergeServerTimes,
 } from './storage.js';
 import { TRACK_COUNT } from './tracks.js';
 import { boardPage, pageForRank, playerRank, worldRecord } from './leaderboard.js';
 import { CAR_COLOURS, hexToRgb, rgbToHex } from './render.js';
 import {
   loadSettings, saveZoom, saveRope, saveAdmin, saveWebhook, isAdminCode, validWebhook,
-  clampZoom, DEFAULT_ROPE_HEX,
+  clampZoom, DEFAULT_ROPE_HEX, saveTrackerMessages,
 } from './settings.js';
-import { enqueue, flush, fetchBoard, clientId, queueLength } from './api.js';
+import { enqueue, flush, fetchBoard, fetchMyRuns, clientId, queueLength } from './api.js';
 import { encodeSteps } from './replay.js';
 import { postWebhook } from './discord.js';
+import { recordMessage, DEFAULT_WR_MESSAGE, DEFAULT_POS_MESSAGE } from './tracker.js';
 import {
   currentAccount, currentEmail, listAccounts, register, login, logout,
   ensureProfile, resolveAccount,
@@ -227,18 +228,22 @@ function onGameChange(g, extra) {
     showOverlay('over-finish');
     $('hint').hidden = true;
     showRoundButton(false);
-    // Report against the record as it stood *before* this run was sent. Nothing
-    // has been uploaded yet, so the board still holds the old record and the
-    // position is this run's own, not the best time's.
+    // The record as it stood before this run was uploaded, captured now because
+    // the upload changes it. The tracker uses it to tell a world record from an
+    // ordinary improvement.
     const reals = boardRealsSeed === g.seed ? boardReals : [];
-    const wrBefore = worldRecord(g.seed, reals);
-    const runRank = playerRank(g.seed, g.time);
-    reportRecord(g.seed, g.time, runRank, wrBefore ? g.time < wrBefore.time : false,
-      wrBefore ? g.time - wrBefore.time : 0);
+    const wr = worldRecord(g.seed, reals);
+    const prevRecord = wr ? wr.time : null;
+    // Whether this run beat the player's own best, known locally. The server
+    // reports this too and its word is preferred; this is the fallback for a
+    // server that does not.
+    const improved = extra.prev === null || g.time < extra.prev;
     // Queue the run, then try to send it. The board is re-read afterwards so the
-    // record and the rank reflect the real runs, not just the baked field.
+    // record and the rank reflect the real runs, not just the baked field. The
+    // tracker posts from the server's answer, not from the local estimate, so it
+    // reports the real position and only when the run was actually an improvement.
     enqueue({ track: g.seed, steps: encodeSteps(g.steps), name: playerName() });
-    submitQueued(g.seed);
+    submitQueued(g.seed, { time: g.time, prevRecord, improved });
   }
 }
 
@@ -263,9 +268,36 @@ async function refreshFinish(seed) {
 }
 
 /** Send queued runs, then refresh the finish screen against the merged board. */
-async function submitQueued(seed) {
-  await flush();
+async function submitQueued(seed, run = null) {
+  const sent = await flush();
   refreshFinish(seed);
+  // The tracker reads the server's answer, not the local estimate: the server is
+  // what knows the real rank and whether the run actually improved anything.
+  if (run && sent && sent.track === seed) reportRecord(seed, run, sent);
+}
+
+/**
+ * Tell the record channel about an improvement.
+ *
+ * Only an admin with a webhook posts, and only when the server says the run beat
+ * this player's own best - a run that changed nothing is not news. The message
+ * comes from one of the admin's two templates: a world record reads differently
+ * from an ordinary improvement, and the delta is signed to match.
+ */
+async function reportRecord(seed, run, sent) {
+  if (!settings.admin || !settings.webhook) return;
+  // The server is authoritative about whether anything improved; fall back to the
+  // local comparison only when it did not say.
+  const improved = typeof sent.improved === 'boolean' ? sent.improved : run.improved;
+  if (!improved) return;
+  const { message } = recordMessage({
+    player: playerName(),
+    track: seed,
+    time: Number.isFinite(sent.time) ? sent.time : run.time,
+    rank: sent.rank ?? null,
+    wrBefore: run.prevRecord,
+  }, settings);
+  await postWebhook(settings.webhook, message);
 }
 
 function onTick(g) {
@@ -541,7 +573,32 @@ function renderAdmin() {
   $('set-admin-login').hidden = settings.admin;
   $('set-admin-form').hidden = true;
   $('set-code').value = '';
-  if (settings.admin) $('set-hook').value = settings.webhook;
+  if (settings.admin) {
+    $('set-hook').value = settings.webhook;
+    $('set-msg-wr').value = settings.wrMessage;
+    $('set-msg-pos').value = settings.posMessage;
+    $('set-msg-status').textContent = '';
+  }
+}
+
+/** Save the two tracker templates, or fall back to the defaults if blanked. */
+function saveMessagesFromFields() {
+  const wr = $('set-msg-wr').value.trim();
+  const pos = $('set-msg-pos').value.trim();
+  saveTrackerMessages(wr, pos);
+  Object.assign(settings, loadSettings());
+  $('set-msg-wr').value = settings.wrMessage;
+  $('set-msg-pos').value = settings.posMessage;
+  $('set-msg-status').textContent = 'Saved.';
+}
+
+/** Put the default wording back into the two fields and save it. */
+function resetMessagesToDefault() {
+  saveTrackerMessages(DEFAULT_WR_MESSAGE, DEFAULT_POS_MESSAGE);
+  Object.assign(settings, loadSettings());
+  $('set-msg-wr').value = settings.wrMessage;
+  $('set-msg-pos').value = settings.posMessage;
+  $('set-msg-status').textContent = 'Reset to the default wording.';
 }
 
 function setZoomFromSlider() {
@@ -594,22 +651,6 @@ async function sendWebhookTest() {
   $('set-hook-status').textContent = sent
     ? 'Sent. Check the channel.'
     : 'Discord did not accept it. Check the URL.';
-}
-
-/**
- * Tell the record channel about a finished run.
- *
- * Only an admin with a webhook posts, and only on a speedrun - an endless run has
- * no position to report. A world record gets its own line, since that is the one
- * worth interrupting a channel for.
- */
-async function reportRecord(seed, time, position, beatRecord, delta) {
-  if (!settings.admin || !settings.webhook) return;
-  const msg = beatRecord
-    ? `${playerName()} beat the world record on track ${seed} with ${time.toFixed(3)}`
-    : `${playerName()} took position ${position} on track ${seed} with ${time.toFixed(3)}`
-      + ` [wr +${delta.toFixed(3)}]`;
-  await postWebhook(settings.webhook, msg);
 }
 
 function signOutAdmin() {
@@ -692,6 +733,24 @@ function afterSignIn() {
   showOverlay('menu');
   // Anything raced as a guest can go up now that there is an account to hold it.
   submitQueued(menuSeed);
+  // And the account's own times come back down, so signing in on a device that
+  // has never seen them still shows the player's bests.
+  hydrateTimes();
+}
+
+/**
+ * Pull the signed-in player's times down from the server and show them.
+ *
+ * The records live on the server but the game reads them from localStorage, so a
+ * fresh device, a reinstall or a cleared cache would show nothing after signing
+ * in. This folds the server's copy in and repaints if anything changed. Never
+ * throws and never blocks: if the network is down the local records still stand.
+ */
+async function hydrateTimes() {
+  const runs = await fetchMyRuns();
+  if (!runs) return;
+  if (!mergeServerTimes(runs)) return;         // nothing new: leave the UI alone
+  buildTrackList();                            // the per-track bests repaint here
 }
 
 // --- menu --------------------------------------------------------------------
@@ -744,6 +803,8 @@ $('set-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') tryAdm
 $('set-admin-out').addEventListener('click', signOutAdmin);
 $('set-hook-save').addEventListener('click', saveWebhookFromField);
 $('set-hook-test').addEventListener('click', sendWebhookTest);
+$('set-msg-save').addEventListener('click', saveMessagesFromFields);
+$('set-msg-reset').addEventListener('click', resetMessagesToDefault);
 $('btn-history-close').addEventListener('click', () => showOverlay('menu'));
 $('btn-board-close').addEventListener('click', () => { showOverlay('menu'); });
 $('btn-again').addEventListener('click', () => startRun(game.seed));
@@ -839,6 +900,9 @@ resolveAccount().then((name) => {
   if (!name) return;
   buildAccountBar();
   buildTrackList();
+  // The account's times may not be on this device at all - a reinstall, a second
+  // phone - so pull them down once the name is resolved and repaint.
+  hydrateTimes();
 });
 
 // Android back button: close the topmost overlay, else let the shell exit.
