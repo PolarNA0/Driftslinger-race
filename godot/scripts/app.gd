@@ -18,6 +18,8 @@ var car_skin := 0
 
 var board_seed := 1
 var board_page_no := 1
+var board_reals := []          # real runs on board_seed, as the server last returned
+var board_reals_seed := 0
 var watching: Variant = null   # {kind, seed, ghost_id, name, time, label, tag, sub}
 
 var acct_mode := "login"
@@ -51,6 +53,7 @@ var hist_sub: Label
 var hist_rows: VBoxContainer
 var acct_title: Label
 var acct_user: LineEdit
+var acct_email: LineEdit
 var acct_pass: LineEdit
 var acct_error: Label
 var acct_submit: Button
@@ -497,7 +500,16 @@ func _render_board() -> void:
 	var me: Variant = null
 	if best != null:
 		me = {"name": _player_name(), "time": float(best)}
-	var page := Leaderboard.board_page(seed, board_page_no, me)
+	# The server's real runs, when they are for this track. A local best is only
+	# handed in when the server has not already listed the player, so they are not
+	# drawn twice.
+	var reals := _reals_for(seed)
+	var listed := false
+	for r in reals:
+		if bool(r["you"]):
+			listed = true
+			break
+	var page := Leaderboard.board_page(seed, board_page_no, null if listed else me, Leaderboard.PER_PAGE, reals)
 	board_page_no = int(page["page"])
 
 	lb_title.text = "Track %d" % seed
@@ -517,6 +529,9 @@ func _render_board() -> void:
 			var b := _button(text + "   " + action, func():
 				if bool(row["you"]):
 					_watch_own_replay(seed)
+				elif str(row.get("steps", "")) != "":
+					# A real submitted run: no ghost id, it replays from its own steps.
+					_watch_steps(seed, str(row["steps"]), str(row["name"]), float(row["time"]))
 				else:
 					_watch_ghost(seed, int(row["ghost_id"]), str(row["name"]), float(row["time"])))
 			lb_rows.add_child(b)
@@ -530,10 +545,17 @@ func _render_board() -> void:
 
 func _show_leaderboard(seed: int) -> void:
 	board_seed = seed
+	# The page the player belongs on comes from their rank in the merged board, so
+	# the real runs have to be counted. Before they load this is a first guess and
+	# the board corrects it once they are in.
 	var best: Variant = Storage.get_best_time(seed)
-	board_page_no = 1 if best == null else Leaderboard.page_for_rank(Leaderboard.player_rank(seed, float(best)))
+	var reals := _reals_for(seed)
+	board_page_no = 1 if best == null else Leaderboard.page_for_rank(Leaderboard.player_rank(seed, float(best), reals))
 	_render_board()
 	_show_only("board")
+	# Then fetch the real runs and re-render with them merged in. The local board is
+	# drawn first so it is never blank while that loads.
+	_load_reals(seed)
 
 
 # =============================================================================
@@ -585,6 +607,9 @@ func _build_account() -> void:
 	acct_user = LineEdit.new()
 	acct_user.placeholder_text = "Username"
 	col.add_child(acct_user)
+	acct_email = LineEdit.new()
+	acct_email.placeholder_text = "Email"
+	col.add_child(acct_email)
 	acct_pass = LineEdit.new()
 	acct_pass.placeholder_text = "Password"
 	acct_pass.secret = true
@@ -592,7 +617,11 @@ func _build_account() -> void:
 	acct_error = _label("", 14)
 	acct_error.add_theme_color_override("font_color", Color(1, 0.4, 0.4))
 	col.add_child(acct_error)
-	acct_submit = _button("Sign in", _submit_account)
+	acct_submit = _button("Sign in", func():
+		if acct_mode == "name":
+			_submit_name()
+		else:
+			_submit_account())
 	col.add_child(acct_submit)
 	acct_toggle = _button("Create an account", func():
 		_open_account("login" if acct_mode == "register" else "register"))
@@ -605,22 +634,132 @@ func _open_account(mode: String) -> void:
 	acct_title.text = "Create an account" if acct_mode == "register" else "Sign in"
 	acct_submit.text = "Create account" if acct_mode == "register" else "Sign in"
 	acct_toggle.text = "I already have an account" if acct_mode == "register" else "Create an account"
+	acct_toggle.visible = true
 	acct_error.text = ""
 	acct_pass.text = ""
+	# The username field is only for registering; signing in uses the email.
+	acct_user.visible = acct_mode == "register"
+	acct_email.visible = true
 	var known := Account.list_accounts()
 	acct_user.placeholder_text = "e.g. %s" % known[0] if known.size() > 0 else "Username"
 	_show_only("account")
 
 
 func _submit_account() -> void:
-	var res := Account.register(acct_user.text, acct_pass.text) if acct_mode == "register" \
-		else Account.login(acct_user.text, acct_pass.text)
-	if not bool(res["ok"]):
-		acct_error.text = str(res["error"])
+	acct_submit.disabled = true
+	acct_error.text = ""
+	var res: Dictionary
+	if acct_mode == "register":
+		res = await Account.register(acct_user.text, acct_email.text, acct_pass.text)
+	else:
+		res = await Account.login(acct_email.text, acct_pass.text)
+	acct_submit.disabled = false
+	if not bool(res.get("ok", false)):
+		acct_error.text = str(res.get("error", "Could not sign in."))
 		return
+	# Confirmation is on: there is no session yet, so say so rather than pretending.
+	if bool(res.get("pending", false)):
+		acct_error.text = "Check your email to confirm, then sign in."
+		return
+	# Signed in, but the account has no public name yet. Ask for one.
+	if bool(res.get("needs_name", false)):
+		acct_error.text = "Pick a username to finish."
+		acct_mode = "name"
+		acct_title.text = "Choose a username"
+		acct_submit.text = "Save name"
+		acct_toggle.visible = false
+		return
+	await _after_sign_in()
+	_show_only("menu")
+
+
+# Pick the public name for an account that signed in without one.
+func _submit_name() -> void:
+	acct_submit.disabled = true
+	acct_error.text = ""
+	var made: Dictionary = await Account.ensure_profile(acct_user.text)
+	acct_submit.disabled = false
+	if not bool(made.get("ok", false)):
+		acct_error.text = str(made.get("error", "Could not save that name."))
+		return
+	acct_toggle.visible = true
+	await _after_sign_in()
+	_show_only("menu")
+
+
+# Everything that has to happen once a player is signed in: the bar and the track
+# list change, their times come back from the server, and the guest queue can go.
+func _after_sign_in() -> void:
 	_refresh_account_bar()
 	_refresh_track_list()
-	_show_only("menu")
+	await _sync_my_runs()
+	await _flush_queue()
+
+
+# Pull the signed-in player's best times back from the server.
+#
+# The account is the source of truth, not the device: on a fresh install the local
+# records are empty even though the account holds times. Merging is a lower-only
+# write, so a better local time is never lost to a worse server one.
+func _sync_my_runs() -> void:
+	var runs: Variant = await Api.fetch_my_runs()
+	if runs == null:
+		return
+	for r in runs:
+		var row: Dictionary = r
+		var seed := int(row["track"])
+		var time := float(row["time"])
+		Storage.save_best_time(seed, time)
+		var steps: Variant = row.get("steps")
+		if steps == null or str(steps) == "":
+			continue
+		var now: Variant = Storage.get_best_time(seed)
+		if now != null and absf(float(now) - time) < 1e-9:
+			Storage.save_replay(seed, Replay.make_replay(seed, Replay.decode_steps(str(steps)), time))
+	_refresh_track_list()
+
+
+# Send anything the queue is holding. A guest's runs wait here until they sign in.
+func _flush_queue() -> void:
+	if Api.queue_length() == 0:
+		return
+	var sent: Variant = await Api.flush()
+	if sent == null:
+		return
+	var d: Dictionary = sent
+	await _load_reals(int(d.get("track", board_seed)))
+	_refresh_track_list()
+
+
+# The real runs for a track, as the server last returned them, mapped to the shape
+# the board merge wants. Empty when the server has not answered for this track.
+func _reals_for(seed: int) -> Array:
+	if board_reals_seed != seed:
+		return []
+	var out := []
+	for r in board_reals:
+		var row: Dictionary = r
+		out.append({
+			"name": str(row.get("name", "")),
+			"time": float(row.get("time", 0.0)),
+			"steps": row.get("steps"),
+			"you": bool(row.get("you", false)),
+		})
+	return out
+
+
+# Fetch a track's real runs and re-render whatever is showing them. Called after a
+# run is uploaded and whenever the board is opened.
+func _load_reals(seed: int) -> void:
+	var rows: Variant = await Api.fetch_board(seed)
+	if rows == null:
+		return
+	board_reals = rows
+	board_reals_seed = seed
+	# The player may have moved on while that was in flight, in which case there is
+	# nothing on screen to re-render.
+	if overlay == "board" and board_seed == seed:
+		_render_board()
 
 
 # =============================================================================
@@ -654,9 +793,9 @@ func _build_finish() -> void:
 	btn_watch = _button("Watch my replay", func(): _watch_own_replay(game.seed_num))
 	row.add_child(btn_watch)
 	btn_finish_wr = _button("Watch world record", func():
-		var wr = Leaderboard.world_record(game.seed_num)
+		var wr = Leaderboard.world_record(game.seed_num, _reals_for(game.seed_num))
 		if wr != null:
-			_watch_ghost(game.seed_num, int(wr["ghost_id"]), str(wr["name"]), float(wr["time"])))
+			_watch_wr(game.seed_num, wr))
 	row.add_child(btn_finish_wr)
 	col.add_child(_button("Leaderboard", func(): _show_leaderboard(game.seed_num)))
 	col.add_child(_button("Run it again", func(): _start_run(game.seed_num)))
@@ -672,10 +811,13 @@ func _build_replay_done() -> void:
 	col.add_child(_button("Watch again", func():
 		if watching == null:
 			return
+		var seed := int(watching["seed"])
 		if watching["kind"] == "self":
-			_watch_own_replay(int(watching["seed"]))
+			_watch_own_replay(seed)
+		elif watching["kind"] == "steps":
+			_watch_steps(seed, str(watching["steps"]), str(watching["name"]), float(watching["time"]))
 		else:
-			_watch_ghost(int(watching["seed"]), int(watching["ghost_id"]),
+			_watch_ghost(seed, int(watching["ghost_id"]),
 				str(watching["name"]), float(watching["time"]))))
 	col.add_child(_button("Leaderboard", func(): _show_leaderboard(game.seed_num)))
 	col.add_child(_button("Main menu", _to_menu))
@@ -725,8 +867,14 @@ func _apply_ghost(seed: int) -> void:
 	if ghost_mode == "self":
 		game.set_ghost_self(seed)
 		return
-	var wr = Leaderboard.world_record(seed)
-	if wr != null:
+	var wr = Leaderboard.world_record(seed, _reals_for(seed))
+	if wr == null:
+		return
+	# A real record has no ghost id; it replays from its stored steps instead.
+	var steps: Variant = wr.get("steps")
+	if steps != null and str(steps) != "":
+		game.set_ghost_steps(seed, Replay.decode_steps(str(steps)), str(wr["name"]), float(wr["time"]))
+	else:
 		game.set_ghost_replay(seed, int(wr["ghost_id"]), str(wr["name"]), float(wr["time"]))
 
 
@@ -761,6 +909,35 @@ func _watch_ghost(seed: int, ghost_id: int, name: String, time: float) -> void:
 		_end_watching()
 		_to_menu()
 		return
+	_hud_reset()
+	hint_label.visible = false
+	_show_round_button(false)
+	_show_watch_badge("Watching %s \u00b7 %s" % [name, _fmt_time(time)])
+	game.start()
+
+
+# Watch the world record, whichever kind it is: a baked ghost regenerates from its
+# id, a real one replays from the steps that travelled with it.
+func _watch_wr(seed: int, wr: Dictionary) -> void:
+	var steps: Variant = wr.get("steps")
+	if steps != null and str(steps) != "":
+		_watch_steps(seed, str(steps), str(wr["name"]), float(wr["time"]))
+	else:
+		_watch_ghost(seed, int(wr["ghost_id"]), str(wr["name"]), float(wr["time"]))
+
+
+# Watch a run given as raw button steps.
+func _watch_steps(seed: int, steps: String, name: String, time: float) -> void:
+	watching = {
+		"kind": "steps", "seed": seed, "ghost_id": null, "name": name, "time": time,
+		"steps": steps,
+		"label": "%s's ghost" % name, "tag": "Ghost run",
+		"sub": "%s \u00b7 Track %d \u00b7 %s" % [name, seed, _fmt_time(time)],
+	}
+	_hide_overlays()
+	game.replay_steps = Replay.decode_steps(steps)
+	game.replay_index = 0
+	game.load_track(seed, "replay")
 	_hud_reset()
 	hint_label.visible = false
 	_show_round_button(false)
@@ -814,13 +991,41 @@ func _on_game_change(extra: Dictionary) -> void:
 		finish_time.text = _fmt_time(game.run_time())
 		var best2 := game.run_time() if prev2 == null else minf(float(prev2), game.run_time())
 		finish_sub.text = "best %s" % _fmt_time(best2)
-		var rank := Leaderboard.player_rank(game.seed_num, best2)
+		var rank := Leaderboard.player_rank(game.seed_num, best2, _reals_for(game.seed_num))
 		finish_rank.text = "#%d on Track %d" % [rank, game.seed_num] if rank > 0 else ""
 		btn_watch.visible = Storage.get_replay(game.seed_num) != null
-		btn_finish_wr.visible = Leaderboard.world_record(game.seed_num) != null
+		btn_finish_wr.visible = Leaderboard.world_record(game.seed_num, _reals_for(game.seed_num)) != null
 		_show_only("finish")
 		hint_label.visible = false
 		_show_round_button(false)
+		# Queue the run, then try to send it. Nothing here blocks play: the run is
+		# already saved locally, so a failure just leaves it queued.
+		var seed_done := game.seed_num
+		Api.enqueue(seed_done, Replay.encode_steps(game.steps), _player_name())
+		_submit_queued(seed_done)
+
+
+# Send queued runs, then refresh the finish card and the board against the merged
+# board. The rank shown is the server's, not a local estimate.
+func _submit_queued(seed: int) -> void:
+	await Api.flush()
+	await _load_reals(seed)
+	if overlay != "finish" or game.seed_num != seed:
+		return
+	var best: Variant = Storage.get_best_time(seed)
+	if best == null:
+		return
+	var reals := _reals_for(seed)
+	var listed := false
+	for r in reals:
+		if bool(r["you"]):
+			listed = true
+			break
+	var me: Variant = null if listed else {"name": _player_name(), "time": float(best)}
+	var page := Leaderboard.board_page(seed, 1, me, Leaderboard.PER_PAGE, reals)
+	var rank := int(page["player_rank"])
+	finish_rank.text = "#%d on Track %d" % [rank, seed] if rank > 0 else ""
+	btn_finish_wr.visible = Leaderboard.world_record(seed, reals) != null
 
 
 func _on_tick() -> void:

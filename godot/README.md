@@ -98,6 +98,16 @@ godot --headless --path . --script res://tools/verify_reattach.gd
 
 `tools/verify_board.gd` checks the leaderboard paging and ranking.
 
+`tools/verify_online.gd` checks the online layer's offline-testable parts: the
+board merge (against reference values produced by the JS `boardPage`), the run
+queue, the client id, the account rules that must hold with no session, and the
+net config. The network paths themselves need a server, so they are not covered
+here.
+
+```sh
+godot --headless --path . --script res://tools/verify_online.gd
+```
+
 The physics is bit-for-bit identical to the JS build: both crash after 334 steps
 at `x=657.803120 y=-278.859877 angle=5.652743`, `dead=wall`, `grabbed=2` (the
 Godot numbers differ in the last digit or two, which is float32 vs float64).
@@ -110,13 +120,16 @@ The track geometry matches too (track 1: length 3074.0, finishS 3074.0, clean 10
 | `scripts/cfg.gd` | `js/config.js` — every tuning number |
 | `scripts/util.gd` | `js/util.js` — `angDiff`, and `mulberry32` bit-exact via 32-bit `imul` |
 | `scripts/track.gd` | `js/track.js` — the road |
-| `scripts/car.gd` | `js/car.js` — the one-button car |
+| `scripts/car.gd` | `js/car.js` — the one-button car, plus the reattach pillar |
 | `scripts/tracks.gd` | `js/tracks.js` — the twenty-five ported tracks, plus the reattach showcase tracks 26–28 |
 | `scripts/ghostrun.gd` | `js/ghostrun.js` — a ghost from an integer id |
 | `scripts/replay.gd` | `js/replay.js` — button-step replays |
 | `scripts/storage.gd` | `js/storage.js` — records, best times, replays, history, prefs |
 | `scripts/leaderboard.gd` | `js/leaderboard.js` — paging, ranking, the board |
-| `scripts/account.gd` | `js/account.js` — local accounts |
+| `scripts/net.gd` | new — the HTTP transport (one request at a time) |
+| `scripts/netconfig.gd` | new — the Supabase URL and anon key, and the endpoints |
+| `scripts/api.gd` | `js/api.js` — the run queue and the board client |
+| `scripts/account.gd` | `js/account.js` — Supabase Auth and the `profiles` name |
 | `scripts/render.gd` | `js/render.js` — themes, camera, road band, vector and sprite cars |
 | `scripts/game.gd` | `js/game.js` — fixed 1/120s tick, modes, records, ghosts |
 | `scripts/app.gd` | `js/app.js` — menu, overlays, leaderboard, history, accounts |
