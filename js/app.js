@@ -221,7 +221,11 @@ function onGameChange(g, extra) {
     $('finish-time').textContent = fmtTime(g.time);
     const best = extra.prev === null ? g.time : Math.min(extra.prev, g.time);
     $('finish-sub').textContent = `best ${fmtTime(best)}`;
-    const rank = playerRank(g.seed, best);
+    // Ranked against the real runs on the track, not just the baked ghosts, so the
+    // place matches the board. This run has not uploaded yet, so the board here is
+    // still the others' runs and the rank is this run's own.
+    const rankReals = boardRealsSeed === g.seed ? boardReals : [];
+    const rank = playerRank(g.seed, best, rankReals);
     $('finish-rank').textContent = rank ? `${fmtRank(rank)} on Track ${g.seed}` : '';
     $('btn-watch').hidden = !getReplay(g.seed);
     $('btn-finish-wr').hidden = !worldRecord(g.seed);
@@ -520,7 +524,11 @@ function showLeaderboard(seed) {
   boardSeed = seed;
   if (boardRealsSeed !== seed) { boardReals = []; boardRealsSeed = null; }
   const best = getBestTime(seed);
-  boardPageNo = best == null ? 1 : pageForRank(playerRank(seed, best));
+  // The page the player belongs on is decided from their rank in the merged board,
+  // so the real runs have to be part of the count. Before they have loaded the
+  // page is a first guess and `renderBoard` corrects it once they are in.
+  const reals = boardRealsSeed === seed ? boardReals : [];
+  boardPageNo = best == null ? 1 : pageForRank(playerRank(seed, best, reals));
   renderBoard();
   showOverlay('over-board');
 }

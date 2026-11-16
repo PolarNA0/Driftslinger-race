@@ -76,10 +76,19 @@ export function ghostsBeaten(n, time) {
   return head.length + lo;
 }
 
-/** The player's 1-based rank among the field, or null. */
-export function playerRank(n, time) {
+/**
+ * The player's 1-based rank among the field, or null.
+ *
+ * `reals` are the other real runs on the track. They must be counted: the ghost
+ * field is only the backdrop, and a real run slots into it by time, so ignoring
+ * them ranks a player among the baked ghosts alone and reports a place they do
+ * not hold. This matches `boardPage`, which ranks the same merged board, so the
+ * number here and the row the board draws never disagree.
+ */
+export function playerRank(n, time, reals = []) {
   if (!Number.isFinite(time)) return null;
-  return ghostsBeaten(n, time) + 1;
+  const ahead = reals.filter((r) => Number.isFinite(r?.time) && r.time < time).length;
+  return ghostsBeaten(n, time) + ahead + 1;
 }
 
 /** How many racers the board holds. */

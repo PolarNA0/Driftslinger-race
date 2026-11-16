@@ -419,6 +419,31 @@ console.log('the leaderboard pages and ranks correctly');
   for (let i = 1; i < shown.rows.length; i++) {
     ok(shown.rows[i].time >= shown.rows[i - 1].time, 'player page is not sorted by time');
   }
+
+  // Real runs count toward the rank. Ignoring them ranks the player among the
+  // baked ghosts alone, which reports a place they do not hold: with three real
+  // runs ahead, the same time has to drop three places.
+  const t0 = wr.time + 0.001;
+  const ahead = [
+    { name: 'Cola', time: wr.time - 0.02 },
+    { name: 'Polar', time: wr.time - 0.01 },
+    { name: 'Ash-8', time: wr.time },
+  ];
+  ok(playerRank(1, t0, ahead) === playerRank(1, t0) + ahead.length,
+    'each real run ahead must push the rank down by one');
+  // Exactly one real run ahead, and both it and the player are faster than the whole
+  // ghost field, so the rank is second on that run's account alone.
+  const onlyOne = [{ name: 'Polar', time: wr.time - 0.01 }];
+  ok(playerRank(1, wr.time - 0.001, onlyOne) === 2,
+    'a run behind one real run ranks second, whatever the ghost field says');
+  // A real run behind the player must not affect their rank at all.
+  const behind = [{ name: 'Slow', time: t0 + 5 }];
+  ok(playerRank(1, t0, behind) === playerRank(1, t0),
+    'a real run behind the player must not change the rank');
+  // And the two rankers agree on the same merged board.
+  const merged = boardPage(1, 1, { player: { name: 'Me', time: t0 }, reals: ahead, perPage: PER_PAGE });
+  ok(merged.playerRank === playerRank(1, t0, ahead),
+    `playerRank and boardPage must agree, got ${playerRank(1, t0, ahead)} vs ${merged.playerRank}`);
 }
 
 // --- server: replay verification and the store --------------------------------
