@@ -33,6 +33,10 @@ const CAR_MODELS := [
 	{"kind": "vector", "name": "Graphite", "body": Color8(70, 74, 88), "dark": Color8(30, 32, 40), "glass": Color8(120, 190, 255)},
 	{"kind": "vector", "name": "Coral", "body": Color8(255, 138, 92), "dark": Color8(188, 84, 48), "glass": Color8(46, 24, 20)},
 	{"kind": "sprite", "name": "Roadster", "body": Color8(92, 156, 255), "dark": Color8(46, 96, 186), "glass": Color8(16, 28, 54), "tex": "res://assets/cars/topdown_car.png"},
+	{"kind": "sprite", "name": "Redline", "body": Color8(214, 60, 40), "dark": Color8(120, 28, 20), "glass": Color8(28, 32, 40), "tex": "res://assets/cars/topdown_car_red.png"},
+	{"kind": "sprite", "name": "Viper", "body": Color8(34, 38, 48), "dark": Color8(14, 16, 22), "glass": Color8(120, 190, 255), "tex": "res://assets/cars/topdown_car_viper.png"},
+	{"kind": "sprite", "name": "Cab", "body": Color8(224, 192, 64), "dark": Color8(150, 120, 20), "glass": Color8(30, 34, 44), "tex": "res://assets/cars/topdown_car_taxi.png"},
+	{"kind": "sprite", "name": "Hauler", "body": Color8(140, 150, 170), "dark": Color8(80, 88, 104), "glass": Color8(40, 48, 62), "tex": "res://assets/cars/topdown_car_truck.png"},
 ]
 
 # Reattach pillars read differently from ordinary ones: live (you may still catch

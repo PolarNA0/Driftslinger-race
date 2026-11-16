@@ -1,26 +1,49 @@
-# Sling Drift — Godot port
+# Sling Drift — Godot build
 
-A port of the web remake in `../slingdrift` to Godot 4.5. Same physics, same
-twenty-five tracks, same top-down look, plus three reattach showcase tracks and a
-sprite car.
+**This is the game.** The Godot build is the primary implementation: the web build
+served to players and the Android app both come from here. New work goes here.
+
+It began as a port of the original JavaScript build (`../index.html`, `../js/`,
+`../css/`), which is now legacy. That JS build is kept only because the Supabase
+leaderboard replays uploaded runs through its physics
+(`../tools/sync-physics.mjs`), and because `tools/parity.gd` compares the two
+builds number for number. Do not add features to the JS build.
+
+Same physics, same twenty-five ported tracks, same top-down look, plus three
+reattach showcase tracks and sprite cars.
 
 ## Status
 
-Feature-complete with the web build. Physics, track generation, all twenty-five
-time-attack tracks, rendering, the one-button loop, the full menu shell (mode and
-track pickers, car skins, ghosts), the leaderboard with watchable ghosts, run
-history, and local accounts are all ported. The physics is bit-for-bit identical
-to the JS build and every track finishes near ten seconds in both.
+Feature-complete with the JS build. Physics, track generation, all twenty-five
+ported time-attack tracks, rendering, the one-button loop, the full menu shell
+(mode and track pickers, car skins, ghosts), the leaderboard with watchable
+ghosts, run history, and local accounts are all ported. The physics is
+bit-for-bit identical to the JS build and every track finishes near ten seconds
+in both.
 
-Two additions on top of the port:
+Additions on top of the port:
 
 - **Reattachable pillars.** A normal pillar is spent the moment you let go. A
   reattach pillar stays live if you release partway round its arc, so you can
   fly off, come back, and grab the same pole again. Riding the arc out still
   spends it, which keeps the ordinary clean line working exactly as before.
   Tracks 26–28 showcase it (amber = still catchable, bronze = spent).
-- **A sprite car.** `assets/cars/topdown_car.png` (CC0, see its `CREDITS.md`) is
-  the "Roadster" model in the car picker, drawn alongside the vector cars.
+- **Sprite cars.** Free CC0 top-down cars (see `assets/cars/CREDITS.md`) sit
+  alongside the eight vector colours in the car picker.
+
+### Not yet ported from the JS build
+
+The JS client has online features the Godot build does not have yet. Porting them
+is the work that has to happen before the JS client can be deleted:
+
+- **Online leaderboard upload.** `js/api.js` uploads runs to Supabase and reads
+  the shared board. The Godot board is local + baked (`ghostdata.gd`), so ranks
+  and ghosts are real but not shared between players.
+- **Accounts.** `js/account.js` signs in against Supabase. `account.gd` is
+  device-local only (username + salted SHA-256 on this device).
+- **Discord record webhook.** `js/discord.js` posts records from the browser.
+- **Replay of another player's uploaded run.** `js/replay.js` + the `steps`
+  field on the server; the Godot ghost path is id-based only.
 
 ## Export
 

@@ -5,7 +5,53 @@ round a pillar, let go to fly straight to the next one. Leave the road and the
 run ends. Two modes: **speedrun** (a finite ~10s track, scored by time) and
 **endless** (an infinite road, scored by distance in metres).
 
+## Two builds, and which one is the game
+
+**The Godot build (`godot/`) is the game.** It is the future of the project: the
+web build served to players and the Android app both come from it. New work goes
+there.
+
+The JavaScript build (`index.html`, `css/`, `js/`) was the original
+implementation and is now **legacy**. It is kept for exactly two reasons:
+
+1. **It is the leaderboard's verification engine.** The Supabase Edge Function
+   replays every uploaded run through the JS physics, vendored by
+   `tools/sync-physics.mjs` (see "The shared leaderboard runs on Supabase"). The
+   rule that a client sends button steps and never a time depends on this. Do not
+   delete `js/{config,util,track,car,tracks}.js` while the online leaderboard
+   exists.
+2. **It is the reference the port is verified against.** `godot/tools/parity.gd`
+   compares the two builds number for number, so the JS physics is what tells us
+   the Godot physics is right.
+
+The rest of `js/` (`app.js`, `render.js`, `account.js`, `api.js`, `discord.js`,
+the service worker, `index.html`, `css/`) is the legacy *client* and is on its way
+out. Do not add features there.
+
 ## Layout
+
+### Godot build (primary)
+
+- `godot/scripts/cfg.gd` — all tunables (`CFG`), port of `js/config.js`. Start
+  here before changing feel.
+- `godot/scripts/track.gd` — the road: a staircase of straight legs joined by
+  quarter-turn circular-arc corners, sampled into `road[]` (points) and `rs[]`
+  (arc-length per point).
+- `godot/scripts/tracks.gd` — the twenty-eight tracks: the twenty-five ported
+  time-attack tracks, plus the reattach showcase tracks 26–28.
+- `godot/scripts/car.gd` — the physics. `step(dt, held)` is pure and testable.
+- `godot/scripts/game.gd` — fixed 1/120s tick, modes, records, ghosts.
+- `godot/scripts/render.gd` — top-down orthographic view, road themes, and both
+  the vector cars and the sprite cars.
+- `godot/scripts/app.gd` — the shell: menu, overlays, leaderboard, history,
+  accounts, car picker, the round restart button.
+- `godot/scripts/{ghostrun,ghostdata,replay,storage,leaderboard,account}.gd` —
+  the ported support modules.
+- `godot/scenes/main.tscn`, `godot/project.godot` — scene and project settings.
+- `godot/tools/` — headless verifiers (`parity.gd`, `verify_tracks.gd`,
+  `verify_reattach.gd`, `verify_board.gd`). See `godot/README.md`.
+
+### JS build (legacy)
 
 - `index.html` — single page, `#view` canvas, HUD and overlays.
 - `css/style.css` — HUD, menu and overlay styling.
@@ -49,6 +95,15 @@ run ends. Two modes: **speedrun** (a finite ~10s track, scored by time) and
 ## Commands
 
 ```sh
+# Godot build (the game)
+godot --path godot                                        # play
+godot --headless --path godot --import                    # first-time import
+godot --headless --path godot --script res://tools/parity.gd          # parity vs JS
+godot --headless --path godot --script res://tools/verify_tracks.gd   # all tracks finish
+godot --headless --path godot --script res://tools/verify_reattach.gd # reattach pillar
+godot --headless --path godot --script res://tools/verify_board.gd    # board paging
+
+# Legacy JS build (kept for leaderboard verification and parity reference)
 node tools/test.mjs            # 561 headless core tests (must stay green)
 node tools/bake-ghosts.mjs     # regenerate js/ghostdata.js (slow, ~15 min)
 node tools/serve.mjs 12000     # static server, POST /__shot writes /tmp/shot.png
@@ -78,6 +133,23 @@ loudly.
 
 ## Packaging
 
+**The Godot build ships as both the web game and the Android app.** `godot/` has
+its own export presets for Web and Android; see `godot/README.md` for the exact
+commands and the toolchain the Android export needs.
+
+- **Web.** `.github/workflows/deploy-godot-web.yml` exports the Web preset and
+  publishes it to Cloudflare Workers on any push that touches `godot/`, serving
+  `https://driftslinger-race.exopolar1.workers.dev/`. The worker config is
+  `godot/wrangler.toml` (static assets, no worker script) and it needs the
+  `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets.
+- **Android.** `.github/workflows/build-godot-android.yml` builds a debug-signed
+  APK as a CI artefact.
+
+### Legacy: the JavaScript app
+
+The paragraphs below describe the old JS build and its WebView APK. They are kept
+only until that client is removed; the Godot build supersedes all of it.
+
 - `download.html` is the install landing page (browser play + APK download).
 - `slingdrift.apk` at the repo root is a copy of `android/build/slingdrift.apk`;
   the server serves it as `application/vnd.android.package-archive`.
@@ -94,15 +166,6 @@ loudly.
   ghosts, no skins) even though the served browser build is current. Re-run
   `android/build.sh`, copy the result over `slingdrift.apk`, and bump
   `versionCode`/`versionName` so devices update instead of ignoring the install.
-- The Godot port lives in `godot/`. It is a native build (GDScript + Godot
-  4.5), not a WebView shell, and it has its own export presets for Web and
-  Android. See `godot/README.md`.
-- **The Godot port deploys itself.** `.github/workflows/deploy-godot-web.yml`
-  exports the Web preset and publishes it to Cloudflare Workers on any push that
-  touches `godot/`, serving `https://driftslinger-race.exopolar1.workers.dev/`.
-  The worker is `godot/wrangler.toml` (static assets, no worker script). It needs
-  the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets.
-  `.github/workflows/build-godot-android.yml` builds the APK as a CI artefact.
 
 ## The one rule that matters
 
@@ -127,7 +190,11 @@ right**. This is not cosmetic:
 - Alternating directions is what keeps the road from folding. Two 90-degree
   corners the same way would point the road back the way it came and the ribbon
   would cross itself. Alternating keeps each leg perpendicular to the last.
-- A 180 would be two poles in one visual turn, so it is deliberately not used.
+- A 180 would be two poles in one visual turn, so the *staircase* builder never
+  emits one. The advanced tracks (21–28) opt out of the staircase and are built
+  from an explicit op list, which is what lets a hairpin (180) or a loop (270)
+  exist at all; those corners are single arcs round a single pivot, so they still
+  read as one pole. See `js/tracks.js` (`ADVANCED`) and `godot/scripts/tracks.gd`.
 
 Because the fillets of a quarter turn are exactly `driftRadius` long, two
 neighbouring fillets eat `2*driftRadius` of each `segLen`. `segLen` must clear
