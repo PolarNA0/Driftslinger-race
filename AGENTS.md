@@ -26,7 +26,9 @@ implementation and is now **legacy**. It is kept for exactly two reasons:
 
 The rest of `js/` (`app.js`, `render.js`, `account.js`, `api.js`, `discord.js`,
 the service worker, `index.html`, `css/`) is the legacy *client* and is on its way
-out. Do not add features there.
+out. Do not add features there. The Godot build now has its own port of the online
+layer (`godot/scripts/{net,netconfig,api,account}.gd`, see "The online layer"),
+so the legacy client has no job left that the Godot build does not do.
 
 ## Layout
 
@@ -48,9 +50,12 @@ out. Do not add features there.
   accounts, car picker, the round restart button.
 - `godot/scripts/{ghostrun,ghostdata,replay,storage,leaderboard,account}.gd` —
   the ported support modules.
+- `godot/scripts/{net,netconfig,api}.gd` — the online layer's transport, config
+  and leaderboard client (see "The online layer").
 - `godot/scenes/main.tscn`, `godot/project.godot` — scene and project settings.
 - `godot/tools/` — headless verifiers (`parity.gd`, `verify_tracks.gd`,
-  `verify_reattach.gd`, `verify_board.gd`). See `godot/README.md`.
+  `verify_reattach.gd`, `verify_board.gd`, `verify_online.gd`). See
+  `godot/README.md`.
 
 ### JS build (legacy)
 
@@ -104,9 +109,10 @@ godot --headless --path godot --script res://tools/parity.gd          # parity v
 godot --headless --path godot --script res://tools/verify_tracks.gd   # all tracks finish
 godot --headless --path godot --script res://tools/verify_reattach.gd # reattach pillar
 godot --headless --path godot --script res://tools/verify_board.gd    # board paging
+godot --headless --path godot --script res://tools/verify_online.gd   # online layer (offline paths)
 
 # Legacy JS build (kept for leaderboard verification and parity reference)
-node tools/test.mjs            # 561 headless core tests (must stay green)
+node tools/test.mjs            # 759 headless core tests (must stay green)
 node tools/bake-ghosts.mjs     # regenerate js/ghostdata.js (slow, ~15 min)
 node tools/serve.mjs 12000     # static server, POST /__shot writes /tmp/shot.png
 SDK=/workspace/android-sdk JDK=/workspace/jdk ./android/build.sh   # signed APK
@@ -462,8 +468,65 @@ It exists to keep the Discord webhook field out of a normal player's way. Do not
 treat "admin" as a security boundary - if anything that matters ever hangs off it,
 gate it on the server instead.
 
-The record tracker posts straight from the browser to the Discord webhook
-(`js/discord.js`). Discord's webhook endpoint reflects the Origin and allows POST,
-so no Edge Function is needed. The webhook URL is the credential: whoever holds it
-can post to the channel, so it lives only in the admin's own settings and is only
-ever sent to discord.com. `validWebhook` pins the host and path for that reason.
+The record tracker posts from the server, not the browser. The `run` Edge
+Function (`supabase/functions/run/index.ts`) reads the webhook and the two message
+templates from `tracker_config` and announces an improvement itself, so every
+player's run is announced rather than only the admin's. The admin sets the webhook
+from `js/app.js`, which writes it to `tracker_config` with the admin's token; RLS
+lets a signed-in player write `webhook_url` but not read it back, so the credential
+goes up and never comes down. `validWebhook` pins the host and path, and the
+`run` function only ever posts to discord.com.
+
+`js/discord.js` remains for the admin's "Send test" button, which posts straight
+from the browser so the admin can check the webhook works without a round trip.
+
+## The online layer (Godot)
+
+The Godot build talks to the same Supabase project the legacy client does. The
+port lives in four files, and the split is deliberate:
+
+- `godot/scripts/net.gd` — the transport. One shared `HTTPRequest`, one request in
+  flight at a time, 8s timeout, every call resolving to
+  `{ok, status, body, error}` so no caller has to catch anything.
+- `godot/scripts/netconfig.gd` — the project URL and public anon key, plus the
+  headers and endpoint helpers.
+- `godot/scripts/api.gd` — the run queue and the board client (port of `js/api.js`).
+- `godot/scripts/account.gd` — Supabase Auth (port of `js/account.js`).
+
+Four things are load-bearing and easy to break:
+
+- **The web export is built without threads** (`variant/thread_support=false` in
+  `export_presets.cfg`, which makes Godot demand `web_nothreads_release.zip`).
+  `HTTPRequest.use_threads` must stay `false`, and every call has to go through a
+  node that is *in the tree* - a request from outside the tree fails with
+  `ERR_UNCONFIGURED`. `Net.shared()` is created unparented and `_send` attaches it
+  once the tree is up, because a caller can arrive from `_init` before the tree
+  exists.
+- **Nothing online blocks play.** A finished run is saved locally first and the
+  upload is best-effort; if it cannot go out it stays in the queue
+  (`user://slingdrift.queue.v2.json`, capped at 50) and is retried on the next
+  flush. A guest's run queues too and is sent after they sign in.
+- **The client still never sends a time.** It sends the button steps and the server
+  replays them, exactly as the legacy client does. Do not add a time field.
+- **The board is one board, not two.** `Leaderboard.board_page` merges the server's
+  real runs into the baked ghost field by time, so a real run displaces the ghosts
+  it beats and its rank is its merged position. `verify_online.gd` checks that
+  merge against reference values produced by the JS `boardPage`, so the two builds
+  agree number for number.
+
+A real submitted run has no ghost id, so it cannot be re-simulated from an id the
+way a baked ghost can. It carries its own `steps` instead, and `Game.set_ghost_steps`
+races it. Anything that watches a board row has to dispatch on that: see
+`_watch_wr`, `_watch_steps` and the board row button in `app.gd`.
+
+The account UI asks for an email and a password now (Supabase Auth owns the
+credentials), not a username and a password. The username is a separate, public
+`profiles` row: register collects it, and a sign-in that lands on an account with
+no profile yet asks for one.
+
+**Tracks 26-28 cannot be uploaded yet.** The server validates `1..25`
+(`supabase/functions/board/index.ts`, and `TRACK_COUNT` in the vendored physics),
+while the Godot build has 28 tracks, and the reattach physics exists only in
+`godot/scripts/car.gd`. A reattach run is therefore rejected with a 422 and dropped
+from the queue. Teaching the server the reattach physics is the work that unblocks
+it; until then those three tracks are local-only.

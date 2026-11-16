@@ -105,6 +105,24 @@ func set_ghost_replay(p_seed: int, ghost_id: int, name: String, time: float) -> 
 	return true
 
 
+# Race a ghost whose steps came from the server: a real submitted run, which has
+# no ghost id to regenerate from, so its own button sequence travels with it.
+func set_ghost_steps(p_seed: int, steps: Array, name: String, time: float) -> bool:
+	if steps.is_empty():
+		return false
+	var gt := Track.new(p_seed, Tracks.track_opts(p_seed))
+	var gc := Car.new()
+	gc.reset(gt)
+	ghost_car = gc
+	ghost_steps = steps
+	ghost_index = 0
+	ghost_name = name
+	ghost_time = time
+	renderer.ghost_car = gc
+	renderer.ghost_visible = true
+	return true
+
+
 func set_ghost_self(p_seed: int) -> bool:
 	var rep = Storage.get_replay(p_seed)
 	if rep == null:

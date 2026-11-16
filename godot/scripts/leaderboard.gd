@@ -71,10 +71,20 @@ static func ghosts_beaten(n: int, time: float) -> int:
 
 
 # The player's 1-based rank among the field, or 0 when there is no time.
-static func player_rank(n: int, time: float) -> int:
+#
+# `reals` are the other real runs on the track. They have to be counted: the ghost
+# field is only the backdrop, and a real run slots into it by time, so counting
+# ghosts alone reports a place the player does not hold. This is the same merged
+# board `board_page` draws, so the two never disagree.
+static func player_rank(n: int, time: float, reals: Array = []) -> int:
 	if is_nan(time) or is_inf(time):
 		return 0
-	return ghosts_beaten(n, time) + 1
+	var ahead := 0
+	for r in reals:
+		var rt := float((r as Dictionary).get("time", INF))
+		if not (is_nan(rt) or is_inf(rt)) and rt < time:
+			ahead += 1
+	return ghosts_beaten(n, time) + ahead + 1
 
 
 static func ghost_count() -> int:
@@ -85,12 +95,29 @@ static func page_for_rank(rank: int, per_page: int = PER_PAGE) -> int:
 	return maxi(1, int(ceil(float(rank) / float(per_page))))
 
 
-# The world record: the fastest real run, and the way to watch it.
-static func world_record(n: int) -> Variant:
+# The world record: the fastest real run if there is one, else the baked head.
+#
+# A real submitted run beats a baked ghost, so the board's record follows the
+# players as soon as one goes faster. The record can then be watched from its
+# stored steps rather than a ghost id, which is why it carries `steps`.
+static func world_record(n: int, reals: Array = []) -> Variant:
+	var sorted := reals.duplicate()
+	sorted.sort_custom(func(a, b): return float(a["time"]) < float(b["time"]))
+	if sorted.size() > 0:
+		var r: Dictionary = sorted[0]
+		var steps: Variant = r.get("steps")
+		return {
+			"rank": 1, "name": str(r["name"]), "time": float(r["time"]),
+			"ghost_id": -1, "steps": steps, "real": true,
+			"watchable": steps != null and str(steps) != "",
+		}
 	var head := REAL(n)
 	if head.is_empty():
 		return null
-	return {"rank": 1, "name": head[0][2], "time": head[0][0], "ghost_id": head[0][1], "watchable": true}
+	return {
+		"rank": 1, "name": head[0][2], "time": head[0][0],
+		"ghost_id": head[0][1], "steps": null, "real": false, "watchable": true,
+	}
 
 
 # The ghost at ghost-index `gi` (0-based, head first then generated).
@@ -103,32 +130,112 @@ static func ghost_at(n: int, gi: int) -> Dictionary:
 	return {"name": gen_name(n, i), "time": gen_time(n, i), "ghost_id": -1, "watchable": false}
 
 
-# One page of the board. `player` is {name, time} or null.
-static func board_page(n: int, page: int, player: Variant = null, per_page: int = PER_PAGE) -> Dictionary:
-	var total := FIELD + (1 if player != null else 0)
-	var pages := maxi(1, int(ceil(float(total) / float(per_page))))
-	var p := clampi(page, 1, pages)
-	var player_pos := -1
+# One page of the board, with real runs merged into the ghost field.
+#
+# There is one board, not two. The ghost field is the backdrop and a real
+# submitted run is slotted into it by time, so a fast real run lands high and a
+# slow one lands deep - both against the same field, and both ranked honestly.
+# A real row carries `real: true`, which is what the UI turns into the green dot;
+# the ghost rows around it are untouched.
+#
+# `reals` are the real runs on this track as {name, time, steps, you} in any
+# order; they are sorted here. `player` is {name, time} for the signed-in
+# account, used only when the server has not listed them, so their rank and page
+# are still right.
+#
+# This is a merge of two sorted lists, and the merge has to be exact: a real run
+# displaces the ghosts it beats, so a run slower than the whole field lands after
+# all of them rather than partway up it. Ranks are merged positions, so a rank on
+# the board is the rank the player sees. A real run tying a ghost sorts after it.
+static func board_page(n: int, page: int, player: Variant = null, per_page: int = PER_PAGE, reals: Array = []) -> Dictionary:
+	# The signed-in player is just another real run, so a local best that has not
+	# uploaded yet merges by time like everything else rather than being special-cased.
+	var all := []
+	for r in reals:
+		all.append((r as Dictionary).duplicate())
 	if player != null:
-		player_pos = ghosts_beaten(n, float(player["time"]))
+		var listed := false
+		for r in all:
+			if bool(r.get("you", false)):
+				listed = true
+				break
+		if not listed:
+			var p: Dictionary = (player as Dictionary).duplicate()
+			p["you"] = true
+			p["steps"] = null
+			all.append(p)
+	all.sort_custom(func(a, b): return float(a["time"]) < float(b["time"]))
 
-	var start := (p - 1) * per_page
+	var total := FIELD + all.size()
+	var pages := maxi(1, int(ceil(float(total) / float(per_page))))
+	var p2 := clampi(page, 1, pages)
+
+	# Ghosts each real run beats or ties, in real-run order. Non-decreasing because
+	# `all` is sorted by time, and left unadjusted: two runs on the same time
+	# simply take the two adjacent slots. A real run ties *after* the ghosts it
+	# matches, so this is the same count `player_rank` uses and the two never
+	# disagree.
+	var beaten := []
+	for r in all:
+		beaten.append(ghosts_beaten(n, float(r["time"])))
+
+	# Real run k sits after the ghosts it beat *and* the k real runs already placed.
+	var real_at := {}
+	for k in range(all.size()):
+		real_at[int(beaten[k]) + k] = all[k]
+
+	var my_index := -1
+	for k in range(all.size()):
+		if bool(all[k].get("you", false)):
+			my_index = k
+			break
+	var player_rank_here := 0 if my_index < 0 else int(beaten[my_index]) + my_index + 1
+
+	var start := (p2 - 1) * per_page
 	var out := []
 	var pos := start
 	while pos < mini(start + per_page, total):
-		if player != null and pos == player_pos:
+		if real_at.has(pos):
+			var r: Dictionary = real_at[pos]
+			var steps: Variant = r.get("steps")
 			out.append({
-				"rank": pos + 1, "name": player["name"], "time": player["time"],
-				"you": true, "ghost_id": -1, "watchable": false,
+				"rank": pos + 1, "name": str(r["name"]), "time": float(r["time"]),
+				"real": true, "you": bool(r.get("you", false)),
+				"steps": steps, "ghost_id": -1,
+				"watchable": steps != null and str(steps) != "",
 			})
-		else:
-			var gi := pos - 1 if (player != null and pos > player_pos) else pos
-			var row := ghost_at(n, gi)
-			row["rank"] = pos + 1
-			row["you"] = false
-			out.append(row)
+			pos += 1
+			continue
+		# Ghost index: gi + pushedBy(gi) == pos, and that is strictly increasing in
+		# gi, so it inverts with a binary search.
+		var lo := 0
+		var hi := FIELD
+		while lo < hi:
+			var m := (lo + hi) >> 1
+			if m + _pushed_by(beaten, m) < pos:
+				lo = m + 1
+			else:
+				hi = m
+		var row := ghost_at(n, lo)
+		row["rank"] = pos + 1
+		row["you"] = false
+		out.append(row)
 		pos += 1
+
 	return {
-		"rows": out, "page": p, "pages": pages, "total": total,
-		"player_rank": player_pos + 1 if player != null else 0,
+		"rows": out, "page": p2, "pages": pages, "total": total,
+		"player_rank": player_rank_here, "real_count": all.size(),
 	}
+
+
+# How many real runs were inserted at or before ghost index `gi`.
+static func _pushed_by(beaten: Array, gi: int) -> int:
+	var lo := 0
+	var hi := beaten.size()
+	while lo < hi:
+		var m := (lo + hi) >> 1
+		if int(beaten[m]) <= gi:
+			lo = m + 1
+		else:
+			hi = m
+	return lo
