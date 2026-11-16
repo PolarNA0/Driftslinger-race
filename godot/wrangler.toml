@@ -1,14 +1,24 @@
 # Cloudflare Workers config for the Godot web build.
 #
 # `wrangler deploy` (run from this directory, after exporting the Web preset to
-# build/web) uploads the static bundle and serves it at
+# build/web and gzipping the wasm - see the deploy workflow) uploads the static
+# bundle and serves it at
 #   https://driftslinger-race.<your-account-subdomain>.workers.dev/
 # which is the `driftslinger-race.exopolar1.workers.dev` address for this project.
 #
-# The Godot web export is a plain static site (index.html plus .js/.wasm/.pck),
-# so it needs no worker script - just the asset binding below.
+# The Godot web export is a plain static site (index.html plus .js/.wasm/.pck).
+# It needs a Worker script only for one reason: Cloudflare caps a static asset at
+# 25 MiB and index.wasm is ~36 MiB. worker.js serves that one file from the
+# gzipped copy the build stores, so the upload stays legal, and redirects
+# /android to the Android APK. Every other request is answered straight from the
+# assets binding.
 name = "driftslinger-race"
+main = "worker.js"
 compatibility_date = "2025-06-01"
 
 [assets]
 directory = "./build/web"
+binding = "ASSETS"
+# The wasm has to reach worker.js to be decompressed, and /android is not a real
+# asset, so route both there rather than letting the asset layer answer them.
+run_worker_first = ["/index.wasm", "/android"]

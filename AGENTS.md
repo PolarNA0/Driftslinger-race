@@ -147,11 +147,39 @@ commands and the toolchain the Android export needs.
 
 - **Web.** `.github/workflows/deploy-godot-web.yml` exports the Web preset and
   publishes it to Cloudflare Workers on any push that touches `godot/`, serving
-  `https://driftslinger-race.exopolar1.workers.dev/`. The worker config is
-  `godot/wrangler.toml` (static assets, no worker script) and it needs the
+  `https://driftslinger-race.exopolar1.workers.dev/`. It needs the
   `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets.
 - **Android.** `.github/workflows/build-godot-android.yml` builds a debug-signed
-  APK as a CI artefact.
+  APK and publishes it to a rolling `android-latest` GitHub release, so
+  `releases/download/android-latest/drift-slinger.apk` is always the newest
+  build. The web worker redirects `/android` there. It needs no extra secrets
+  (it uses the default `GITHUB_TOKEN` with `contents: write`).
+
+### The wasm is served gzipped to fit Cloudflare's 25 MiB asset cap
+
+A static asset on Cloudflare Workers may be at most 25 MiB, and the Godot web
+export's `index.wasm` is ~36 MiB, so deploying the export as-is is rejected with
+"Asset too large" and the whole deploy fails. The build therefore gzips the wasm
+to `index.wasm.gz` (~9 MiB) and deletes the raw file before `wrangler deploy`.
+
+`godot/worker.js` puts the real module back. For `/index.wasm` it fetches
+`index.wasm.gz` through the assets binding and streams it through a
+`DecompressionStream`, so the browser receives valid wasm at the path Godot asks
+for, with `Content-Type: application/wasm`. Every other request is passed
+straight to the assets binding.
+
+Two things there are load-bearing:
+
+- **Do not set `Content-Encoding: gzip` on the response.** The stored body is
+  already gzip; adding the header encodes it a second time and the browser hands
+  Godot a gzip blob it cannot compile. Decompressing in the worker sidesteps the
+  header entirely.
+- **`run_worker_first` must list `/index.wasm` and `/android`.** Without it the
+  asset layer answers those paths first: `/index.wasm` would 404 (only the `.gz`
+  exists) and `/android` would fall through to a not-found page.
+
+`wrangler.toml` also carries `main = "worker.js"` and `binding = "ASSETS"`; the
+binding is what gives the worker `env.ASSETS.fetch`.
 
 ### Legacy: the JavaScript app
 

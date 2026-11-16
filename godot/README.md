@@ -47,8 +47,7 @@ is the work that has to happen before the JS client can be deleted:
 
 ## Export
 
-Both presets ship in `export_presets.cfg`: **Web** and **Android**. The web build
-deploys to Cloudflare Pages.
+Both presets ship in `export_presets.cfg`: **Web** and **Android**.
 
 ```sh
 # Web (static site in build/web)
@@ -57,6 +56,23 @@ godot --headless --path . --export-release "Web" build/web/index.html
 # Android (signed debug APK)
 godot --headless --path . --export-debug "Android" build/android/drift-slinger.apk
 ```
+
+The web build deploys to Cloudflare Workers
+(`https://driftslinger-race.exopolar1.workers.dev/`). Cloudflare caps a static
+asset at 25 MiB and the exported `index.wasm` is ~36 MiB, so the deploy gzips it
+to `index.wasm.gz` and deletes the raw file; `worker.js` serves the original
+bytes back at `/index.wasm` (and redirects `/android` to the APK release). See
+the "wasm is served gzipped" section in `../AGENTS.md` before changing either
+file. To deploy by hand, from this directory after the export:
+
+```sh
+gzip -9 -c build/web/index.wasm > build/web/index.wasm.gz && rm build/web/index.wasm
+wrangler deploy
+```
+
+The Android build is published to a rolling `android-latest` GitHub release by
+`.github/workflows/build-godot-android.yml`, so
+`releases/download/android-latest/drift-slinger.apk` is always the newest build.
 
 The Android export needs the Godot 4.5 export templates, a JDK 17, and the
 Android SDK (platform-tools + build-tools + platform 35), wired into the editor

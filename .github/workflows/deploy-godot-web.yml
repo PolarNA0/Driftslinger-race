@@ -56,6 +56,18 @@ jobs:
           mkdir -p build/web
           godot --headless --path . --export-release "Web" build/web/index.html
 
+      # Cloudflare caps a static asset at 25 MiB and the exported index.wasm is
+      # ~36 MiB, so the deploy is rejected unless the wasm is stored compressed.
+      # gzip it to index.wasm.gz and drop the raw file; worker.js serves the
+      # original bytes back at /index.wasm (see godot/worker.js).
+      - name: Compress the wasm under Cloudflare's 25 MiB asset limit
+        working-directory: godot
+        run: |
+          set -euo pipefail
+          gzip -9 -c build/web/index.wasm > build/web/index.wasm.gz
+          rm build/web/index.wasm
+          ls -la build/web
+
       # Publish build/web with wrangler. Wrangler reads godot/wrangler.toml, which
       # names the worker `driftslinger-race` and points it at the export output.
       # Pin wrangler 4: the static-assets binding in wrangler.toml is a v4 feature,
