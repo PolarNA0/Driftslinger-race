@@ -626,5 +626,58 @@ console.log('settings: colours round-trip, and malformed values are repaired');
   ok(s.webhook === '', 'and there is no webhook by default');
 }
 
+console.log('account: a token refresh keeps the name, so the PBs stay visible');
+{
+  // Records are keyed by the signed-in username. A refresh hands back a session
+  // with no username on it, and the old code stored that verbatim, so the next
+  // refresh resolved the account to null and moved every best time to the guest
+  // bucket. This walks the real refresh path and checks the name survives.
+  const store = new Map();
+  const realLS = globalThis.localStorage;
+  const realFetch = globalThis.fetch;
+  globalThis.localStorage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: (k) => store.delete(k),
+    clear: () => store.clear(),
+  };
+  globalThis.document = { querySelector: () => null };
+  globalThis.window = { SLING_SUPABASE_URL: 'https://x.supabase.co', SLING_SUPABASE_ANON_KEY: 'k' };
+  globalThis.fetch = async (url) => (
+    String(url).includes('grant_type=refresh_token')
+      ? { ok: true, json: async () => ({
+          access_token: 't2', refresh_token: 'r2', expires_in: 3600,
+          user: { id: 'u1', email: 'p@example.com' },        // no username, as the real service returns
+        }) }
+      : { ok: false, json: async () => ({}) }
+  );
+
+  const A = await import('../js/account.js');
+  const S = await import('../js/storage.js');
+
+  localStorage.setItem('slingdrift.session.v2', JSON.stringify({
+    access_token: 't1', refresh_token: 'r1',
+    expires_at: Math.floor(Date.now() / 1000) + 5,           // inside the refresh window
+    user: { id: 'u1', email: 'p@example.com' }, username: 'Polar',
+  }));
+  S.saveBestTime(1, 10.125);
+  ok(A.currentAccount() === 'Polar', 'the signed-in name should read back');
+  ok(S.getBestTime(1) === 10.125, 'and the PB should be under that name');
+
+  await A.authToken();                                       // the real refresh path
+  ok(A.currentAccount() === 'Polar', 'a token refresh must not drop the name');
+  ok(S.getBestTime(1) === 10.125, 'so the PB is still the player\'s after a refresh');
+
+  // A session that arrives nameless anyway still resolves from the id -> name map.
+  const s = JSON.parse(localStorage.getItem('slingdrift.session.v2'));
+  delete s.username;
+  localStorage.setItem('slingdrift.session.v2', JSON.stringify(s));
+  ok(A.currentAccount() === 'Polar', 'a nameless session should still resolve from the remembered id');
+  ok(S.getBestTime(1) === 10.125, 'and still find the PB');
+
+  globalThis.localStorage = realLS;
+  globalThis.fetch = realFetch;
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

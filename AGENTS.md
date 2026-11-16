@@ -239,9 +239,20 @@ length and a small release error accumulates into a wall hit by the far end.
   track and the clock with the player, so the two are directly comparable.
 - **History**: every finish is appended to `storage.addRun`, namespaced per
   account. The History overlay lists them newest first and flags personal bests.
-- `js/account.js` is device-local: username + password, salted SHA-256, never
-  plain. `js/storage.js` namespaces records/times/replays per account (`guest`
-  when signed out). Preferences stay global.
+- `js/account.js` talks to Supabase Auth; the session (tokens, expiry, the
+  public name) lives in `localStorage`. `js/storage.js` namespaces
+  records/times/replays per account (`guest` when signed out). Preferences stay
+  global.
+- **Records are keyed by the username, so a session that loses its name reads the
+  guest bucket.** A Supabase token refresh returns a session with *no* username on
+  it; storing that verbatim resolved the account to `null` and every PB vanished
+  until the next sign-in. The name is now carried across a refresh, remembered by
+  user id (`slingdrift.idnames.v1`) as a fallback, and healed at boot
+  (`resolveAccount`). If you ever key records by something else, key them by user
+  id, not by a name the server may not resend.
+- Guest PBs do **not** migrate into an account on sign-in: the `guest` bucket and
+  the account bucket are separate. Guest runs do still queue and upload
+  (`js/api.js`), but the local best time stays under `guest`.
 - The run clock is `Car.time` (the simulated time). Do not add a second clock:
   the HUD, the saved best and a ghost's time must all be the same number, or a
   run and a ghost of that run disagree by a step (8ms) - enough to change a rank.

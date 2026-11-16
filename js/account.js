@@ -43,9 +43,34 @@ function readSession() {
 }
 function writeSession(s) {
   try {
-    if (s) localStorage.setItem(SESSION_KEY, JSON.stringify(s));
-    else localStorage.removeItem(SESSION_KEY);
+    if (s) {
+      localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+      rememberId(s.user && s.user.id, s.username);
+    } else localStorage.removeItem(SESSION_KEY);
   } catch { /* private mode: the player stays signed out for this visit */ }
+}
+
+// --- name by user id ---------------------------------------------------------
+// The session is the source of truth for the signed-in name, but a name can go
+// missing from it: a token refresh returns a session with no username on it. The
+// name is what the per-account records are keyed by, so losing it silently moves
+// every best time to the guest bucket. Remembering the id -> name pair means the
+// account still resolves even if a session arrives without it.
+const IDNAMES_KEY = 'slingdrift.idnames.v1';
+
+function rememberId(userId, name) {
+  if (!userId || !name) return;
+  try {
+    const all = JSON.parse(localStorage.getItem(IDNAMES_KEY)) || {};
+    all[userId] = name;
+    localStorage.setItem(IDNAMES_KEY, JSON.stringify(all));
+  } catch { /* not persisted */ }
+}
+function recallId(userId) {
+  if (!userId) return null;
+  try {
+    return (JSON.parse(localStorage.getItem(IDNAMES_KEY)) || {})[userId] || null;
+  } catch { return null; }
 }
 
 const api = (path) => `${supabaseUrl()}${path}`;
@@ -56,11 +81,18 @@ const authHeaders = (token) => ({
 });
 
 /** Turn a session response from the auth service into what we store. */
-const toSession = (d) => ({
+const toSession = (d, prev = null) => ({
   access_token: d.access_token,
   refresh_token: d.refresh_token,
   expires_at: d.expires_at || Math.floor(Date.now() / 1000) + (d.expires_in || 3600),
   user: { id: d.user.id, email: d.user.email },
+  // A token refresh returns a session with no username on it. Carry over the one
+  // we already had, but only for the same user. Records are keyed by name, so a
+  // session that loses its name resolves the account to null and silently moves
+  // every best time to the guest bucket.
+  ...(prev && prev.username && prev.user && prev.user.id === d.user.id
+    ? { username: prev.username }
+    : {}),
 });
 
 /** Trade the refresh token for a new access token, or null if it will not. */
@@ -72,7 +104,7 @@ async function refreshSession(s) {
       body: JSON.stringify({ refresh_token: s.refresh_token }),
     });
     if (!res.ok) { writeSession(null); return null; }
-    const next = toSession(await res.json());
+    const next = toSession(await res.json(), s);
     writeSession(next);
     return next;
   } catch {
@@ -101,7 +133,11 @@ export async function authToken() {
 /** The signed-in player's public name, or null. */
 export function currentAccount() {
   const s = readSession();
-  return (s && s.username) || null;
+  if (!s) return null;
+  // Prefer the name on the session; fall back to the one remembered for this
+  // user id. A refresh can hand back a session without the name, and the records
+  // are keyed by it, so resolving it from the id keeps the account's PBs visible.
+  return s.username || recallId(s.user && s.user.id) || null;
 }
 
 /** The signed-in player's email, or null. */
@@ -110,13 +146,46 @@ export function currentEmail() {
   return (s && s.user && s.user.email) || null;
 }
 
+/**
+ * Heal a session that is missing its username, and report the name.
+ *
+ * A session can arrive without a name: token refreshes used to drop it, and an
+ * install that predates the id -> name map has no fallback. Records are keyed by
+ * the name, so a nameless session shows the guest's best times instead of the
+ * player's. Ask the server for the name and write it back.
+ *
+ * Returns the resolved name, or null if there is no session or the server cannot
+ * be reached. Never throws: boot must not depend on the network.
+ */
+export async function resolveAccount() {
+  const s = readSession();
+  if (!s) return null;
+  const known = s.username || recallId(s.user && s.user.id);
+  if (known) return known;
+  const tok = await authToken();
+  if (!tok) return null;
+  const mine = await fetchProfile(tok, s.user.id);
+  if (!mine.ok || !mine.username) return null;
+  const cur = readSession();
+  if (!cur || !cur.user || cur.user.id !== s.user.id) return null;  // signed out meanwhile
+  cur.username = mine.username;
+  writeSession(cur);
+  rememberName(mine.username);
+  return mine.username;
+}
+
+/** Read a user's public name. `{ ok }` says whether the server answered. */
 async function fetchProfile(token, userId) {
-  const res = await fetch(api(`/rest/v1/profiles?id=eq.${userId}&select=username`), {
-    headers: authHeaders(token),
-  });
-  if (!res.ok) return null;
-  const rows = await res.json();
-  return rows.length ? rows[0].username : null;
+  try {
+    const res = await fetch(api(`/rest/v1/profiles?id=eq.${userId}&select=username`), {
+      headers: authHeaders(token),
+    });
+    if (!res.ok) return { ok: false };
+    const rows = await res.json();
+    return { ok: true, username: rows.length ? rows[0].username : null };
+  } catch {
+    return { ok: false };
+  }
 }
 
 /**
@@ -130,6 +199,17 @@ export async function ensureProfile(username, token) {
   const tok = token || (await authToken());
   const s = readSession();
   if (!tok || !s) return { ok: false, error: 'Not signed in.' };
+
+  // This account may already have a name - a sign-in that could not reach the
+  // profiles table leaves the session nameless, and picking your own existing
+  // name would otherwise dead-end as "taken". Adopt it instead.
+  const mine = await fetchProfile(tok, s.user.id);
+  if (mine.ok && mine.username) {
+    s.username = mine.username;
+    writeSession(s);
+    rememberName(mine.username);
+    return { ok: true, username: mine.username };
+  }
 
   const name = String(username || '').trim();
   const bad = validateName(name);
@@ -249,11 +329,22 @@ export async function login(email, password) {
 
   // Completing a profile left over from a confirmation-flow signup.
   const existing = await fetchProfile(body.access_token, body.user.id);
-  if (existing) {
+  if (existing.ok && existing.username) {
     const s = readSession();
-    s.username = existing;
+    s.username = existing.username;
     writeSession(s);
-    rememberName(existing);
+    rememberName(existing.username);
+    return { ok: true };
+  }
+  // The profile read failed (offline blip, say) but this device has signed this
+  // user in before, so their name is known. Use it rather than asking again -
+  // asking would dead-end, since their name is already taken by them.
+  const known = recallId(body.user.id);
+  if (known) {
+    const s = readSession();
+    s.username = known;
+    writeSession(s);
+    rememberName(known);
     return { ok: true };
   }
 

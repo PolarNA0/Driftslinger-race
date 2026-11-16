@@ -16,7 +16,7 @@ import { encodeSteps } from './replay.js';
 import { postWebhook } from './discord.js';
 import {
   currentAccount, currentEmail, listAccounts, register, login, logout,
-  ensureProfile,
+  ensureProfile, resolveAccount,
 } from './account.js';
 
 const $ = (id) => document.getElementById(id);
@@ -830,6 +830,16 @@ buildCarList();
 buildTrackList();
 showOverlay('menu');
 game.run();
+
+// A session can be missing its username (an older token refresh dropped it, or
+// the install predates the id -> name map). Records are keyed by that name, so
+// without it the player sees the guest's best times. Heal in the background and
+// repaint once the name is known; boot itself never waits on the network.
+resolveAccount().then((name) => {
+  if (!name) return;
+  buildAccountBar();
+  buildTrackList();
+});
 
 // Android back button: close the topmost overlay, else let the shell exit.
 window.SlingDriftBack = () => {
