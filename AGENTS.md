@@ -428,8 +428,9 @@ build step and no secret, because the anon key is designed to be visible and RLS
 what constrains it. To point the game at a different project, change those two tags.
 
 `js/api.js` reads the older `sling-api` tag, which `tools/build-pages.mjs` still
-rewrites for the GitHub Pages build. That tag is now only about the *old* same-origin
-API and does nothing for the Supabase path; leave it empty.
+rewrites when it stages a static bundle for any file host. That tag is now only
+about the *old* same-origin API and does nothing for the Supabase path; leave it
+empty.
 
 The player's session lives in `localStorage` under `slingdrift.session.v2`, and the
 upload queue under `slingdrift.queue.v2`. Bumping either suffix deliberately
