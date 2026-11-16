@@ -1,0 +1,14 @@
+# Cloudflare Workers config for the Godot web build.
+#
+# `wrangler deploy` (run from this directory, after exporting the Web preset to
+# build/web) uploads the static bundle and serves it at
+#   https://driftslinger-race.<your-account-subdomain>.workers.dev/
+# which is the `driftslinger-race.exopolar1.workers.dev` address for this project.
+#
+# The Godot web export is a plain static site (index.html plus .js/.wasm/.pck),
+# so it needs no worker script - just the asset binding below.
+name = "driftslinger-race"
+compatibility_date = "2025-06-01"
+
+[assets]
+directory = "./build/web"

@@ -1,0 +1,77 @@
+name: Build Godot Android APK
+
+# Builds the signed debug APK for the Godot port and uploads it as a workflow
+# artefact, so a build is reproducible without a local Godot install. Attach it
+# to a release by hand if you want it downloadable.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'godot/**'
+      - '.github/workflows/build-godot-android.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: godot-android
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # Installs the Android SDK (and the platform/build-tools Godot's prebuilt
+      # export template links against) and exports ANDROID_HOME for later steps.
+      - uses: android-actions/setup-android@v3
+
+      # Godot's Android export needs a debug keystore at a path the editor
+      # settings point at. keytool ships with the JDK installed above.
+      - name: Create a debug keystore
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/keystores"
+          keytool -genkeypair -v \
+            -keystore "$HOME/keystores/debug.keystore" \
+            -storepass android -alias androiddebugkey -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Install Godot 4.5.2 and the export templates
+        run: |
+          set -euo pipefail
+          GODOT_VERSION=4.5.2-stable
+          BASE=https://github.com/godotengine/godot/releases/download/$GODOT_VERSION
+          curl -sSL -o godot.zip "$BASE/Godot_v${GODOT_VERSION}_linux.x86_64.zip"
+          curl -sSL -o templates.tpz "$BASE/Godot_v${GODOT_VERSION}_export_templates.tpz"
+          mkdir -p "$HOME/.local/bin"
+          unzip -q godot.zip -d "$HOME/.local/bin"
+          mv "$HOME/.local/bin/Godot_v${GODOT_VERSION}_linux.x86_64" "$HOME/.local/bin/godot"
+          chmod +x "$HOME/.local/bin/godot"
+          TPL_DIR="$HOME/.local/share/godot/export_templates/4.5.2.stable"
+          mkdir -p "$TPL_DIR"
+          unzip -q templates.tpz -d /tmp/templates
+          mv /tmp/templates/templates/* "$TPL_DIR/"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build the APK
+        working-directory: godot
+        env:
+          JAVA_HOME: ${{ env.JAVA_HOME }}
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+        run: |
+          set -euo pipefail
+          godot --headless --path . --import
+          mkdir -p build/android
+          godot --headless --path . --export-debug "Android" build/android/drift-slinger.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: drift-slinger-apk
+          path: godot/build/android/drift-slinger.apk
+          if-no-files-found: error

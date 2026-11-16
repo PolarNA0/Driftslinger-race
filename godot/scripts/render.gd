@@ -19,16 +19,26 @@ const THEMES := [
 	{"ground": Color8(77, 16, 35), "road": Color8(203, 203, 203), "stripe": Color8(222, 222, 222), "pole": Color8(40, 8, 18)},
 ]
 
-const CAR_COLOURS := [
-	{"body": Color8(255, 209, 102), "dark": Color8(196, 150, 54), "glass": Color8(30, 38, 56)},
-	{"body": Color8(238, 92, 66), "dark": Color8(170, 52, 36), "glass": Color8(40, 20, 18)},
-	{"body": Color8(104, 219, 168), "dark": Color8(50, 158, 116), "glass": Color8(16, 46, 40)},
-	{"body": Color8(92, 156, 255), "dark": Color8(46, 96, 186), "glass": Color8(16, 28, 54)},
-	{"body": Color8(206, 130, 255), "dark": Color8(140, 76, 186), "glass": Color8(34, 20, 50)},
-	{"body": Color8(238, 242, 250), "dark": Color8(150, 160, 178), "glass": Color8(28, 34, 46)},
-	{"body": Color8(70, 74, 88), "dark": Color8(30, 32, 40), "glass": Color8(120, 190, 255)},
-	{"body": Color8(255, 138, 92), "dark": Color8(188, 84, 48), "glass": Color8(46, 24, 20)},
+# The selectable cars. A model is either a flat vector body (drawn from the
+# outline below) or a sprite drawn from `assets/cars/`. Sprite art is stored
+# nose-up, so it lines up with the vector cars, which are drawn nose-first along
+# -Y. The sprite is a CC0 top-down car; see `assets/cars/CREDITS.md`.
+const CAR_MODELS := [
+	{"kind": "vector", "name": "Sunbeam", "body": Color8(255, 209, 102), "dark": Color8(196, 150, 54), "glass": Color8(30, 38, 56)},
+	{"kind": "vector", "name": "Ember", "body": Color8(238, 92, 66), "dark": Color8(170, 52, 36), "glass": Color8(40, 20, 18)},
+	{"kind": "vector", "name": "Mint", "body": Color8(104, 219, 168), "dark": Color8(50, 158, 116), "glass": Color8(16, 46, 40)},
+	{"kind": "vector", "name": "Cobalt", "body": Color8(92, 156, 255), "dark": Color8(46, 96, 186), "glass": Color8(16, 28, 54)},
+	{"kind": "vector", "name": "Orchid", "body": Color8(206, 130, 255), "dark": Color8(140, 76, 186), "glass": Color8(34, 20, 50)},
+	{"kind": "vector", "name": "Frost", "body": Color8(238, 242, 250), "dark": Color8(150, 160, 178), "glass": Color8(28, 34, 46)},
+	{"kind": "vector", "name": "Graphite", "body": Color8(70, 74, 88), "dark": Color8(30, 32, 40), "glass": Color8(120, 190, 255)},
+	{"kind": "vector", "name": "Coral", "body": Color8(255, 138, 92), "dark": Color8(188, 84, 48), "glass": Color8(46, 24, 20)},
+	{"kind": "sprite", "name": "Roadster", "body": Color8(92, 156, 255), "dark": Color8(46, 96, 186), "glass": Color8(16, 28, 54), "tex": "res://assets/cars/topdown_car.png"},
 ]
+
+# Reattach pillars read differently from ordinary ones: live (you may still catch
+# it) versus spent (this arc is done). Live is a warm amber, spent a dull bronze.
+const REATTACH_FILL := Color8(255, 196, 0)
+const REATTACH_SPENT_FILL := Color8(150, 112, 0)
 
 var track: Track
 var car_ref: Car
@@ -45,6 +55,14 @@ var _w := 420.0
 var _h := 820.0
 var _anchor_y := 451.0
 var _scale := 1.6
+
+var _sprites := {}
+
+
+func _sprite(path: String) -> Texture2D:
+	if not _sprites.has(path):
+		_sprites[path] = load(path)
+	return _sprites[path]
 
 
 func theme() -> Dictionary:
@@ -171,7 +189,16 @@ func _draw_poles(t: Dictionary) -> void:
 	items.sort_custom(func(a, b): return a["p"].y < b["p"].y)
 	var r := 13.0 * _scale
 	for it in items:
+		var f: Dictionary = track.fillets[it["k"]]
 		var is_next: bool = it["k"] == car_ref.corner and not car_ref.attached
+		if f.get("reattach", false):
+			# A reattach pillar keeps its own colour until it is spent, so the
+			# player can see at a glance that it is still catchable.
+			var spent: bool = it["k"] == car_ref.spent
+			draw_circle(it["p"], r, REATTACH_SPENT_FILL if spent else REATTACH_FILL)
+			if is_next and not spent:
+				draw_arc(it["p"], r * 1.35, 0.0, TAU, 48, Color8(255, 255, 255), 2.0, true)
+			continue
 		draw_circle(it["p"], r, Color8(255, 255, 255) if is_next else t["pole"])
 
 
@@ -217,7 +244,10 @@ func _draw_ghost() -> void:
 
 
 func _draw_car_body(cx: float, cy: float, cang: float, alpha: float, _is_ghost: bool) -> void:
-	var skin: Dictionary = CAR_COLOURS[((car_index % CAR_COLOURS.size()) + CAR_COLOURS.size()) % CAR_COLOURS.size()]
+	var skin: Dictionary = CAR_MODELS[((car_index % CAR_MODELS.size()) + CAR_MODELS.size()) % CAR_MODELS.size()]
+	if skin.get("kind", "vector") == "sprite":
+		_draw_car_sprite(cx, cy, cang, alpha, skin)
+		return
 	var len := 30.0 * _scale
 	var wid := 16.0 * _scale
 	var p := _to_screen(cx, cy)
@@ -243,3 +273,26 @@ func _draw_car_body(cx: float, cy: float, cang: float, alpha: float, _is_ghost: 
 		var a := TAU * float(i) / 16.0
 		glass_pts.append(p + Vector2(cos(a) * wid * 0.30, sin(a) * len * 0.17).rotated(rot) + Vector2(0, -len * 0.10).rotated(rot))
 	draw_colored_polygon(glass_pts, glass)
+
+
+# Draw a sprite car. The art is stored nose-up, so it needs one extra quarter
+# turn to line up with the vector cars (which are built along -Y and rotated by
+# heading). A ghost is drawn translucent and tinted, matching the vector ghost.
+func _draw_car_sprite(cx: float, cy: float, cang: float, alpha: float, skin: Dictionary) -> void:
+	var tex: Texture2D = _sprite(str(skin["tex"]))
+	if tex == null:
+		return
+	var target_len := 34.0 * _scale
+	var aspect := float(tex.get_height()) / float(tex.get_width())
+	var size := Vector2(target_len / aspect, target_len)
+	var p := _to_screen(cx, cy)
+	# +PI/2 turns the nose-up art to match the vector cars' heading frame.
+	var rot := cang - cam_angle + PI / 2.0
+	# A ghost is washed toward its body colour so it reads as a translucent echo.
+	var tint := Color(1, 1, 1, alpha)
+	if alpha < 1.0:
+		tint = Color(skin["body"].r, skin["body"].g, skin["body"].b, alpha)
+	# Transform is in screen space, so the offset is the car's screen position.
+	draw_set_transform(p, rot, Vector2.ONE)
+	draw_texture_rect(tex, Rect2(-size / 2.0, size), false, tint)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)

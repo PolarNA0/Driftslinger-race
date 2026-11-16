@@ -2,7 +2,8 @@ extends RefCounted
 class_name Tracks
 
 # Port of js/tracks.js. Twenty-five time-attack tracks, each a fixed road derived
-# from its number, so track 7 is the same road on every device.
+# from its number, so track 7 is the same road on every device. Three more
+# tracks (26-28) showcase the reattachable pillar; see REATTACH_TRACKS below.
 
 const TRACK_COUNT := 25
 const RHYTHMS := [
@@ -58,6 +59,47 @@ const ADVANCED := {
 	},
 }
 
+# The three reattach showcase tracks (26-28). Same op-list builder as the advanced
+# tracks, but their corners carry `reattach: true`, so letting go before an arc is
+# finished leaves that pillar live and it can be caught again. Each opens with a
+# long, wide corner so there is room to bail out, fly, and come back round.
+const REATTACH_TRACKS := {
+	26: {
+		"lead_in": 640.0, "target_time": 10.4,
+		"defs": [
+			{"deg": 90, "r": 86, "reattach": true, "gap": 150},
+			{"deg": -90, "r": 74, "reattach": true, "gap": 150},
+			{"deg": 90, "r": 86, "reattach": true, "gap": 150},
+			{"deg": -90, "r": 74},
+			{"deg": 90, "r": 62},
+		],
+	},
+	27: {
+		"lead_in": 660.0, "target_time": 10.5,
+		"defs": [
+			{"deg": 180, "r": 88, "reattach": true, "gap": 170},
+			{"deg": -90, "r": 74, "reattach": true, "gap": 150},
+			{"deg": 90, "r": 74, "reattach": true, "gap": 150},
+			{"deg": -90, "r": 62},
+		],
+	},
+	28: {
+		"lead_in": 640.0, "target_time": 10.6,
+		"defs": [
+			{"deg": 90, "r": 88, "reattach": true, "gap": 160},
+			{"deg": 90, "r": 78, "reattach": true, "gap": 160},
+			{"deg": -90, "r": 70, "reattach": true, "gap": 150},
+			{"deg": -90, "r": 62},
+			{"deg": 90, "r": 62},
+		],
+	},
+}
+
+# Every track number the game knows about, in menu order. The ported tracks come
+# first, so the showcase tracks extend the menu without shifting any existing seed.
+const FIRST_REATTACH_TRACK := TRACK_COUNT + 1
+const ALL_TRACK_COUNT := 28
+
 
 # Turn an advanced track's defs into an op list, scaling the straights to time.
 static func _advanced_ops(spec: Dictionary, radius: float) -> Array:
@@ -77,7 +119,10 @@ static func _advanced_ops(spec: Dictionary, radius: float) -> Array:
 		var g := float(d.get("gap", 0.0)) + float(d.get("scale", 1.0)) * per
 		if g > 1.0:
 			ops.append({"t": "L", "len": g})
-		ops.append({"t": "A", "deg": d["deg"], "r": float(d.get("r", radius))})
+		ops.append({
+			"t": "A", "deg": d["deg"], "r": float(d.get("r", radius)),
+			"reattach": bool(d.get("reattach", false)),
+		})
 	return ops
 
 
@@ -126,7 +171,18 @@ static func track_def(n: int) -> Dictionary:
 
 
 static func track_opts(n: int) -> Dictionary:
-	var num := ((n - 1) % TRACK_COUNT + TRACK_COUNT) % TRACK_COUNT + 1
+	var num := ((n - 1) % ALL_TRACK_COUNT + ALL_TRACK_COUNT) % ALL_TRACK_COUNT + 1
+	if REATTACH_TRACKS.has(num):
+		var spec: Dictionary = REATTACH_TRACKS[num]
+		var radius := 70.0
+		return {
+			"corners": spec["defs"].size(),
+			"radius": radius,
+			"lead_in": spec["lead_in"],
+			"finish_len": 460.0,
+			"target_time": spec["target_time"],
+			"ops": _advanced_ops(spec, radius),
+		}
 	if ADVANCED.has(num):
 		var spec: Dictionary = ADVANCED[num]
 		var radius := 62.0

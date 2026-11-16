@@ -12,6 +12,10 @@ var sgn: float
 var radius: float
 var spent: int
 var grabbed: int
+var regrabs: int
+var released_corner: int
+var released_angle: float
+var grabbed_corners: Dictionary
 var alive: bool
 var dead: Variant
 var finished: bool
@@ -39,6 +43,10 @@ func reset(p_track: Track) -> void:
 	radius = Cfg.DRIFT_RADIUS
 	spent = -1
 	grabbed = 0
+	regrabs = 0
+	released_corner = -1
+	released_angle = 0.0
+	grabbed_corners = {}
 	alive = true
 	dead = null
 	finished = false
@@ -136,12 +144,20 @@ func try_grab() -> bool:
 	# Unwrap the orbit angle onto the arc. atan2 returns (-PI, PI], so a raw value
 	# cannot represent a corner that turns 180 or 270 degrees - "distance left to
 	# the end of the arc" would wrap and read as already done. Pick the
-	# representative congruent to the angle nearest the arc's start; from there the
-	# drift accumulates without wrapping, and `done` / `remaining` compare straight
-	# against `a2` however far round the corner goes.
+	# representative congruent to the reference angle (the arc start on a fresh
+	# grab, the release angle on a re-grab); from there the drift accumulates
+	# without wrapping, and `done` / `remaining` compare straight against `a2`
+	# however far round the corner goes.
 	var raw := atan2(y - c.y, x - c.x)
-	var a1 := float(f["a1"])
-	orbit_angle = raw + TAU * round((a1 - raw) / TAU)
+	# Normally unwrap onto the arc start: a fresh grab is made on the approach,
+	# with the car sitting near the entry. A re-grab is different - the car flew
+	# off partway round, so unwrap onto the angle it left from. Using the entry
+	# there would drop the car back to the start and throw away its progress.
+	var ref := released_angle if corner == released_corner else float(f["a1"])
+	orbit_angle = raw + TAU * round((ref - raw) / TAU)
+	if grabbed_corners.has(corner):
+		regrabs += 1
+	grabbed_corners[corner] = true
 	grabbed += 1
 	return true
 
@@ -195,12 +211,20 @@ func centre(dt: float) -> void:
 func release(dt: float) -> void:
 	var f := _fillet()
 	var st := Cfg.SPEED / radius * dt
-	if done() and sgn * (orbit_angle - float(f["a2"])) <= st:
+	var carried := done()
+	if carried and sgn * (orbit_angle - float(f["a2"])) <= st:
 		orbit_angle = f["a2"]
 		radius = f["r"]
 		place()
 	attached = false
-	spent = corner
+	released_corner = corner
+	released_angle = orbit_angle
+	# A plain pillar is spent the moment you let go. A reattachable pillar is
+	# spent only by riding the arc to its end: bail out early and it stays open,
+	# so the same pole can be caught again. An ordinary clean line rides every
+	# arc out, so its behaviour is unchanged.
+	if carried or not f.get("reattach", false):
+		spent = corner
 
 
 # How far the orbit still has to turn before this corner is done.

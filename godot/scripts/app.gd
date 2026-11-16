@@ -70,7 +70,7 @@ var replay_sub: Label
 
 func _ready() -> void:
 	menu_seed = int(Storage.get_pref("track", 1))
-	if menu_seed < 1 or menu_seed > Tracks.TRACK_COUNT:
+	if menu_seed < 1 or menu_seed > Tracks.ALL_TRACK_COUNT:
 		menu_seed = 1
 	menu_mode = str(Storage.get_pref("mode", "speedrun"))
 	if menu_mode != "endless":
@@ -79,7 +79,7 @@ func _ready() -> void:
 	if not ["off", "wr", "self"].has(ghost_mode):
 		ghost_mode = "off"
 	car_skin = int(Storage.get_pref("carSkin", 0))
-	if car_skin < 0 or car_skin >= Renderer2D.CAR_COLOURS.size():
+	if car_skin < 0 or car_skin >= Renderer2D.CAR_MODELS.size():
 		car_skin = 0
 
 	game = Game.new()
@@ -356,13 +356,13 @@ func _mode_button(parent: Node, title: String, sub: String, cb: Callable) -> But
 
 func _build_car_list(parent: Node) -> void:
 	car_buttons.clear()
-	for i in range(Renderer2D.CAR_COLOURS.size()):
+	for i in range(Renderer2D.CAR_MODELS.size()):
 		var idx := i
 		var b := Button.new()
 		b.toggle_mode = true
 		b.custom_minimum_size = Vector2(40, 40)
 		var sw := ColorRect.new()
-		sw.color = Renderer2D.CAR_COLOURS[i]["body"]
+		sw.color = Renderer2D.CAR_MODELS[i]["body"]
 		sw.set_anchors_preset(Control.PRESET_FULL_RECT)
 		sw.offset_left = 8
 		sw.offset_top = 8
@@ -387,7 +387,7 @@ func _refresh_car_list() -> void:
 
 func _build_track_list(parent: Node) -> void:
 	track_buttons.clear()
-	for seed in range(1, Tracks.TRACK_COUNT + 1):
+	for seed in range(1, Tracks.ALL_TRACK_COUNT + 1):
 		var s := seed
 		var b := Button.new()
 		b.toggle_mode = true
@@ -794,7 +794,8 @@ func _on_game_change(extra: Dictionary) -> void:
 		if game.mode == "speedrun":
 			dead_tag.text = "Crashed"
 			dead_dist.text = _fmt_time(game.run_time())
-			dead_sub.text = "best %s" % _fmt_time(float(game.record_time()))
+			var best: Variant = game.record_time()
+			dead_sub.text = "best --" if best == null else "best %s" % _fmt_time(float(best))
 		else:
 			var prev: Dictionary = extra["prev"]
 			var beat := game.metres() > float(prev["dist"])

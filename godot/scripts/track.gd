@@ -101,6 +101,8 @@ func build_ops() -> void:
 				"k": fillets.size(), "c": c, "r": r, "sign": s, "a1": a1, "a2": a2,
 				"phi": th, "t1": cur, "t2": c + Vector2(cos(a2), sin(a2)) * r,
 				"s0": length, "s1": length + r * abs(th),
+				# A pillar you can re-grab after letting go early (see Car.release).
+				"reattach": bool(op.get("reattach", false)),
 			}
 			fillets.append(fil)
 			push_arc(fil)
@@ -190,6 +192,7 @@ func finalize_corner(k: int) -> void:
 	var fil := {
 		"k": k, "c": c, "r": r, "sign": sgn, "a1": a1, "a2": a2, "phi": phi,
 		"t1": t1, "t2": t2, "s0": length, "s1": length + r * abs(phi),
+		"reattach": false,
 	}
 	fillets.append(fil)
 	push_arc(fil)

@@ -94,8 +94,15 @@ loudly.
   ghosts, no skins) even though the served browser build is current. Re-run
   `android/build.sh`, copy the result over `slingdrift.apk`, and bump
   `versionCode`/`versionName` so devices update instead of ignoring the install.
-- The Godot port at `../godot-slingdrift` exports separately (`sling-drift-godot.apk`);
-  it is a native build, not a WebView shell, and needs its own rebuild.
+- The Godot port lives in `godot/`. It is a native build (GDScript + Godot
+  4.5), not a WebView shell, and it has its own export presets for Web and
+  Android. See `godot/README.md`.
+- **The Godot port deploys itself.** `.github/workflows/deploy-godot-web.yml`
+  exports the Web preset and publishes it to Cloudflare Workers on any push that
+  touches `godot/`, serving `https://driftslinger-race.exopolar1.workers.dev/`.
+  The worker is `godot/wrangler.toml` (static assets, no worker script). It needs
+  the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets.
+  `.github/workflows/build-godot-android.yml` builds the APK as a CI artefact.
 
 ## The one rule that matters
 
@@ -157,6 +164,16 @@ length and a small release error accumulates into a wall hit by the far end.
   a straight then turns that sliver into a crash. Snapping only inside a single
   frame keeps the mechanic honest: release much later and you really do swing
   wide into the wall. This is what makes a clean line actually finishable.
+- **A reattach pillar reopens on an early release.** A normal pillar is spent the
+  instant you let go (`Car.release` sets `spent = corner`). A pillar whose fillet
+  carries `reattach: true` is spent only when you ride the arc to its end
+  (`done()`); bail out partway and it stays live, so the same pole can be caught
+  again after you fly off and come back. The re-grab unwraps the orbit onto the
+  angle you left from (`released_angle`), not the arc start, so your progress
+  round the corner is kept instead of reset. Riding every arc out - the clean
+  line - spends the pillars exactly as before, which is why ordinary play is
+  unchanged. Tracks 26-28 (`Tracks.REATTACH_TRACKS`) showcase it; the renderer
+  paints a live reattach pillar amber and a spent one bronze.
 
 ## Gotchas
 

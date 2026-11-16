@@ -1,0 +1,67 @@
+name: Deploy Godot web build to Cloudflare
+
+# Publishes the Godot web export to Cloudflare Workers, so a push to main ships a
+# playable build at https://driftslinger-race.exopolar1.workers.dev/ with no
+# manual step. Only the godot/ tree triggers it; the JavaScript game is untouched.
+#
+# The Cloudflare Worker is defined by godot/wrangler.toml, which serves
+# godot/build/web as static assets.
+#
+# Requires two repository secrets:
+#   CLOUDFLARE_API_TOKEN   - a token with the "Edit Cloudflare Workers" permission
+#   CLOUDFLARE_ACCOUNT_ID  - the account id that owns the worker
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'godot/**'
+      - '.github/workflows/deploy-godot-web.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: godot-web
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Godot editor is not on the runner, and the web export needs the
+      # export templates too, so fetch both from the release that matches the
+      # project (see godot/project.godot: 4.5).
+      - name: Install Godot 4.5.2
+        run: |
+          set -euo pipefail
+          GODOT_VERSION=4.5.2-stable
+          BASE=https://github.com/godotengine/godot/releases/download/$GODOT_VERSION
+          curl -sSL -o godot.zip "$BASE/Godot_v${GODOT_VERSION}_linux.x86_64.zip"
+          curl -sSL -o templates.tpz "$BASE/Godot_v${GODOT_VERSION}_export_templates.tpz"
+          mkdir -p "$HOME/.local/bin"
+          unzip -q godot.zip -d "$HOME/.local/bin"
+          mv "$HOME/.local/bin/Godot_v${GODOT_VERSION}_linux.x86_64" "$HOME/.local/bin/godot"
+          chmod +x "$HOME/.local/bin/godot"
+          TPL_DIR="$HOME/.local/share/godot/export_templates/4.5.2.stable"
+          mkdir -p "$TPL_DIR"
+          unzip -q templates.tpz -d /tmp/templates
+          mv /tmp/templates/templates/* "$TPL_DIR/"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Import resources and export the web build
+        working-directory: godot
+        run: |
+          set -euo pipefail
+          godot --headless --path . --import
+          mkdir -p build/web
+          godot --headless --path . --export-release "Web" build/web/index.html
+
+      # Publish build/web with wrangler. Wrangler reads godot/wrangler.toml, which
+      # names the worker `driftslinger-race` and points it at the export output.
+      - name: Deploy to Cloudflare
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: godot
+          command: deploy
