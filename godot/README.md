@@ -9,13 +9,13 @@ leaderboard replays uploaded runs through its physics
 (`../tools/sync-physics.mjs`), and because `tools/parity.gd` compares the two
 builds number for number. Do not add features to the JS build.
 
-Same physics, same twenty-five ported tracks, same top-down look, plus three
+Same physics, same ten ported tracks, same top-down look, plus three
 reattach showcase tracks and sprite cars.
 
 ## Status
 
-Feature-complete with the JS build. Physics, track generation, all twenty-five
-ported time-attack tracks, rendering, the one-button loop, the full menu shell
+Feature-complete with the JS build. Physics, track generation, all ten ported
+time-attack tracks, rendering, the one-button loop, the full menu shell
 (mode and track pickers, car skins, ghosts), the leaderboard with watchable
 ghosts, run history, and local accounts are all ported. The physics is
 bit-for-bit identical to the JS build and every track finishes near ten seconds
@@ -111,7 +111,7 @@ The track geometry matches too (track 1: length 3074.0, finishS 3074.0, clean 10
 | `scripts/util.gd` | `js/util.js` — `angDiff`, and `mulberry32` bit-exact via 32-bit `imul` |
 | `scripts/track.gd` | `js/track.js` — the road |
 | `scripts/car.gd` | `js/car.js` — the one-button car |
-| `scripts/tracks.gd` | `js/tracks.js` — the twenty-five ported tracks, plus the reattach showcase tracks 26–28 |
+| `scripts/tracks.gd` | `js/tracks.js` — the ten ported tracks, plus the reattach showcase tracks 26–28 |
 | `scripts/ghostrun.gd` | `js/ghostrun.js` — a ghost from an integer id |
 | `scripts/replay.gd` | `js/replay.js` — button-step replays |
 | `scripts/storage.gd` | `js/storage.js` — records, best times, replays, history, prefs |

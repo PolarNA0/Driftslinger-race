@@ -10,7 +10,7 @@
 
 import { Track } from './track.js';
 import { Car } from './car.js';
-import { trackOpts, TRACK_COUNT } from './tracks.js';
+import { trackOpts, isPlayableTrack } from './tracks.js';
 
 /** The simulation advances in fixed steps, and the run clock counts them. */
 export const FIXED_DT = 1 / 120;
@@ -28,7 +28,9 @@ export const MAX_STEPS = 120 * 60;
  * stored time is exact rather than rounded.
  */
 export function replayRun(track, steps) {
-  if (!Number.isInteger(track) || track < 1 || track > TRACK_COUNT) {
+  // The playable set, not a range: tracks 6-20 were removed and there are gaps,
+  // so `track <= TRACK_COUNT` would accept a run on a road the game does not show.
+  if (!isPlayableTrack(track)) {
     return { ok: false, reason: 'bad track' };
   }
   if (typeof steps !== 'string' || !/^[01]*$/.test(steps)) {

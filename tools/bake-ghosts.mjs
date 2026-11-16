@@ -12,7 +12,7 @@
 import { writeFileSync } from 'node:fs';
 import { Track } from '../js/track.js';
 import { Car } from '../js/car.js';
-import { trackOpts, TRACK_COUNT } from '../js/tracks.js';
+import { trackOpts, PLAYABLE_TRACKS } from '../js/tracks.js';
 import { ghostPolicy, ghostName } from '../js/ghostrun.js';
 
 const TOP = 10;      // watchable runs per track
@@ -29,7 +29,7 @@ function simulate(track, id) {
 }
 
 const out = {};
-for (let n = 1; n <= TRACK_COUNT; n++) {
+for (const n of PLAYABLE_TRACKS) {
   const track = new Track(n, trackOpts(n));
   const found = [];
   for (let id = 0; id < SCAN; id++) {

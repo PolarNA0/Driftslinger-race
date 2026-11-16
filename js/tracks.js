@@ -1,14 +1,14 @@
 import { CFG } from './config.js';
 
 /**
- * The twenty-five time-attack tracks.
+ * The time-attack tracks.
  *
  * Each track is a fixed road: its straight-length rhythm (the "winds"), its
  * corner radius (how wide the wiggles are), how many corners it has and how long
  * it is. Every one is calibrated to land near ten seconds, so the leaderboard
  * compares like with like, but the shape you drive is different on each.
  *
- * Everything is derived from the track number, so track 7 is the same road on
+ * Everything is derived from the track number, so a track is the same road on
  * every device, forever. A leaderboard and a replay are both meaningless
  * otherwise.
  *
@@ -84,10 +84,29 @@ function def(n) {
   };
 }
 
-export const TRACK_COUNT = 25;
+/**
+ * The tracks the game ships, in menu order.
+ *
+ * Tracks 6-20 were removed: they were the same staircase with the radius and
+ * rhythm cycled, so they added menu length without adding a shape. The remaining
+ * numbers are kept exactly as they were - 21-25 are still the advanced tracks -
+ * so a leaderboard entry or a replay for track 1 is still track 1. That leaves
+ * gaps, which is deliberate: replacement tracks will be dropped into the empty
+ * numbers later, and they will be new roads rather than another cycling of these.
+ *
+ * A track number outside this list is not playable, and the verifier refuses it,
+ * so no run can be posted to a road the game does not show.
+ */
+export const PLAYABLE_TRACKS = [1, 2, 3, 4, 5, 21, 22, 23, 24, 25];
+
+/** How many tracks ship. Prefer this to a literal in loops and menus. */
+export const TRACK_COUNT = PLAYABLE_TRACKS.length;
+
+/** Is `n` a track the game plays? Guards the verifier and the board alike. */
+export const isPlayableTrack = (n) => Number.isInteger(n) && PLAYABLE_TRACKS.includes(n);
 
 /**
- * The five advanced tracks (21-25).
+ * The advanced tracks (21-25).
  *
  * These are not staircases. Each is built from an explicit op list, which lets a
  * corner turn more than a quarter: a hairpin is a 180, and a loop is a single
@@ -162,12 +181,18 @@ function advancedOps(spec, radius) {
   return ops;
 }
 
-export const trackDef = (n) => def(((n - 1) % TRACK_COUNT + TRACK_COUNT) % TRACK_COUNT + 1);
+/**
+ * The definition (geometry, not the road itself) for track number `n`.
+ *
+ * `n` is used directly rather than wrapped: a track's road is a function of its
+ * own number, so track 21 keeps the shape it always had even now that 6-20 are
+ * gone. Wrapping would silently renumber every road past the gap.
+ */
+export const trackDef = (n) => def(n);
 
 /** The options object a Track wants for track number `n`. */
 export function trackOpts(n) {
-  const num = ((n - 1) % TRACK_COUNT + TRACK_COUNT) % TRACK_COUNT + 1;
-  const adv = ADVANCED[num];
+  const adv = ADVANCED[n];
   if (adv) {
     const radius = 62;
     return {
@@ -179,7 +204,7 @@ export function trackOpts(n) {
       ops: advancedOps(adv, radius),
     };
   }
-  const d = def(num);
+  const d = def(n);
   return {
     corners: d.corners,
     radius: d.radius,

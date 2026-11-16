@@ -1,11 +1,22 @@
 extends RefCounted
 class_name Tracks
 
-# Port of js/tracks.js. Twenty-five time-attack tracks, each a fixed road derived
-# from its number, so track 7 is the same road on every device. Three more
-# tracks (26-28) showcase the reattachable pillar; see REATTACH_TRACKS below.
+# Port of js/tracks.js. The time-attack tracks, each a fixed road derived from its
+# number, so a track is the same road on every device. Three more tracks (26-28)
+# showcase the reattachable pillar; see REATTACH_TRACKS below.
 
-const TRACK_COUNT := 25
+# Tracks 6-20 were removed: the same staircase with the radius and rhythm cycled,
+# so they added menu length without adding a shape. The numbers are kept as they
+# were (21-25 are still the advanced tracks), so a leaderboard entry or a replay
+# for track 1 is still track 1. The gaps are deliberate: replacements will be
+# dropped into the empty numbers later.
+const PLAYABLE_TRACKS := [1, 2, 3, 4, 5, 21, 22, 23, 24, 25]
+
+# Is `n` a track the game plays? The set has gaps, so a range check would accept a
+# removed track; membership is the honest test.
+static func is_playable_track(n: int) -> bool:
+	return PLAYABLE_TRACKS.has(n)
+
 const RHYTHMS := [
 	[1, 1, 1, 1],
 	[1, 2, 1, 2],
@@ -95,10 +106,16 @@ const REATTACH_TRACKS := {
 	},
 }
 
-# Every track number the game knows about, in menu order. The ported tracks come
-# first, so the showcase tracks extend the menu without shifting any existing seed.
-const FIRST_REATTACH_TRACK := TRACK_COUNT + 1
-const ALL_TRACK_COUNT := 28
+# Every track number the game shows, in menu order: the ported time-attack tracks
+# first, then the reattach showcase tracks. The numbers are their own, not their
+# menu position, so removing tracks 6-20 leaves the kept tracks unshifted.
+const FIRST_REATTACH_TRACK := 26
+const MENU_TRACKS := [1, 2, 3, 4, 5, 21, 22, 23, 24, 25, 26, 27, 28]
+
+# Is `n` a track the menu offers? Guards the menu seed the same way the playable
+# set guards the verifier.
+static func is_menu_track(n: int) -> bool:
+	return MENU_TRACKS.has(n)
 
 
 # Turn an advanced track's defs into an op list, scaling the straights to time.
@@ -171,7 +188,7 @@ static func track_def(n: int) -> Dictionary:
 
 
 static func track_opts(n: int) -> Dictionary:
-	var num := ((n - 1) % ALL_TRACK_COUNT + ALL_TRACK_COUNT) % ALL_TRACK_COUNT + 1
+	var num := n
 	if REATTACH_TRACKS.has(num):
 		var spec: Dictionary = REATTACH_TRACKS[num]
 		var radius := 70.0

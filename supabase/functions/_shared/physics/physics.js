@@ -9,6 +9,6 @@
 export { CFG } from './config.js';
 export { Track } from './track.js';
 export { Car } from './car.js';
-export { trackOpts, TRACK_COUNT } from './tracks.js';
+export { trackOpts, TRACK_COUNT, PLAYABLE_TRACKS, isPlayableTrack } from './tracks.js';
 export { mulberry32, angDiff, clamp } from './util.js';
 export { replayRun, FIXED_DT, TICKS_PER_SECOND, MAX_STEPS } from './verify.js';

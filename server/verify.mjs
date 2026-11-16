@@ -6,14 +6,13 @@
 // game's own modules unchanged, so the server and the client can never drift.
 import { Track } from '../js/track.js';
 import { Car } from '../js/car.js';
-import { trackOpts } from '../js/tracks.js';
+import { trackOpts, isPlayableTrack } from '../js/tracks.js';
 
 const FIXED_DT = 1 / 120;
 
 // A finished run is 1200-ish steps; the cap only exists to bound a malicious
 // payload, so it is generous (60s of play).
 const MAX_STEPS = 120 * 60;
-const MAX_TRACK = 25;
 
 /**
  * Replay `steps` on `track` and report what the physics actually produces.
@@ -22,7 +21,9 @@ const MAX_TRACK = 25;
  * the finish line with the steps given.
  */
 export function verifyRun(track, steps) {
-  if (!Number.isInteger(track) || track < 1 || track > MAX_TRACK) {
+  // The playable set, not a numeric range: tracks 6-20 were removed and there are
+  // gaps, so `track <= 25` would accept a run on a road the game does not show.
+  if (!isPlayableTrack(track)) {
     return { ok: false, reason: 'bad track' };
   }
   if (typeof steps !== 'string' || !/^[01]*$/.test(steps)) {

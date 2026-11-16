@@ -5,7 +5,7 @@
 import { Track } from '../js/track.js';
 import { Car } from '../js/car.js';
 import { CFG } from '../js/config.js';
-import { TRACK_COUNT, trackDef, trackOpts } from '../js/tracks.js';
+import { TRACK_COUNT, PLAYABLE_TRACKS, isPlayableTrack, trackDef, trackOpts } from '../js/tracks.js';
 import {
   boardPage, pageForRank, playerRank, worldRecord, ghostCount, PER_PAGE,
 } from '../js/leaderboard.js';
@@ -196,7 +196,7 @@ console.log('grabbing does not shove the car outward');
   // radius. A snap shows up as a jump in position on the grab step, and as the car
   // being thrown further off the road than it started.
   const stepLen = CFG.speed * DT;
-  for (const n of [1, 4, 9, 15]) {
+  for (const n of [1, 4, 21, 23]) {
     const t = new Track(n, trackOpts(n));
     const c = new Car(); c.reset(t);
     let i = 0;
@@ -249,7 +249,7 @@ console.log('a sloppy release is nudged back to the centre, and costs time');
     }
     return c;
   };
-  for (const n of [1, 4, 9, 15, 20]) {
+  for (const n of [1, 4, 21, 23, 25]) {
     const late = releaseLast(n, 12);
     ok(late.finished, `track ${n}: a 12-degree late release on the last corner should still finish`);
   }
@@ -270,10 +270,10 @@ console.log('a sloppy release is nudged back to the centre, and costs time');
   ok(!noNudge.finished, 'without the centring nudge a late release should crash');
 }
 
-console.log('the twenty-five tracks are distinct and all finish near ten seconds');
+console.log('the playable tracks are distinct and all finish near ten seconds');
 {
   const shapes = new Set();
-  for (let n = 1; n <= TRACK_COUNT; n++) {
+  for (const n of PLAYABLE_TRACKS) {
     const o = trackOpts(n);
     const t = new Track(n, o);
     const c = new Car(); c.reset(t);
@@ -290,14 +290,28 @@ console.log('the twenty-five tracks are distinct and all finish near ten seconds
       ? `a${f.r.toFixed(0)}:${(f.a2 - f.a1).toFixed(2)}`
       : `l${f.len.toFixed(0)}`)).join('|'));
   }
-  ok(shapes.size === TRACK_COUNT, `only ${shapes.size} of ${TRACK_COUNT} tracks have a unique shape`);
-  // trackDef must wrap, so track 26 is track 1 again.
-  ok(trackDef(TRACK_COUNT + 1).radius === trackDef(1).radius, 'trackDef should wrap around');
+  ok(shapes.size === PLAYABLE_TRACKS.length,
+    `only ${shapes.size} of ${PLAYABLE_TRACKS.length} tracks have a unique shape`);
+  ok(TRACK_COUNT === PLAYABLE_TRACKS.length, 'TRACK_COUNT should match the playable set');
+
+  // Tracks 6-20 were removed, so the playable set is not a contiguous range. A
+  // run on a removed track must be refused, and `track <= TRACK_COUNT` would not
+  // do that: 6 is under the count but is not a track any more.
+  for (const gone of [6, 10, 20]) {
+    ok(!isPlayableTrack(gone), `track ${gone} should no longer be playable`);
+  }
+  ok(isPlayableTrack(21) && isPlayableTrack(5), 'the kept tracks should still be playable');
+  ok(!isPlayableTrack(0) && !isPlayableTrack(26) && !isPlayableTrack(1.5),
+    'out-of-range and fractional tracks must not be playable');
+
+  // A track keeps its own road: track 21 is the same road it was before the gap,
+  // so its shape is not a function of how many tracks happen to exist.
+  ok(trackDef(21).id === 21 && trackDef(5).id === 5, 'a track def should carry its own number');
 }
 
 console.log('a replay reproduces its run exactly');
 {
-  for (const n of [1, 7, 13, 20]) {
+  for (const n of [1, 3, 21, 25]) {
     const t = new Track(n, trackOpts(n));
     const c = new Car(); c.reset(t);
     const steps = [];
@@ -331,7 +345,7 @@ console.log('the run clock is exactly the simulated time');
   // or a run and a ghost of that run would disagree by a step (8ms) - enough to
   // move the rank. Car.time is that clock, so it must equal steps * DT exactly,
   // including the step that crosses the finish line.
-  for (const n of [1, 9, 20]) {
+  for (const n of [1, 21, 25]) {
     const t = new Track(n, trackOpts(n));
     const c = new Car(); c.reset(t);
     let steps = 0;
@@ -348,7 +362,7 @@ console.log('the watchable head of the board is real runs');
   // The head is baked from real simulations: each of the top rows must carry a
   // ghost id whose re-simulation reproduces the time on the board exactly. Those
   // are the rows that can be watched, so they are the rows that must be honest.
-  for (const n of [1, 9, 20]) {
+  for (const n of [1, 21, 25]) {
     const rows = boardPage(n, 1, { perPage: PER_PAGE }).rows;
     const watchable = rows.filter((r) => r.watchable);
     ok(watchable.length >= 5, `track ${n}: expected a watchable head, got ${watchable.length}`);
@@ -374,7 +388,7 @@ console.log('the watchable head of the board is real runs');
 
 console.log('the leaderboard pages and ranks correctly');
 {
-  for (const n of [1, 9, 20]) {
+  for (const n of [1, 21, 25]) {
     const total = ghostCount(n);
     const pages = Math.ceil(total / PER_PAGE);
     // Page 1 is the fastest, ranks are 1..PER_PAGE and ascending.
@@ -473,7 +487,11 @@ console.log('the leaderboard pages and ranks correctly');
   ok(!verifyRun(1, 'nonsense').ok, 'non-binary steps must be rejected');
   ok(!verifyRun(1, '0'.repeat(2000)).ok, 'a run that never finishes must be rejected');
   ok(!verifyRun(1, good.replay.steps.slice(0, 120)).ok, 'a truncated run must be rejected');
-  ok(!verifyRun(99, good.replay.steps).ok, 'a track outside 1..25 must be rejected');
+  ok(!verifyRun(99, good.replay.steps).ok, 'a track outside the playable set must be rejected');
+  // 6-20 were removed, so the playable set is not a range: a run on a removed
+  // track must be refused even though it is under the old 1..25 ceiling.
+  ok(!verifyRun(6, good.replay.steps).ok, 'a run on a removed track must be rejected');
+  ok(!verifyRun(20, good.replay.steps).ok, 'a run on a removed track must be rejected');
   ok(verifyRun(1, good.replay.steps).time === v.time, 'verification must be deterministic');
 
   // Flipping one step changes the run; if it still finishes it is a different time,
@@ -854,6 +872,61 @@ console.log('account: a signed-in player\'s times come back from the server');
   // A faster server time (another device) does win.
   S.mergeServerTimes([{ track: 1, time: 8.5, steps: 'zz' }]);
   ok(S.getBestTime(1) === 8.5, 'a faster server time replaces the local one');
+
+  globalThis.localStorage = realLS;
+  globalThis.fetch = realFetch;
+}
+
+console.log('tracker: the admin\'s webhook reaches the server, not just the device');
+{
+  // The server announces records, so the webhook has to be written to
+  // `tracker_config` with the admin's token. Before this, "Save webhook" only
+  // wrote to localStorage, so the server's webhook was null and it announced
+  // nothing - which is why only the admin ever saw a post.
+  const store = new Map();
+  const realLS = globalThis.localStorage;
+  const realFetch = globalThis.fetch;
+  let seen = null;
+  globalThis.localStorage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: (k) => store.delete(k),
+    clear: () => store.clear(),
+  };
+  globalThis.document = { querySelector: () => null };
+  globalThis.window = { SLING_SUPABASE_URL: 'https://x.supabase.co', SLING_SUPABASE_ANON_KEY: 'k' };
+  globalThis.fetch = async (url, opts) => {
+    seen = { url: String(url), opts };
+    return { ok: true, json: async () => ({}) };
+  };
+
+  const Api = await import('../js/api.js');
+
+  // No session yet: a guest's save cannot reach the server, and that is reported.
+  localStorage.clear();
+  ok(await Api.saveTrackerConfig({ webhook: 'https://discord.com/api/webhooks/1/abc' }) === false,
+    'a guest cannot write the server webhook');
+
+  localStorage.setItem('slingdrift.session.v2', JSON.stringify({
+    access_token: 't1', refresh_token: 'r1',
+    expires_at: Math.floor(Date.now() / 1000) + 3600,
+    user: { id: 'u1', email: 'p@example.com' }, username: 'Polar',
+  }));
+
+  const okWrite = await Api.saveTrackerConfig({ webhook: 'https://discord.com/api/webhooks/1/abc' });
+  ok(okWrite === true, 'a signed-in admin can write the server webhook');
+  ok(seen.url.endsWith('/rest/v1/tracker_config?id=eq.1'), 'the write targets the single config row');
+  ok(seen.opts.method === 'PATCH', 'and updates rather than inserts');
+  ok(seen.opts.headers.authorization === 'Bearer t1', 'with the admin token, so RLS lets it through');
+  ok(JSON.parse(seen.opts.body).webhook_url === 'https://discord.com/api/webhooks/1/abc',
+    'and carries the webhook url');
+
+  // The templates travel the same way, so the server posts the admin's wording.
+  await Api.saveTrackerConfig({ wrMessage: 'WR {player}', posMessage: 'POS {rank}' });
+  const body = JSON.parse(seen.opts.body);
+  ok(body.wr_message === 'WR {player}' && body.pos_message === 'POS {rank}',
+    'the message templates reach the server too');
+  ok(!('webhook_url' in body), 'and a template-only save does not blank the webhook');
 
   globalThis.localStorage = realLS;
   globalThis.fetch = realFetch;

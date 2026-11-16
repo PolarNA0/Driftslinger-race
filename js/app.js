@@ -4,24 +4,24 @@ import {
   getRecord, bestDistance, getBestTime, getReplay, getPref, setPref,
   getRuns, allRuns, mergeServerTimes,
 } from './storage.js';
-import { TRACK_COUNT } from './tracks.js';
+import { PLAYABLE_TRACKS } from './tracks.js';
 import { boardPage, pageForRank, playerRank, worldRecord } from './leaderboard.js';
 import { CAR_COLOURS, hexToRgb, rgbToHex } from './render.js';
 import {
   loadSettings, saveZoom, saveRope, saveAdmin, saveWebhook, isAdminCode, validWebhook,
   clampZoom, DEFAULT_ROPE_HEX, saveTrackerMessages,
 } from './settings.js';
-import { enqueue, flush, fetchBoard, fetchMyRuns, clientId, queueLength } from './api.js';
+import { enqueue, flush, fetchBoard, fetchMyRuns, clientId, queueLength, saveTrackerConfig } from './api.js';
 import { encodeSteps } from './replay.js';
 import { postWebhook } from './discord.js';
-import { recordMessage, DEFAULT_WR_MESSAGE, DEFAULT_POS_MESSAGE } from './tracker.js';
+import { DEFAULT_WR_MESSAGE, DEFAULT_POS_MESSAGE } from './tracker.js';
 import {
   currentAccount, currentEmail, listAccounts, register, login, logout,
   ensureProfile, resolveAccount,
 } from './account.js';
 
 const $ = (id) => document.getElementById(id);
-const TRACKS = Array.from({ length: TRACK_COUNT }, (_, i) => i + 1);
+const TRACKS = PLAYABLE_TRACKS;
 
 const canvas = $('view');
 const game = new Game(canvas, { onChange: onGameChange, onTick: onTick });
@@ -232,22 +232,12 @@ function onGameChange(g, extra) {
     showOverlay('over-finish');
     $('hint').hidden = true;
     showRoundButton(false);
-    // The record as it stood before this run was uploaded, captured now because
-    // the upload changes it. The tracker uses it to tell a world record from an
-    // ordinary improvement.
-    const reals = boardRealsSeed === g.seed ? boardReals : [];
-    const wr = worldRecord(g.seed, reals);
-    const prevRecord = wr ? wr.time : null;
-    // Whether this run beat the player's own best, known locally. The server
-    // reports this too and its word is preferred; this is the fallback for a
-    // server that does not.
-    const improved = extra.prev === null || g.time < extra.prev;
     // Queue the run, then try to send it. The board is re-read afterwards so the
     // record and the rank reflect the real runs, not just the baked field. The
-    // tracker posts from the server's answer, not from the local estimate, so it
-    // reports the real position and only when the run was actually an improvement.
+    // tracker announces from the server, which knows the real position and
+    // whether the run actually improved anything.
     enqueue({ track: g.seed, steps: encodeSteps(g.steps), name: playerName() });
-    submitQueued(g.seed, { time: g.time, prevRecord, improved });
+    submitQueued(g.seed);
   }
 }
 
@@ -272,36 +262,9 @@ async function refreshFinish(seed) {
 }
 
 /** Send queued runs, then refresh the finish screen against the merged board. */
-async function submitQueued(seed, run = null) {
-  const sent = await flush();
+async function submitQueued(seed) {
+  await flush();
   refreshFinish(seed);
-  // The tracker reads the server's answer, not the local estimate: the server is
-  // what knows the real rank and whether the run actually improved anything.
-  if (run && sent && sent.track === seed) reportRecord(seed, run, sent);
-}
-
-/**
- * Tell the record channel about an improvement.
- *
- * Only an admin with a webhook posts, and only when the server says the run beat
- * this player's own best - a run that changed nothing is not news. The message
- * comes from one of the admin's two templates: a world record reads differently
- * from an ordinary improvement, and the delta is signed to match.
- */
-async function reportRecord(seed, run, sent) {
-  if (!settings.admin || !settings.webhook) return;
-  // The server is authoritative about whether anything improved; fall back to the
-  // local comparison only when it did not say.
-  const improved = typeof sent.improved === 'boolean' ? sent.improved : run.improved;
-  if (!improved) return;
-  const { message } = recordMessage({
-    player: playerName(),
-    track: seed,
-    time: Number.isFinite(sent.time) ? sent.time : run.time,
-    rank: sent.rank ?? null,
-    wrBefore: run.prevRecord,
-  }, settings);
-  await postWebhook(settings.webhook, message);
 }
 
 function onTick(g) {
@@ -598,6 +561,7 @@ function saveMessagesFromFields() {
   $('set-msg-wr').value = settings.wrMessage;
   $('set-msg-pos').value = settings.posMessage;
   $('set-msg-status').textContent = 'Saved.';
+  pushTrackerConfig({ wrMessage: settings.wrMessage, posMessage: settings.posMessage });
 }
 
 /** Put the default wording back into the two fields and save it. */
@@ -645,6 +609,18 @@ function saveWebhookFromField() {
   saveWebhook(url);
   settings.webhook = url.trim();
   $('set-hook-status').textContent = 'Saved.';
+  // The server posts the announcements, so the webhook has to reach it too. A
+  // device-local save alone is why only the admin's own runs ever posted.
+  pushTrackerConfig({ webhook: settings.webhook });
+}
+
+/** Save the tracker settings on the server, and say so if they did not land. */
+async function pushTrackerConfig(fields) {
+  const ok = await saveTrackerConfig(fields);
+  if (!ok) {
+    $('set-hook-status').textContent =
+      'Saved on this device, but not on the server. Sign in as an admin to enable announcements.';
+  }
 }
 
 /** Send a test line, so the admin can see the webhook actually works. */

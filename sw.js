@@ -2,7 +2,7 @@
 // network, but serve network-first while online: a cache-first shell would pin
 // the player to whatever build was cached first, so edits would never show up.
 
-const VERSION = 'slingdrift-v20';
+const VERSION = 'slingdrift-v21';
 const SHELL = [
   './',
   'index.html',

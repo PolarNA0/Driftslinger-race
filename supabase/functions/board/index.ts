@@ -19,6 +19,7 @@
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { json, preflight, bearer } from '../_shared/http.ts';
+import { isPlayableTrack } from '../_shared/physics/tracks.js';
 
 // A track is not expected to hold more real runs than this. The cap bounds the
 // response; the ghost field behind it is unbounded and never travels.
@@ -40,7 +41,7 @@ Deno.serve(async (req) => {
   const url = new URL(req.url);
   const track = Number(url.searchParams.get('track'));
 
-  if (!Number.isInteger(track) || track < 1 || track > 25) {
+  if (!isPlayableTrack(track)) {
     return json({ error: 'bad track' }, 400);
   }
 

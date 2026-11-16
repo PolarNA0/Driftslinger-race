@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 import { verifyRun } from './verify.mjs';
 import { Store } from './store.mjs';
+import { isPlayableTrack } from '../js/tracks.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
@@ -70,7 +71,7 @@ async function handleApi(req, res, url) {
 
   if (url.pathname === '/api/board' && req.method === 'GET') {
     const track = Number(url.searchParams.get('track'));
-    if (!Number.isInteger(track) || track < 1 || track > 25) return json(res, 400, { error: 'bad track' });
+    if (!isPlayableTrack(track)) return json(res, 400, { error: 'bad track' });
     const page = Number(url.searchParams.get('page')) || 1;
     const clientId = url.searchParams.get('clientId') || '';
     const out = store.page(track, page, PER_PAGE);

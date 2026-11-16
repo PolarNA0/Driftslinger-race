@@ -149,6 +149,51 @@ export async function fetchMyRuns() {
 }
 
 /**
+ * Save the tracker settings the server posts with.
+ *
+ * The webhook and the two message templates are read by the `run` function when
+ * it announces a record, so they have to live on the server, not on the admin's
+ * device. They are written straight to `tracker_config` with the admin's token:
+ * RLS lets a signed-in player update that row but not read `webhook_url` back, so
+ * the credential goes up and never comes down. Returns true when the row took it.
+ *
+ * A guest, or a device with no Supabase configured, returns false - the settings
+ * still save locally, so the admin UI keeps working, but the server will not
+ * announce until an admin signs in and saves again.
+ */
+export async function saveTrackerConfig({ webhook, wrMessage, posMessage }) {
+  const token = await authToken();
+  if (!token) return false;
+
+  const body = {};
+  if (webhook !== undefined) body.webhook_url = String(webhook).trim();
+  if (wrMessage !== undefined) body.wr_message = String(wrMessage).trim();
+  if (posMessage !== undefined) body.pos_message = String(posMessage).trim();
+  if (!Object.keys(body).length) return true;
+
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), TIMEOUT);
+  try {
+    const res = await fetch(`${supabaseUrl()}/rest/v1/tracker_config?id=eq.1`, {
+      method: 'PATCH',
+      headers: {
+        apikey: supabaseAnonKey(),
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+        prefer: 'return=minimal',
+      },
+      body: JSON.stringify(body),
+      signal: ctl.signal,
+    });
+    return res.ok;
+  } catch {
+    return false;                        // offline, DNS, timeout
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * The real runs on a track, or null when offline.
  *
  * This is not a page of a board: it is every real run on the track, for the game

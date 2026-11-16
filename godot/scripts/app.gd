@@ -70,7 +70,7 @@ var replay_sub: Label
 
 func _ready() -> void:
 	menu_seed = int(Storage.get_pref("track", 1))
-	if menu_seed < 1 or menu_seed > Tracks.ALL_TRACK_COUNT:
+	if not Tracks.is_menu_track(menu_seed):
 		menu_seed = 1
 	menu_mode = str(Storage.get_pref("mode", "speedrun"))
 	if menu_mode != "endless":
@@ -387,12 +387,14 @@ func _refresh_car_list() -> void:
 
 func _build_track_list(parent: Node) -> void:
 	track_buttons.clear()
-	for seed in range(1, Tracks.ALL_TRACK_COUNT + 1):
-		var s := seed
+	for s in Tracks.MENU_TRACKS:
 		var b := Button.new()
 		b.toggle_mode = true
 		b.custom_minimum_size = Vector2(62, 54)
 		b.text = "Track %d\n--" % s
+		# The button carries its own track number: the list has gaps now, so the
+		# number is not the button's position and cannot be read back off the index.
+		b.set_meta("track", s)
 		b.pressed.connect(func():
 			menu_seed = s
 			Storage.set_pref("track", s)
@@ -402,8 +404,8 @@ func _build_track_list(parent: Node) -> void:
 
 
 func _refresh_track_list() -> void:
-	for i in range(track_buttons.size()):
-		var s := i + 1
+	for b in track_buttons:
+		var s: int = b.get_meta("track")
 		var best: Variant = Storage.get_best_time(s) if menu_mode == "speedrun" else null
 		var rec := Storage.get_record(s)
 		var sub := "--"
@@ -411,8 +413,8 @@ func _refresh_track_list() -> void:
 			sub = "--" if best == null else _fmt_time(float(best))
 		else:
 			sub = _fmt_dist(float(rec["dist"])) if float(rec["dist"]) > 0.0 else "--"
-		track_buttons[i].text = "Track %d\n%s" % [s, sub]
-		track_buttons[i].button_pressed = (s == menu_seed)
+		b.text = "Track %d\n%s" % [s, sub]
+		b.button_pressed = (s == menu_seed)
 
 
 func _refresh_mode_list() -> void:

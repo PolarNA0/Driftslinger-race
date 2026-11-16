@@ -2,8 +2,10 @@ name: Deploy Supabase functions
 
 # Pushes the Edge Functions whenever their source changes, so a backend fix ships
 # with the commit that makes it rather than waiting for someone to run the CLI by
-# hand. Only the `board` function is deployed: `run` is what verifies and stores
-# runs, and it has not changed since it was first deployed.
+# hand. Both functions are deployed: `board` serves the leaderboard, and `run`
+# verifies and stores runs and announces records to the Discord tracker. `run`
+# used to be left out on the assumption it never changed; when the tracker moved
+# server-side it changed, and the omission meant the fix never shipped.
 on:
   push:
     branches: [main]
@@ -28,7 +30,9 @@ jobs:
       # --yes is required: a hosted change refuses to proceed without it, and CI
       # has no one to answer the prompt. --remote is the current spelling of what
       # used to be --project-ref.
-      - name: Deploy board
+      - name: Deploy functions
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: supabase functions deploy board --remote=pleotpbgzeohxbuxffiq --yes
+        run: |
+          supabase functions deploy board --remote=pleotpbgzeohxbuxffiq --yes
+          supabase functions deploy run   --remote=pleotpbgzeohxbuxffiq --yes

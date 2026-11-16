@@ -5,7 +5,7 @@ extends SceneTree
 
 func _init() -> void:
 	var bad := 0
-	for n in range(1, Tracks.ALL_TRACK_COUNT + 1):
+	for n in Tracks.MENU_TRACKS:
 		var opts := Tracks.track_opts(n)
 		var t := Track.new(n, opts)
 		var car := Car.new()
@@ -31,5 +31,5 @@ func _init() -> void:
 		var has_re: bool = t.fillets.any(func(f): return f.get("reattach", false))
 		print("track %2d: corners=%2d clean=%.3f finished=%s time=%.3f maxOff=%.2f grabbed=%d regrabs=%d reattach=%s %s"
 			% [n, t.fillets.size(), clean, str(car.finished), car.time, car.max_off, car.grabbed, car.regrabs, str(has_re), "OK" if ok else "FAIL"])
-	print("ALL_TRACK_COUNT=%d  bad=%d" % [Tracks.ALL_TRACK_COUNT, bad])
+	print("MENU_TRACKS=%d  bad=%d" % [Tracks.MENU_TRACKS.size(), bad])
 	quit(1 if bad > 0 else 0)

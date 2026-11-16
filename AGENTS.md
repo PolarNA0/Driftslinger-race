@@ -37,8 +37,9 @@ out. Do not add features there.
 - `godot/scripts/track.gd` — the road: a staircase of straight legs joined by
   quarter-turn circular-arc corners, sampled into `road[]` (points) and `rs[]`
   (arc-length per point).
-- `godot/scripts/tracks.gd` — the twenty-eight tracks: the twenty-five ported
-  time-attack tracks, plus the reattach showcase tracks 26–28.
+- `godot/scripts/tracks.gd` — the menu tracks: the ten ported time-attack
+  tracks (`PLAYABLE_TRACKS`), plus the reattach showcase tracks 26–28. Tracks
+  6–20 were removed, so the numbers are not a contiguous range.
 - `godot/scripts/car.gd` — the physics. `step(dt, held)` is pure and testable.
 - `godot/scripts/game.gd` — fixed 1/120s tick, modes, records, ghosts.
 - `godot/scripts/render.gd` — top-down orthographic view, road themes, and both
@@ -61,7 +62,8 @@ out. Do not add features there.
   (arc-length per point). Takes `opts` (`corners`, `radius`, `leadIn`,
   `finishLen`, `segLens`, `targetTime`) so a finite track can have its own shape;
   endless play passes none and gets the uniform `CFG` lengths.
-- `js/tracks.js` — the twenty-five time-attack tracks. `trackDef(n)` is a pure
+- `js/tracks.js` — the ten playable time-attack tracks (`PLAYABLE_TRACKS`:
+  1–5 and 21–25; 6–20 were removed). `trackDef(n)` is a pure
   function of the track number: radius, corner count, lead-in and the straight
   rhythm all come out of `n`, so a track is identical on every device (which the
   leaderboard and replays rely on). `targetTime` makes `Track.buildFinish` size

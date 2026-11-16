@@ -33,8 +33,10 @@ create policy tracker_write on public.tracker_config
 
 -- Column-level grants, so `webhook_url` is neither readable nor writable except
 -- by the service role. A select of it is refused outright rather than returned
--- blank, which makes the intent unmistakable.
-grant select (wr_message, pos_message) on public.tracker_config to authenticated;
+-- blank, which makes the intent unmistakable. `id` is readable because the admin
+-- client targets the single row with `?id=eq.1`, and PostgREST needs to read the
+-- column it filters on.
+grant select (id, wr_message, pos_message) on public.tracker_config to authenticated;
 grant update (webhook_url, wr_message, pos_message) on public.tracker_config to authenticated;
 grant select, insert, update on public.tracker_config to service_role;
 
