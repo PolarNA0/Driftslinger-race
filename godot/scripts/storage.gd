@@ -38,6 +38,23 @@ static func _write(name: String, value: Variant) -> void:
 	f.close()
 
 
+# --- endless: the single endless best ----------------------------------------
+# Endless is one road, so there is one endless best per account, not one per
+# seed. The steps travel with it so the player's own best can be watched back,
+# exactly as a speedrun best can.
+static func get_endless() -> Dictionary:
+	var v: Variant = _read("endless.v1", {})
+	return v if v is Dictionary else {}
+
+
+static func save_endless(ticks: int, metres: float, corners: int, steps: String) -> Dictionary:
+	var v := get_endless()
+	var prev := float(v.get("dist", 0.0))
+	if metres > prev:
+		_write("endless.v1", {"ticks": ticks, "dist": metres, "corners": corners, "steps": steps})
+	return {"dist": prev, "corners": int(v.get("corners", 0))}
+
+
 # --- endless: best distance per seed -----------------------------------------
 static func get_record(seed: int) -> Dictionary:
 	var all: Dictionary = _read("records.v1", {})

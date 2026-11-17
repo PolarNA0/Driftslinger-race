@@ -69,15 +69,20 @@ static func _write_queue(q: Array) -> void:
 
 
 # Queue a finished run. Always succeeds - uploading is not the player's problem.
-static func enqueue(track: int, steps: String, name: String) -> int:
+# `mode` is "speedrun" or "endless". An endless entry carries no track: there
+# is one endless road, so the server does not need to be told which one.
+static func enqueue(track: int, steps: String, name: String, mode: String = "speedrun") -> int:
 	var q := []
 	for e in read_queue():
 		var entry: Dictionary = e
-		if int(entry.get("track", -1)) == track and str(entry.get("steps", "")) == steps:
+		if str(entry.get("mode", "speedrun")) == mode \
+				and int(entry.get("track", -1)) == track \
+				and str(entry.get("steps", "")) == steps:
 			continue
 		q.append(entry)
 	q.append({
 		"track": track,
+		"mode": mode,
 		"steps": steps,
 		"name": name,
 		"at": int(Time.get_unix_time_from_system() * 1000.0),
@@ -98,10 +103,13 @@ static func _post(entry: Dictionary) -> Dictionary:
 	if token == "":
 		return {"retry": true}
 
+	var payload := {"track": int(entry["track"]), "steps": str(entry["steps"])}
+	if str(entry.get("mode", "speedrun")) == "endless":
+		payload["mode"] = "endless"
 	var res: Dictionary = await Net.shared().post_json(
 		NetConfig.function_endpoint("run"),
 		NetConfig.auth_headers(token),
-		{"track": int(entry["track"]), "steps": str(entry["steps"])},
+		payload,
 	)
 
 	# 422: the server replayed the run and it was not a finish. Re-sending it
@@ -138,6 +146,7 @@ static func flush() -> Variant:
 		var body: Variant = r.get("body")
 		var merged: Dictionary = body if body is Dictionary else {}
 		merged["track"] = int(entry["track"])
+		merged["mode"] = str(entry.get("mode", "speedrun"))
 		last = merged
 	_write_queue(keep)
 	return last
@@ -197,3 +206,47 @@ static func fetch_board(track: int) -> Variant:
 		return null
 	var rows: Variant = body.get("rows")
 	return rows if rows is Array else null
+
+
+# The real endless runs, furthest first, or null when offline.
+#
+# Endless is one board, so there is no track parameter. The game merges these into
+# its own backdrop and ranks the player by distance.
+static func fetch_endless_board() -> Variant:
+	var token: String = await Account.auth_token()
+	var res: Dictionary = await Net.shared().get_json(
+		"%s?mode=endless" % NetConfig.function_endpoint("board"),
+		NetConfig.auth_headers(token),
+	)
+	if not bool(res["ok"]):
+		return null
+	var body: Variant = res["body"]
+	if not (body is Dictionary):
+		return null
+	var rows: Variant = body.get("rows")
+	return rows if rows is Array else null
+
+
+# The signed-in player's endless best, or null when offline or unset.
+#
+# The endless score lives on the server, but the game reads it from local storage.
+# This pulls it back so a fresh install shows the account's real best, and hands
+# back the steps so the best can be watched.
+static func fetch_my_endless() -> Variant:
+	var me := Account.current_user_id()
+	if me == "":
+		return null
+	var token: String = await Account.auth_token()
+	if token == "":
+		return null
+	var res: Dictionary = await Net.shared().get_json(
+		"%s/endless_runs?user_id=eq.%s&select=ticks,steps" % [NetConfig.rest_endpoint(), me],
+		NetConfig.auth_headers(token),
+	)
+	if not bool(res["ok"]):
+		return null
+	var rows: Variant = res["body"]
+	if not (rows is Array) or rows.is_empty():
+		return null
+	var row: Dictionary = rows[0]
+	return {"ticks": int(row["ticks"]), "steps": row.get("steps")}

@@ -24,6 +24,9 @@ var board_seed := 1
 var board_page_no := 1
 var board_reals := []          # real runs on board_seed, as the server last returned
 var board_reals_seed := 0
+var endless_reals := []        # real endless runs, furthest first, as the server returned
+var endless_loaded := false    # whether the server has answered for the endless board
+var endless_page_no := 1
 var watching: Variant = null   # {kind, seed, ghost_id, name, time, label, tag, sub}
 
 var acct_mode := "login"
@@ -56,6 +59,14 @@ var lb_rows: VBoxContainer
 var lb_page_label: Label
 var lb_prev: Button
 var lb_next: Button
+var elb_title: Label
+var elb_note: Label
+var elb_rows: VBoxContainer
+var elb_page_label: Label
+var elb_prev: Button
+var elb_next: Button
+var btn_dead_board: Button
+var btn_dead_watch: Button
 var hist_sub: Label
 var hist_rows: VBoxContainer
 var acct_title: Label
@@ -68,6 +79,7 @@ var acct_toggle: Button
 var dead_tag: Label
 var dead_dist: Label
 var dead_sub: Label
+var dead_rank: Label
 var finish_tag: Label
 var finish_time: Label
 var finish_sub: Label
@@ -110,6 +122,7 @@ func _ready() -> void:
 	_build_menu()
 	_build_tracks()
 	_build_board()
+	_build_endless_board()
 	_build_history()
 	_build_account()
 	_build_dead()
@@ -139,6 +152,7 @@ func _capture_after(secs: float) -> void:
 		match which:
 			"tracks": _show_tracks()
 			"board": _show_leaderboard(menu_seed)
+			"endless": _show_endless_board()
 			"history": _show_history()
 			"account": _open_account("register")
 			_: _to_menu()
@@ -417,7 +431,7 @@ func _build_menu() -> void:
 	var actions := _row(8)
 	col.add_child(actions)
 	actions.add_child(_primary_button("Play", func(): _start_run(menu_seed)))
-	actions.add_child(_button("Leaderboard", func(): _show_leaderboard(menu_seed)))
+	actions.add_child(_button("Leaderboard", _open_leaderboard))
 	actions.add_child(_button("History", _show_history))
 
 	acct_bar = _col(6)
@@ -696,6 +710,158 @@ func _show_leaderboard(seed: int) -> void:
 	# drawn first so it is never blank while that loads.
 	_load_reals(seed)
 
+# =============================================================================
+# Endless leaderboard
+# =============================================================================
+#
+# One board, furthest distance wins. It reads the same way as a track board, but
+# there is no track: the road is always the same one, so every run is comparable
+# and the player has a single endless best.
+
+
+func _build_endless_board() -> void:
+	var col := _new_overlay("endless", "Endless leaderboard")
+	elb_title = _label("Furthest distance", 20)
+	col.add_child(elb_title)
+	elb_note = _label("", 14)
+	col.add_child(elb_note)
+
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(0, 300)
+	col.add_child(scroll)
+	elb_rows = _col(2)
+	elb_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(elb_rows)
+
+	var pager := _row(8)
+	col.add_child(pager)
+	elb_prev = _button("Prev", func():
+		endless_page_no -= 1
+		_render_endless_board())
+	pager.add_child(elb_prev)
+	elb_page_label = _label("1 / 1", 16)
+	elb_page_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	elb_page_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	pager.add_child(elb_page_label)
+	elb_next = _button("Next", func():
+		endless_page_no += 1
+		_render_endless_board())
+	pager.add_child(elb_next)
+
+	col.add_child(_button("Back", func(): _show_only("menu")))
+
+
+func _render_endless_board() -> void:
+	var best := float(Storage.get_endless().get("dist", 0.0))
+	var me: Variant = null
+	if best > 0.0:
+		me = {"name": _player_name(), "dist": best}
+	var listed := false
+	for r in endless_reals:
+		if bool((r as Dictionary).get("you", false)):
+			listed = true
+			break
+	var page := Leaderboard.endless_page(endless_page_no, null if listed else me,
+			Leaderboard.PER_PAGE, endless_reals)
+	endless_page_no = int(page["page"])
+
+	elb_title.text = "Furthest distance"
+	if int(page["player_rank"]) > 0:
+		elb_note.text = "You are #%d of %d" % [int(page["player_rank"]), int(page["total"])]
+	elif not endless_loaded:
+		elb_note.text = "Loading the board\u2026"
+	else:
+		elb_note.text = "%d racers \u00b7 set a distance to join" % int(page["total"])
+
+	for c in elb_rows.get_children():
+		c.queue_free()
+	for r in page["rows"]:
+		var text := "%d   %s   %s" % [int(r["rank"]), str(r["name"]), _fmt_dist(float(r["dist"]))]
+		if bool(r["real"]) and bool(r["watchable"]):
+			var row: Dictionary = r
+			var b := _button(text + "   Watch", func():
+				_watch_endless(str(row["steps"]), str(row["name"]), float(row["dist"])))
+			elb_rows.add_child(b)
+		elif bool(r["you"]):
+			var row2: Dictionary = r
+			var own: Variant = Storage.get_endless()
+			if own.has("steps") and str(own["steps"]) != "":
+				var b2 := _button(text + "   Replay", func():
+					_watch_endless(str(own["steps"]), _player_name(), float(row2["dist"])))
+				elb_rows.add_child(b2)
+			else:
+				elb_rows.add_child(_label(text + "   you", 14))
+		else:
+			elb_rows.add_child(_label(text, 14))
+
+	elb_page_label.text = "%d / %d" % [int(page["page"]), int(page["pages"])]
+	elb_prev.disabled = int(page["page"]) <= 1
+	elb_next.disabled = int(page["page"]) >= int(page["pages"])
+
+
+# The menu has one board button, and it opens the board for the selected mode.
+# A separate endless button made the action row wider than a phone card.
+func _open_leaderboard() -> void:
+	if menu_mode == "endless":
+		_show_endless_board()
+	else:
+		_show_leaderboard(menu_seed)
+
+
+func _show_endless_board() -> void:
+	var best := float(Storage.get_endless().get("dist", 0.0))
+	endless_page_no = 1 if best <= 0.0 else Leaderboard.page_for_rank(
+		Leaderboard.endless_rank(best, endless_reals))
+	_render_endless_board()
+	_show_only("endless")
+	# Then fetch the real runs and re-render merged. The local board is drawn first
+	# so it is never blank while that loads.
+	_load_endless_reals()
+
+
+# Fetch the real endless runs and re-render the endless board if it is showing.
+func _load_endless_reals() -> void:
+	var rows: Variant = await Api.fetch_endless_board()
+	if rows == null:
+		return
+	var out := []
+	for r in rows:
+		var row: Dictionary = r
+		out.append({
+			"name": str(row.get("name", "")),
+			"dist": float(row.get("metres", 0.0)),
+			"ticks": int(row.get("ticks", 0)),
+			"steps": row.get("steps"),
+			"you": bool(row.get("you", false)),
+		})
+	endless_reals = out
+	endless_loaded = true
+	if overlay == "endless":
+		_render_endless_board()
+
+
+# Watch an endless run from its button steps. It replays on the endless road and
+# ends where the car left it, exactly as the live run did.
+func _watch_endless(steps: String, name: String, dist: float) -> void:
+	watching = {
+		"kind": "endless", "seed": 1, "ghost_id": null, "name": name, "time": dist,
+		"steps": steps,
+		"label": "%s's endless run" % name, "tag": "Endless run",
+		"sub": "%s \u00b7 %s" % [name, _fmt_dist(dist)],
+	}
+	_hide_overlays()
+	if not game.load_endless_replay(Replay.decode_steps(steps)):
+		_end_watching()
+		_to_menu()
+		return
+	_hud_reset()
+	hint_label.visible = false
+	_show_round_button(false)
+	_show_watch_badge("Watching %s \u00b7 %s" % [name, _fmt_dist(dist)])
+	game.start()
+
+
+
 
 # =============================================================================
 # History
@@ -876,6 +1042,15 @@ func _sync_my_runs() -> void:
 		# and without one the board cannot play it back.
 		if Storage.get_replay(seed) == null:
 			Storage.save_replay(seed, Replay.make_replay(seed, Replay.decode_steps(str(steps)), time))
+	# The endless best lives on the server too. Pull it so a fresh install shows
+	# the account's real distance, and keep the steps so it can be watched.
+	var endless: Variant = await Api.fetch_my_endless()
+	if endless is Dictionary:
+		var ticks := int((endless as Dictionary)["ticks"])
+		var dist := float(ticks) / 120.0 * Cfg.SPEED / Cfg.PX_PER_METRE
+		var prev := float(Storage.get_endless().get("dist", 0.0))
+		if dist > prev:
+			Storage.save_endless(ticks, dist, 0, str((endless as Dictionary).get("steps", "")))
 	_refresh_track_list()
 
 
@@ -934,6 +1109,19 @@ func _build_dead() -> void:
 	col.add_child(dead_dist)
 	dead_sub = _label("", 16)
 	col.add_child(dead_sub)
+	dead_rank = _label("", 16)
+	col.add_child(dead_rank)
+	btn_dead_watch = _button("Watch my run", func():
+		var own: Variant = Storage.get_endless()
+		if own.has("steps") and str(own["steps"]) != "":
+			_watch_endless(str(own["steps"]), _player_name(), float(own.get("dist", 0.0))))
+	col.add_child(btn_dead_watch)
+	btn_dead_board = _button("Leaderboard", func():
+		if game.mode == "speedrun":
+			_show_leaderboard(game.seed_num)
+		else:
+			_show_endless_board())
+	col.add_child(btn_dead_board)
 	col.add_child(_button("Try again", func(): _start_run(game.seed_num)))
 	col.add_child(_button("Main menu", _to_menu))
 
@@ -1127,11 +1315,13 @@ func _on_game_change(extra: Dictionary) -> void:
 		return
 
 	if bool(extra.get("died", false)):
+		dead_rank.text = ""
 		if game.mode == "speedrun":
 			dead_tag.text = "Crashed"
 			dead_dist.text = _fmt_time(game.run_time())
 			var best: Variant = game.record_time()
 			dead_sub.text = "best --" if best == null else "best %s" % _fmt_time(float(best))
+			btn_dead_watch.visible = false
 		else:
 			var prev: Dictionary = extra["prev"]
 			var beat := game.metres() > float(prev["dist"])
@@ -1139,6 +1329,11 @@ func _on_game_change(extra: Dictionary) -> void:
 			dead_dist.text = _fmt_dist(game.metres())
 			var best := maxf(float(prev["dist"]), game.metres())
 			dead_sub.text = "best %s \u00b7 %d corners" % [_fmt_dist(best), game.car.grabbed]
+			btn_dead_watch.visible = Storage.get_endless().has("steps")
+			# Queue the endless run, then try to send it. Like a speedrun, nothing
+			# here blocks play: the run is saved locally first.
+			Api.enqueue(0, Replay.encode_steps(game.steps), _player_name(), "endless")
+			_submit_endless_queued()
 		_show_only("dead")
 		hint_label.visible = false
 		_show_round_button(false)
@@ -1185,6 +1380,18 @@ func _submit_queued(seed: int) -> void:
 	var rank := int(page["player_rank"])
 	finish_rank.text = "#%d on Track %d" % [rank, seed] if rank > 0 else ""
 	btn_finish_wr.visible = Leaderboard.world_record(seed, reals) != null
+
+
+# Send queued runs, then refresh the endless death card against the server board.
+# The rank shown is the server's, not a local estimate.
+func _submit_endless_queued() -> void:
+	await Api.flush()
+	await _load_endless_reals()
+	if overlay != "dead" or game.mode != "endless":
+		return
+	var dist := game.metres()
+	var rank := Leaderboard.endless_rank(dist, endless_reals)
+	dead_rank.text = "#%d of %d" % [rank, int(Leaderboard.endless_page(1, null, Leaderboard.PER_PAGE, endless_reals)["total"])] if rank > 0 else ""
 
 
 func _on_tick() -> void:

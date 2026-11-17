@@ -1,9 +1,15 @@
 // Upload a finished run.
 //
-// The client sends the button steps, never a time. This function replays them
-// with the game's own physics and stores what the physics produces, so a forged
-// time has nothing to attach to. It then returns the player's real rank, which
-// the client shows instead of its local estimate.
+// The client sends the button steps, never a time or a distance. This function
+// replays them with the game's own physics and stores what the physics produces,
+// so a forged score has nothing to attach to. It then returns the player's real
+// rank, which the client shows instead of its local estimate.
+//
+// Two boards, two shapes of run. A speedrun run is a time on one track
+// (`mode` absent or "speedrun"); an endless run is a distance on the single
+// endless road (`mode: "endless"`). Both are verified the same way - the physics
+// decides the score - but they rank in opposite directions and live in different
+// tables, so the branch happens right after the replay.
 //
 // Auth: the caller's Supabase access token identifies the player. The token is
 // verified before anything is written, and the row is attributed to that user, so
@@ -11,7 +17,7 @@
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { json, preflight, bearer } from '../_shared/http.ts';
-import { replayRun } from '../_shared/physics/verify.js';
+import { replayRun, replayEndless, MAX_ENDLESS_STEPS } from '../_shared/physics/verify.js';
 import {
   DEFAULT_POS_MESSAGE, DEFAULT_WR_MESSAGE, formatMessage, messageVars, postWebhook,
 } from '../_shared/tracker.ts';
@@ -41,21 +47,27 @@ Deno.serve(async (req) => {
   const { data: { user }, error: authError } = await admin.auth.getUser(token);
   if (authError || !user) return json({ error: 'bad token' }, 401);
 
-  let body: { track?: unknown; steps?: unknown };
+  let body: { track?: unknown; steps?: unknown; mode?: unknown };
   try {
     body = await req.json();
   } catch {
     return json({ error: 'bad json' }, 400);
   }
 
+  const endless = body?.mode === 'endless';
   const track = Number(body?.track);
   const steps = body?.steps;
 
   // A fast shape check before the expensive part. Replaying is about 9ms of CPU,
-  // so a malformed payload is rejected before it is paid for.
-  if (typeof steps !== 'string' || !/^[01]+$/.test(steps) || steps.length > 7200) {
+  // so a malformed payload is rejected before it is paid for. An endless run is
+  // longer than a speedrun (it ends only when the car crashes), so it gets the
+  // larger cap.
+  const maxSteps = endless ? MAX_ENDLESS_STEPS : 7200;
+  if (typeof steps !== 'string' || !/^[01]+$/.test(steps) || steps.length > maxSteps) {
     return json({ error: 'bad steps' }, 422);
   }
+
+  if (endless) return submitEndless(user.id, steps);
 
   const result = replayRun(track, steps);
   if (!result.ok) {
@@ -98,6 +110,41 @@ Deno.serve(async (req) => {
     improved: data.improved,
   });
 });
+
+/**
+ * Verify and store an endless run, then return the rank the client shows.
+ *
+ * Endless has one board, so there is no track to validate - the physics pins the
+ * seed itself. A run that did not end in a crash is refused: an endless run ends
+ * when the car leaves the road, so a sequence that never dies is not a run, it is
+ * a script driving forever.
+ */
+async function submitEndless(userId: string, steps: string) {
+  const result = replayEndless(steps);
+  if (!result.ok) {
+    return json({ error: result.reason, ok: false, reason: result.reason }, 422);
+  }
+
+  const { data, error } = await admin.rpc('submit_endless', {
+    p_user: userId,
+    p_ticks: result.ticks,
+    p_steps: steps,
+  });
+
+  if (error) {
+    if (error.code === '23503') return json({ error: 'no profile' }, 409);
+    return json({ error: 'store failed' }, 500);
+  }
+
+  return json({
+    ok: true,
+    mode: 'endless',
+    metres: result.metres,
+    rank: data.rank,
+    total: data.total,
+    improved: data.improved,
+  });
+}
 
 /**
  * Post an improvement to the admin's Discord channel.

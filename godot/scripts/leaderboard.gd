@@ -228,6 +228,161 @@ static func board_page(n: int, page: int, player: Variant = null, per_page: int 
 	}
 
 
+# =============================================================================
+# Endless: one board, furthest distance wins
+# =============================================================================
+#
+# Endless is one road, so there is one board, and it ranks the other way round
+# from a track board: more distance is better. There is no baked ghost field to
+# merge into - a ghost field exists to give a *time* board depth, and the endless
+# board is short and real - so this board is simply the real runs, sorted. The
+# player is slotted in by distance, so their rank is real.
+
+const ENDLESS_BACKDROP := 50000
+
+
+# A generated endless row, so the board has a field to sit in rather than a
+# handful of names and a lot of white space. It is the same idea as a track
+# board's tail: a monotonic curve *behind* the real rows. A track board's tail is
+# slower than its real head; here "behind" means shorter, because more distance
+# wins, so the curve runs from a modest maximum down to a bare opening straight.
+# A run longer than the maximum is therefore at the very top of the board, and a
+# weak run is honestly buried in the field.
+static func endless_backdrop_dist(i: int) -> float:
+	var frac := float(i + 1) / float(ENDLESS_BACKDROP)
+	return 10.0 + 290.0 * pow(1.0 - frac, 1.6)
+
+
+static func endless_backdrop_name(i: int) -> String:
+	var h := U.imul32(i + 104729, 2654435761) & 0xFFFFFFFF
+	return GhostRun.ghost_name(h)
+
+
+# The world record distance: the furthest real run, or null when the board is
+# empty. Endless has no baked head, so an empty board has no record to show.
+static func endless_world_record(reals: Array = []) -> Variant:
+	if reals.is_empty():
+		return null
+	var best: Dictionary = reals[0]
+	for r in reals:
+		var row: Dictionary = r
+		if float(row.get("dist", 0.0)) > float(best.get("dist", 0.0)):
+			best = row
+	return {
+		"rank": 1, "name": str(best["name"]), "dist": float(best["dist"]),
+		"steps": best.get("steps"), "real": true,
+		"watchable": best.get("steps") != null and str(best.get("steps")) != "",
+	}
+
+
+# Racers no shorter than `dist` (ties included).
+static func endless_beaten(dist: float) -> int:
+	if is_nan(dist) or is_inf(dist) or dist <= 0.0:
+		return 0
+	var lo := 0
+	var hi := ENDLESS_BACKDROP
+	while lo < hi:
+		var m := (lo + hi) >> 1
+		if endless_backdrop_dist(m) >= dist:
+			lo = m + 1
+		else:
+			hi = m
+	return lo
+
+
+# The player's 1-based rank, or 0 when there is no distance. Same merged count
+# `endless_page` draws, so the two never disagree.
+static func endless_rank(dist: float, reals: Array = []) -> int:
+	if is_nan(dist) or is_inf(dist) or dist <= 0.0:
+		return 0
+	var ahead := 0
+	for r in reals:
+		var rd := float((r as Dictionary).get("dist", 0.0))
+		if not (is_nan(rd) or is_inf(rd)) and rd > dist:
+			ahead += 1
+	return endless_beaten(dist) + ahead + 1
+
+
+# One page of the endless board, with the signed-in player slotted in by
+# distance. `reals` are {name, dist, steps, you}; `player` is {name, dist} for a
+# local best the server has not listed yet.
+static func endless_page(page: int, player: Variant = null, per_page: int = PER_PAGE, reals: Array = []) -> Dictionary:
+	var all := []
+	for r in reals:
+		all.append((r as Dictionary).duplicate())
+	if player != null:
+		var listed := false
+		for r in all:
+			if bool(r.get("you", false)):
+				listed = true
+				break
+		if not listed:
+			var p: Dictionary = (player as Dictionary).duplicate()
+			p["you"] = true
+			p["steps"] = null
+			all.append(p)
+	all.sort_custom(func(a, b): return float(a["dist"]) > float(b["dist"]))
+
+	var total := ENDLESS_BACKDROP + all.size()
+	var pages := maxi(1, int(ceil(float(total) / float(per_page))))
+	var p2 := clampi(page, 1, pages)
+
+	# Backdrop rows each real run beats or ties, in real-run order.
+	var beaten := []
+	for r in all:
+		beaten.append(endless_beaten(float(r["dist"])))
+
+	# Real run k sits after the backdrop rows it beat *and* the k real runs
+	# already placed. Higher distance sorts first, so this is a descending
+	# merge - the same shape as the track board, mirrored.
+	var real_at := {}
+	for k in range(all.size()):
+		real_at[int(beaten[k]) + k] = all[k]
+
+	var my_index := -1
+	for k in range(all.size()):
+		if bool(all[k].get("you", false)):
+			my_index = k
+			break
+	var player_rank_here := 0 if my_index < 0 else int(beaten[my_index]) + my_index + 1
+
+	var start := (p2 - 1) * per_page
+	var out := []
+	var pos := start
+	while pos < mini(start + per_page, total):
+		if real_at.has(pos):
+			var r: Dictionary = real_at[pos]
+			var steps: Variant = r.get("steps")
+			out.append({
+				"rank": pos + 1, "name": str(r["name"]), "dist": float(r["dist"]),
+				"real": true, "you": bool(r.get("you", false)),
+				"steps": steps,
+				"watchable": steps != null and str(steps) != "",
+			})
+			pos += 1
+			continue
+		# Backdrop index: gi + pushedBy(gi) == pos, strictly increasing in gi.
+		var lo := 0
+		var hi := ENDLESS_BACKDROP
+		while lo < hi:
+			var m := (lo + hi) >> 1
+			if m + _pushed_by(beaten, m) < pos:
+				lo = m + 1
+			else:
+				hi = m
+		out.append({
+			"rank": pos + 1, "name": endless_backdrop_name(lo),
+			"dist": endless_backdrop_dist(lo), "real": false, "you": false,
+			"steps": null, "watchable": false,
+		})
+		pos += 1
+
+	return {
+		"rows": out, "page": p2, "pages": pages, "total": total,
+		"player_rank": player_rank_here, "real_count": all.size(),
+	}
+
+
 # How many real runs were inserted at or before ghost index `gi`.
 static func _pushed_by(beaten: Array, gi: int) -> int:
 	var lo := 0

@@ -11,4 +11,5 @@ export { Track } from './track.js';
 export { Car } from './car.js';
 export { trackOpts, TRACK_COUNT, PLAYABLE_TRACKS, isPlayableTrack } from './tracks.js';
 export { mulberry32, angDiff, clamp } from './util.js';
-export { replayRun, FIXED_DT, TICKS_PER_SECOND, MAX_STEPS } from './verify.js';
+export { replayRun, replayEndless, FIXED_DT, TICKS_PER_SECOND, MAX_STEPS,
+         MAX_ENDLESS_STEPS, ENDLESS_SEED } from './verify.js';

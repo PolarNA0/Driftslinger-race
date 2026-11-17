@@ -15,7 +15,7 @@ import { Track } from '../physics/track.js';
 import { Car } from '../physics/car.js';
 import { CFG } from '../physics/config.js';
 import { TRACK_COUNT, PLAYABLE_TRACKS, isPlayableTrack, trackDef, trackOpts } from '../physics/tracks.js';
-import { replayRun, FIXED_DT } from '../supabase/functions/_shared/physics/verify.js';
+import { replayRun, replayEndless, ENDLESS_SEED, FIXED_DT } from '../supabase/functions/_shared/physics/verify.js';
 
 const DT = 1 / 60;
 const seeds = [1, 2, 3, 7, 11, 42, 99, 123, 777, 2024];
@@ -406,6 +406,60 @@ console.log('a submitted run is verified by re-simulation, never trusted');
   flipped[mid] = flipped[mid] === '1' ? '0' : '1';
   const fv = replayRun(1, flipped.join(''));
   ok(!fv.ok || fv.time !== v.time, 'a tampered step sequence must not reproduce the time');
+}
+
+// --- server: the endless verifier --------------------------------------------
+// Endless has no finish line: a run ends when the car leaves the road, and the
+// score is how far it got. The server derives that distance the same way it
+// derives a time, by replaying the steps, so a forged distance has nothing to
+// attach to.
+console.log('an endless run is scored by re-simulated distance, never trusted');
+{
+  // A reference endless run: drive the clean line for a while, then let go and
+  // never grab again. The release costs the car the road, which is exactly how a
+  // real endless run ends.
+  const t = new Track(ENDLESS_SEED);
+  const c = new Car(); c.reset(t);
+  const steps = [];
+  let i = 0;
+  while (c.alive && i++ < 1200) { const h = timing(0)(c); steps.push(h); c.step(FIXED_DT, h); }
+  while (c.alive && steps.length < 20000) { steps.push(false); c.step(FIXED_DT, false); }
+  ok(!c.alive, 'the reference endless run should end in a crash');
+  const encoded = encodeSteps(steps);
+
+  const v = replayEndless(encoded);
+  ok(v.ok, 'a run that crashes should verify');
+  ok(v.ticks === steps.length, 'the score is the whole step count, not a float sum');
+  ok(Math.abs(v.metres - (v.ticks * FIXED_DT * CFG.speed) / CFG.pxPerMetre) < 1e-9,
+    'metres derive from the tick count, so they never disagree with it');
+  ok(replayEndless(encoded).metres === v.metres, 'endless verification must be deterministic');
+
+  // The road is pinned, so the seed a run was driven on does not travel and
+  // cannot be used to shop for an easier board.
+  ok(ENDLESS_SEED === 1, 'endless verifies on one fixed road');
+
+  ok(!replayEndless('nonsense').ok, 'non-binary steps must be rejected');
+  ok(!replayEndless('').ok, 'an empty step string must be rejected');
+  ok(!replayEndless('0'.repeat(50)).ok, 'a run that never crashes must be rejected');
+  // A scripted perfect line that simply does not die is not a run either: the
+  // physics has to kill it for the distance to count.
+  const immortal = [];
+  {
+    const ct = new Track(ENDLESS_SEED);
+    const cc = new Car(); cc.reset(ct);
+    while (cc.alive && immortal.length < 3000) { const h = timing(0)(cc); immortal.push(h); cc.step(FIXED_DT, h); }
+  }
+  ok(immortal.length === 3000, 'the clean line should still be alive at 3000 steps');
+  ok(!replayEndless(encodeSteps(immortal)).ok,
+    'a run that never crashes must be refused');
+
+  // Flipping a step inside the driven line changes the run, so a client cannot
+  // nudge the distance without actually driving the line.
+  const flipped = encoded.split('');
+  const mid = Math.floor(steps.length / 2);
+  flipped[mid] = flipped[mid] === '1' ? '0' : '1';
+  const fv = replayEndless(flipped.join(''));
+  ok(!fv.ok || fv.metres !== v.metres, 'a tampered endless sequence must not reproduce the distance');
 }
   console.log(`\n${pass} passed, ${fail} failed`);
 

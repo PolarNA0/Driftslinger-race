@@ -38,6 +38,7 @@ var steps := []
 
 var replay_steps: Variant = null
 var replay_index := 0
+var replay_endless := false
 
 var ghost_car: Car = null
 var ghost_steps: Variant = null
@@ -56,7 +57,11 @@ func load_track(p_seed: int, p_mode: String = "") -> void:
 	if p_mode != "":
 		mode = p_mode
 	seed_num = p_seed
-	track = Track.new(seed_num) if mode == "endless" else Track.new(seed_num, Tracks.track_opts(seed_num))
+	# A replay is of a speedrun or of an endless run, and they are different roads:
+	# the endless road grows forever, the speedrun road is the fixed track. Pick by
+	# what is being replayed, not by the replay mode itself.
+	var endless := mode == "endless" or (mode == "replay" and replay_endless)
+	track = Track.new(seed_num) if endless else Track.new(seed_num, Tracks.track_opts(seed_num))
 	car = Car.new()
 	car.reset(track)
 	renderer.track = track
@@ -82,7 +87,20 @@ func load_replay(p_seed: int) -> bool:
 		return false
 	replay_steps = Replay.decode_steps(rep["steps"])
 	replay_index = 0
+	replay_endless = false
 	load_track(p_seed, "replay")
+	return true
+
+
+# Set up an endless replay: the endless road, re-simulated from the stored steps.
+# The run ends when the car leaves the road, exactly as it did live.
+func load_endless_replay(p_steps: Array) -> bool:
+	if p_steps.is_empty():
+		return false
+	replay_steps = p_steps
+	replay_index = 0
+	replay_endless = true
+	load_track(1, "replay")
 	return true
 
 
@@ -187,8 +205,12 @@ func record_time() -> Variant:
 	return Storage.get_best_time(seed_num)
 
 
-# Best distance on this track so far, the endless score.
+# Best endless distance so far. Endless is one road, so there is one endless
+# best per account; the per-seed record is kept for anything that still reads it.
 func record_dist() -> float:
+	var e := Storage.get_endless()
+	if e.has("dist"):
+		return float(e["dist"])
 	return float(Storage.get_record(seed_num)["dist"])
 
 
@@ -272,6 +294,12 @@ func _die() -> void:
 		changed.emit({"died": true, "replay": true})
 		return
 	var prev := Storage.save_record(seed_num, metres(), car.grabbed)
+	# Endless is one board, so the score that uploads is the single endless best,
+	# steps and all, so it can be watched back the way a speedrun best can. The
+	# per-seed record above stays for the local per-seed readout.
+	if mode == "endless":
+		Storage.save_endless(int(car.time * 120.0), metres(), car.grabbed,
+				Replay.encode_steps(steps))
 	kick(18.0)
 	changed.emit({"died": true, "prev": prev})
 

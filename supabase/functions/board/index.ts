@@ -1,4 +1,5 @@
-// The real runs on a track, for the game to merge into its ghost field.
+// The real runs on a track, for the game to merge into its ghost field, or the
+// endless board when `?mode=endless`.
 //
 // Public: no token needed, because the board is public data. Reading it with the
 // anon key is enough, and RLS on `runs` and `profiles` already allows that read.
@@ -20,6 +21,7 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { json, preflight, bearer } from '../_shared/http.ts';
 import { isPlayableTrack } from '../_shared/physics/tracks.js';
+import { CFG } from '../_shared/physics/config.js';
 
 // A track is not expected to hold more real runs than this. The cap bounds the
 // response; the ghost field behind it is unbounded and never travels.
@@ -39,6 +41,13 @@ Deno.serve(async (req) => {
   if (req.method !== 'GET') return json({ error: 'method not allowed' }, 405);
 
   const url = new URL(req.url);
+
+  // Endless is one board, so it takes its own branch: there is no track, and the
+  // ranking is by distance (more is better) rather than by time.
+  if (url.searchParams.get('mode') === 'endless') {
+    return await endlessBoard();
+  }
+
   const track = Number(url.searchParams.get('track'));
 
   if (!isPlayableTrack(track)) {
@@ -111,3 +120,73 @@ Deno.serve(async (req) => {
     you: myRank,
   });
 });
+
+/**
+ * The endless board: every real endless run, furthest first.
+ *
+ * Public, like the track board - no token is needed to read it. The client merges
+ * this into its own backdrop and ranks the player by distance, so `metres` and
+ * `ticks` both travel: the client shows metres but ranks by ticks, so two runs
+ * one step apart never tie by a rounding.
+ *
+ * A caller with a token also learns which row is theirs, so the game can mark it
+ * without a second request.
+ */
+async function endlessBoard(req: Request) {
+  const { data, error } = await anon
+    .from('endless_board')
+    .select('rank, username, ticks, metres, user_id')
+    .order('rank', { ascending: true })
+    .limit(MAX_ROWS);
+
+  if (error) return json({ error: 'board unavailable' }, 500);
+
+  // The button sequences, keyed by user, so a run can be watched. `endless_runs`
+  // holds one row per player, so this joins one-to-one.
+  const { data: runRows, error: runErr } = await anon
+    .from('endless_runs')
+    .select('user_id, steps');
+
+  if (runErr) return json({ error: 'board unavailable' }, 500);
+
+  const stepsFor = new Map((runRows ?? []).map((r) => [r.user_id, r.steps]));
+
+  // A signed-in caller learns which row is theirs, so the game can mark it
+  // without a second request. Read with the caller's token so RLS applies.
+  let me: string | null = null;
+  let myRank: number | null = null;
+  const token = bearer(req);
+  if (token) {
+    const { data: auth } = await anon.auth.getUser(token);
+    if (auth?.user) {
+      me = auth.user.id;
+      const { data: mine } = await anon
+        .from('endless_board')
+        .select('rank')
+        .eq('user_id', me)
+        .maybeSingle();
+      myRank = mine?.rank ?? null;
+    }
+  }
+
+  const rows = (data ?? []).map((r) => {
+    const steps = stepsFor.get(r.user_id) ?? null;
+    return {
+      rank: r.rank,
+      name: r.username,
+      ticks: r.ticks,
+      metres: r.metres,
+      steps,
+      watchable: !!steps,
+      you: me !== null && r.user_id === me,
+    };
+  });
+
+  return json({
+    rows,
+    page: 1,
+    pages: 1,
+    total: rows.length,
+    you: myRank,
+  });
+}
