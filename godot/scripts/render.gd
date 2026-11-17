@@ -6,13 +6,15 @@ class_name Renderer2D
 # and the car is drawn rotated by its heading relative to the camera.
 
 const ROAD_W_FRAC := 0.358
-# On a phone-portrait window the road fills ROAD_W_FRAC of the width. On a wider
-# or shorter window that same formula would zoom the road up until you can only
-# see a few car lengths ahead, so the zoom is also capped so the screen always
-# shows at least MIN_WORLD_H of the world vertically. The two agree at the phone
-# size, which is why the phone look is unchanged; on a desktop window the road
-# stays a sane size instead of filling a 1280px-wide screen with tarmac.
-const MIN_WORLD_H := 460.0
+# The design window is 420x820 (project.godot), and at that size ROAD_W_FRAC puts
+# the road at 0.358*420 = 150px with a scale of ~1.634. That scale also shows
+# 820/1.634 ~= 500 world units of road ahead. This is the amount of lookahead the
+# game is tuned for, so the zoom is capped to never show less than that: on a wide
+# desktop window the width formula alone would zoom in until only a few car
+# lengths are visible, while the cap keeps the phone's exact zoom and simply
+# reveals more road to the sides. The two agree at the phone size, which is why
+# the phone look is unchanged.
+const MIN_WORLD_H := 500.0
 const CAR_ANCHOR := 0.55
 
 # One theme per road. Road is always darker than the ground, or the ribbon
