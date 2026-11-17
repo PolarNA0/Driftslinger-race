@@ -6,6 +6,13 @@ class_name Renderer2D
 # and the car is drawn rotated by its heading relative to the camera.
 
 const ROAD_W_FRAC := 0.358
+# On a phone-portrait window the road fills ROAD_W_FRAC of the width. On a wider
+# or shorter window that same formula would zoom the road up until you can only
+# see a few car lengths ahead, so the zoom is also capped so the screen always
+# shows at least MIN_WORLD_H of the world vertically. The two agree at the phone
+# size, which is why the phone look is unchanged; on a desktop window the road
+# stays a sane size instead of filling a 1280px-wide screen with tarmac.
+const MIN_WORLD_H := 460.0
 const CAR_ANCHOR := 0.55
 
 # One theme per road. Road is always darker than the ground, or the ribbon
@@ -19,24 +26,17 @@ const THEMES := [
 	{"ground": Color8(77, 16, 35), "road": Color8(203, 203, 203), "stripe": Color8(222, 222, 222), "pole": Color8(40, 8, 18)},
 ]
 
-# The selectable cars. A model is either a flat vector body (drawn from the
-# outline below) or a sprite drawn from `assets/cars/`. Sprite art is stored
-# nose-up, so it lines up with the vector cars, which are drawn nose-first along
-# -Y. The sprite is a CC0 top-down car; see `assets/cars/CREDITS.md`.
+# The selectable cars. Every one is a real top-down sprite from `assets/cars/`
+# (free CC0 art; see `assets/cars/CREDITS.md`), stored nose-up so it shares the
+# car's -Y nose frame. The flat vector bodies the port shipped with were drawn in
+# code and read as placeholders, so they are gone; `body` is kept per model only
+# so the menu swatch and the ghost tint have a colour to work from.
 const CAR_MODELS := [
-	{"kind": "vector", "name": "Sunbeam", "body": Color8(255, 209, 102), "dark": Color8(196, 150, 54), "glass": Color8(30, 38, 56)},
-	{"kind": "vector", "name": "Ember", "body": Color8(238, 92, 66), "dark": Color8(170, 52, 36), "glass": Color8(40, 20, 18)},
-	{"kind": "vector", "name": "Mint", "body": Color8(104, 219, 168), "dark": Color8(50, 158, 116), "glass": Color8(16, 46, 40)},
-	{"kind": "vector", "name": "Cobalt", "body": Color8(92, 156, 255), "dark": Color8(46, 96, 186), "glass": Color8(16, 28, 54)},
-	{"kind": "vector", "name": "Orchid", "body": Color8(206, 130, 255), "dark": Color8(140, 76, 186), "glass": Color8(34, 20, 50)},
-	{"kind": "vector", "name": "Frost", "body": Color8(238, 242, 250), "dark": Color8(150, 160, 178), "glass": Color8(28, 34, 46)},
-	{"kind": "vector", "name": "Graphite", "body": Color8(70, 74, 88), "dark": Color8(30, 32, 40), "glass": Color8(120, 190, 255)},
-	{"kind": "vector", "name": "Coral", "body": Color8(255, 138, 92), "dark": Color8(188, 84, 48), "glass": Color8(46, 24, 20)},
-	{"kind": "sprite", "name": "Roadster", "body": Color8(92, 156, 255), "dark": Color8(46, 96, 186), "glass": Color8(16, 28, 54), "tex": "res://assets/cars/topdown_car.png"},
-	{"kind": "sprite", "name": "Redline", "body": Color8(214, 60, 40), "dark": Color8(120, 28, 20), "glass": Color8(28, 32, 40), "tex": "res://assets/cars/topdown_car_red.png"},
-	{"kind": "sprite", "name": "Viper", "body": Color8(34, 38, 48), "dark": Color8(14, 16, 22), "glass": Color8(120, 190, 255), "tex": "res://assets/cars/topdown_car_viper.png"},
-	{"kind": "sprite", "name": "Cab", "body": Color8(224, 192, 64), "dark": Color8(150, 120, 20), "glass": Color8(30, 34, 44), "tex": "res://assets/cars/topdown_car_taxi.png"},
-	{"kind": "sprite", "name": "Hauler", "body": Color8(140, 150, 170), "dark": Color8(80, 88, 104), "glass": Color8(40, 48, 62), "tex": "res://assets/cars/topdown_car_truck.png"},
+	{"name": "Roadster", "body": Color8(92, 156, 255), "dark": Color8(46, 96, 186), "glass": Color8(16, 28, 54), "tex": "res://assets/cars/topdown_car.png"},
+	{"name": "Redline", "body": Color8(214, 60, 40), "dark": Color8(120, 28, 20), "glass": Color8(28, 32, 40), "tex": "res://assets/cars/topdown_car_red.png"},
+	{"name": "Viper", "body": Color8(34, 38, 48), "dark": Color8(14, 16, 22), "glass": Color8(120, 190, 255), "tex": "res://assets/cars/topdown_car_viper.png"},
+	{"name": "Cab", "body": Color8(224, 192, 64), "dark": Color8(150, 120, 20), "glass": Color8(30, 34, 44), "tex": "res://assets/cars/topdown_car_taxi.png"},
+	{"name": "Hauler", "body": Color8(140, 150, 170), "dark": Color8(80, 88, 104), "glass": Color8(40, 48, 62), "tex": "res://assets/cars/topdown_car_truck.png"},
 ]
 
 # Reattach pillars read differently from ordinary ones: live (you may still catch
@@ -98,7 +98,10 @@ func _draw() -> void:
 	_w = vp.x
 	_h = vp.y
 	_anchor_y = _h * CAR_ANCHOR
-	_scale = (_w * ROAD_W_FRAC) / (2.0 * Cfg.ROAD_HALF_WIDTH)
+	# Zoom the road to ROAD_W_FRAC of the width, but never so far that the visible
+	# world is shorter than MIN_WORLD_H - on a wide or short window that cap is what
+	# keeps enough road ahead of the car to play, instead of a screen full of tarmac.
+	_scale = minf((_w * ROAD_W_FRAC) / (2.0 * Cfg.ROAD_HALF_WIDTH), _h / MIN_WORLD_H)
 
 	var t := theme()
 	draw_rect(Rect2(Vector2(-40, -40), Vector2(_w + 80, _h + 80)), t["ground"])
@@ -238,72 +241,28 @@ func _draw_rope() -> void:
 	draw_line(a, b, Color8(255, 255, 255), 2.5, true)
 
 
-func _car_body_points(len: float, wid: float) -> PackedVector2Array:
-	# The JS car outline is a run of quadratic curves; sampled here so the shape
-	# matches without a path API.
-	var pts := PackedVector2Array()
-	var segs := [
-		[Vector2(-wid * 0.5, len * 0.5), Vector2(-wid * 0.62, 0), Vector2(-wid * 0.5, -len * 0.42)],
-		[Vector2(-wid * 0.5, -len * 0.42), Vector2(0, -len * 0.62), Vector2(wid * 0.5, -len * 0.42)],
-		[Vector2(wid * 0.5, -len * 0.42), Vector2(wid * 0.62, 0), Vector2(wid * 0.5, len * 0.5)],
-		[Vector2(wid * 0.5, len * 0.5), Vector2(0, len * 0.66), Vector2(-wid * 0.5, len * 0.5)],
-	]
-	for seg in segs:
-		var p0: Vector2 = seg[0]
-		var p1: Vector2 = seg[1]
-		var p2: Vector2 = seg[2]
-		for i in range(6):
-			var t := float(i) / 6.0
-			var u := 1.0 - t
-			pts.append(u * u * p0 + 2.0 * u * t * p1 + t * t * p2)
-	return pts
-
-
 func _draw_car() -> void:
-	_draw_car_body(car_ref.x, car_ref.y, car_ref.angle, 1.0, false)
+	_draw_car_body(car_ref.x, car_ref.y, car_ref.angle, 1.0)
 
 
 func _draw_ghost() -> void:
 	if ghost_car == null or not ghost_visible:
 		return
-	_draw_car_body(ghost_car.x, ghost_car.y, ghost_car.angle, 0.42, true)
+	_draw_car_body(ghost_car.x, ghost_car.y, ghost_car.angle, 0.42)
 
 
-func _draw_car_body(cx: float, cy: float, cang: float, alpha: float, _is_ghost: bool) -> void:
-	var skin: Dictionary = CAR_MODELS[((car_index % CAR_MODELS.size()) + CAR_MODELS.size()) % CAR_MODELS.size()]
-	if skin.get("kind", "vector") == "sprite":
-		_draw_car_sprite(cx, cy, cang, alpha, skin)
-		return
-	var len := 30.0 * _scale
-	var wid := 16.0 * _scale
-	var p := _to_screen(cx, cy)
-	var rot := cang - cam_angle
-	var local := _car_body_points(len, wid)
-	var pts := PackedVector2Array()
-	for q in local:
-		pts.append(p + q.rotated(rot))
-	var body: Color = skin["body"]
-	var dark: Color = skin["dark"]
-	var glass: Color = skin["glass"]
-	if alpha < 1.0:
-		body.a = alpha
-		dark.a = alpha
-		glass.a = alpha
-	draw_colored_polygon(pts, body)
-	# Outline, then the canopy.
-	var outline := pts.duplicate()
-	outline.append(pts[0])
-	draw_polyline(outline, dark, 2.0, true)
-	var glass_pts := PackedVector2Array()
-	for i in range(16):
-		var a := TAU * float(i) / 16.0
-		glass_pts.append(p + Vector2(cos(a) * wid * 0.30, sin(a) * len * 0.17).rotated(rot) + Vector2(0, -len * 0.10).rotated(rot))
-	draw_colored_polygon(glass_pts, glass)
+func _skin() -> Dictionary:
+	return CAR_MODELS[((car_index % CAR_MODELS.size()) + CAR_MODELS.size()) % CAR_MODELS.size()]
 
 
-# Draw a sprite car. The art is stored nose-up, which is the same frame the
-# vector cars use (they are built along -Y and rotated by heading), so both take
-# the identical rotation. A ghost is drawn translucent and tinted.
+func _draw_car_body(cx: float, cy: float, cang: float, alpha: float) -> void:
+	_draw_car_sprite(cx, cy, cang, alpha, _skin())
+
+
+# Draw a sprite car. The art is stored nose-up, which is the car's own frame (the
+# body points along -Y and is rotated by its heading), so the sprite takes exactly
+# the same `cang - cam_angle` rotation the road band does. A ghost is drawn
+# translucent and washed toward its body colour so it reads as an echo.
 func _draw_car_sprite(cx: float, cy: float, cang: float, alpha: float, skin: Dictionary) -> void:
 	var tex: Texture2D = _sprite(str(skin["tex"]))
 	if tex == null:
@@ -312,12 +271,9 @@ func _draw_car_sprite(cx: float, cy: float, cang: float, alpha: float, skin: Dic
 	var aspect := float(tex.get_height()) / float(tex.get_width())
 	var size := Vector2(target_len / aspect, target_len)
 	var p := _to_screen(cx, cy)
-	# The art is already nose-up, so it shares the vector cars' frame exactly: the
-	# same `cang - cam_angle` that turns a vector car's -Y nose to the heading.
 	# Adding a quarter turn here (as an earlier version did) left every sprite car
-	# broadside to its direction of travel.
+	# broadside to its direction of travel; the art is already nose-up.
 	var rot := cang - cam_angle
-	# A ghost is washed toward its body colour so it reads as a translucent echo.
 	var tint := Color(1, 1, 1, alpha)
 	if alpha < 1.0:
 		tint = Color(skin["body"].r, skin["body"].g, skin["body"].b, alpha)

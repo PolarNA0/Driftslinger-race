@@ -38,6 +38,7 @@ var watch_badge: PanelContainer
 var watch_label: Label
 
 var overlays := {}             # name -> Control (full-rect root)
+var overlay_cards := []        # the card columns, so a resize can re-widen them
 var mode_buttons := {}         # "speedrun"/"endless" -> Button
 var ghost_buttons := {}        # "off"/"wr"/"self" -> Button
 var track_buttons := []        # one per track, in order
@@ -98,6 +99,7 @@ func _ready() -> void:
 	ui_root = Control.new()
 	ui_root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	ui_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui_root.theme = UiTheme.build()
 	layer.add_child(ui_root)
 
 	_build_hud()
@@ -117,6 +119,9 @@ func _ready() -> void:
 	# A screenshot hook for headless visual checks: `--shot <path> [--shot-menu]`
 	# saves one frame and quits. Default shows a run in progress; `--shot-menu`
 	# shows the menu instead.
+	get_viewport().size_changed.connect(_layout_cards)
+	_layout_cards()
+
 	if OS.get_cmdline_user_args().has("--shot"):
 		_capture_after(1.0)
 
@@ -151,6 +156,21 @@ func _button(text: String, cb: Callable) -> Button:
 	return b
 
 
+# A primary action (Play, Try again): drawn in the warm accent, so the thing a
+# player most likely wants is the thing that stands out.
+func _primary_button(text: String, cb: Callable) -> Button:
+	var b := _button(text, cb)
+	b.theme_type_variation = "PrimaryButton"
+	return b
+
+
+# A quiet secondary action (Back, Exit, the top-corner icons).
+func _ghost_button(text: String, cb: Callable) -> Button:
+	var b := _button(text, cb)
+	b.theme_type_variation = "GhostButton"
+	return b
+
+
 func _row(sep: int = 8) -> HBoxContainer:
 	var h := HBoxContainer.new()
 	h.add_theme_constant_override("separation", sep)
@@ -169,7 +189,7 @@ func _col(sep: int = 10) -> VBoxContainer:
 # scrolls instead of running its bottom controls off the display where they cannot
 # be pressed. That was the bug with the old menu: the card wanted 851px on an
 # 820px-tall viewport and the account buttons below the fold were unreachable.
-func _new_overlay(name: String) -> VBoxContainer:
+func _new_overlay(name: String, title: String = "") -> VBoxContainer:
 	var root := Control.new()
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.visible = false
@@ -200,7 +220,35 @@ func _new_overlay(name: String) -> VBoxContainer:
 	var col := _col(10)
 	col.custom_minimum_size = Vector2(320, 0)
 	margin.add_child(col)
+	overlay_cards.append(col)
+	if title != "":
+		col.add_child(_card_title(title))
 	return col
+
+
+# Cards are sized for a phone portrait window by default, but on a wide desktop
+# window the 420px logical card would float in a sea of background, so the width
+# tracks the viewport between a floor (never narrower than a phone card) and a
+# ceiling (never a full-width slab on an ultrawide monitor).
+func _layout_cards() -> void:
+	var vw := get_viewport_rect().size.x
+	var w := clampf(vw * 0.46, 320.0, 520.0)
+	for c in overlay_cards:
+		c.custom_minimum_size = Vector2(w, 0)
+
+
+# The heading of an overlay card: accent, a touch larger, and separated from the
+# body so a card reads as a titled panel rather than a stack of rows.
+func _card_title(text: String) -> Label:
+	return _style_title(_label(text, 26))
+
+
+# Accent-colour a heading label (used for the cards whose heading text changes at
+# runtime: the account card and the run-end tags).
+func _style_title(l: Label) -> Label:
+	l.add_theme_color_override("font_color", UiTheme.ACCENT)
+	l.custom_minimum_size = Vector2(0, 36)
+	return l
 
 
 func _show_only(name: String) -> void:
@@ -248,23 +296,29 @@ func _build_hud() -> void:
 
 	hud_dist = _label("0.000s", 44)
 	hud_dist.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud_dist.add_theme_constant_override("outline_size", 6)
+	hud_dist.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.65))
 	top.add_child(hud_dist)
 
 	hud_sub = _label("best --", 20)
-	hud_sub.add_theme_color_override("font_color", Color(1, 1, 1, 0.75))
+	hud_sub.add_theme_color_override("font_color", Color(1, 1, 1, 0.82))
+	hud_sub.add_theme_constant_override("outline_size", 5)
+	hud_sub.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
 	hud_sub.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top.add_child(hud_sub)
 
 	hint_label = _label("Hold anywhere to swing", 22)
-	hint_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.9))
+	hint_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.95))
+	hint_label.add_theme_constant_override("outline_size", 6)
+	hint_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
 	hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint_label.set_anchors_preset(Control.PRESET_CENTER)
 	hint_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui_root.add_child(hint_label)
 
-	btn_pause = _button("II", _on_pause)
+	btn_pause = _ghost_button("II", _on_pause)
 	_anchor(btn_pause, Control.PRESET_TOP_RIGHT, 18, 64)
-	btn_restart_round = _button("\u21bb", func(): _start_run(game.seed_num))
+	btn_restart_round = _ghost_button("\u21bb", func(): _start_run(game.seed_num))
 	_anchor(btn_restart_round, Control.PRESET_TOP_LEFT, 18, 64)
 	btn_restart_round.visible = false
 
@@ -305,9 +359,10 @@ func _anchor(b: Button, preset: int, inset: float, size: float) -> void:
 # =============================================================================
 
 func _build_menu() -> void:
-	var col := _new_overlay("menu")
-	col.add_child(_label("SLINGDRIFT", 34))
-	col.add_child(_label("Hold to swing round the poles. Let go to fly.\nDon't leave the road.", 14))
+	var col := _new_overlay("menu", "SLINGDRIFT")
+	var blurb := _label("Hold to swing round the poles. Let go to fly.\nDon't leave the road.", 14)
+	blurb.add_theme_color_override("font_color", UiTheme.INK_DIM)
+	col.add_child(blurb)
 
 	col.add_child(_section("Mode"))
 	var mode_row := _row(8)
@@ -343,19 +398,21 @@ func _build_menu() -> void:
 
 	var actions := _row(8)
 	col.add_child(actions)
-	actions.add_child(_button("Play", func(): _start_run(menu_seed)))
+	actions.add_child(_primary_button("Play", func(): _start_run(menu_seed)))
 	actions.add_child(_button("Leaderboard", func(): _show_leaderboard(menu_seed)))
 	actions.add_child(_button("History", _show_history))
 
 	acct_bar = _col(6)
 	col.add_child(acct_bar)
 
-	col.add_child(_label("Offline \u00b7 no ads \u00b7 your scores stay on this device", 11))
+	var foot := _label("Offline \u00b7 no ads \u00b7 your scores stay on this device", 11)
+	foot.add_theme_color_override("font_color", UiTheme.INK_MUTE)
+	col.add_child(foot)
 
 
 func _section(text: String) -> Label:
-	var l := _label(text, 16)
-	l.add_theme_color_override("font_color", Color(1, 1, 1, 0.6))
+	var l := _label(text.to_upper(), 14)
+	l.add_theme_color_override("font_color", UiTheme.ACCENT)
 	return l
 
 
@@ -363,6 +420,7 @@ func _mode_button(parent: Node, title: String, sub: String, cb: Callable) -> But
 	var b := Button.new()
 	b.text = title + "\n" + sub
 	b.toggle_mode = true
+	b.theme_type_variation = "ToggleButton"
 	b.custom_minimum_size = Vector2(0, 58)
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	# Wrap rather than widen: three option buttons in a row are only as wide as their
@@ -375,27 +433,32 @@ func _mode_button(parent: Node, title: String, sub: String, cb: Callable) -> But
 
 func _build_car_list(parent: Node) -> void:
 	car_buttons.clear()
-	# A grid, not one long row: thirteen swatches in a single row is wider than a
-	# phone screen and would stretch the whole menu card past the viewport.
+	# A grid, not one long row: the picker stays inside a phone-width card. Each
+	# cell shows the actual car sprite, so the choice is what you see, not a swatch.
 	var grid := GridContainer.new()
-	grid.columns = 7
+	grid.columns = Renderer2D.CAR_MODELS.size()
 	grid.add_theme_constant_override("h_separation", 6)
 	grid.add_theme_constant_override("v_separation", 6)
 	parent.add_child(grid)
 	for i in range(Renderer2D.CAR_MODELS.size()):
 		var idx := i
+		var model: Dictionary = Renderer2D.CAR_MODELS[i]
 		var b := Button.new()
 		b.toggle_mode = true
-		b.custom_minimum_size = Vector2(40, 40)
-		var sw := ColorRect.new()
-		sw.color = Renderer2D.CAR_MODELS[i]["body"]
-		sw.set_anchors_preset(Control.PRESET_FULL_RECT)
-		sw.offset_left = 8
-		sw.offset_top = 8
-		sw.offset_right = -8
-		sw.offset_bottom = -8
-		sw.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		b.add_child(sw)
+		b.theme_type_variation = "ToggleButton"
+		b.custom_minimum_size = Vector2(46, 58)
+		b.tooltip_text = str(model["name"])
+		var tex := TextureRect.new()
+		tex.texture = load(str(model["tex"]))
+		tex.set_anchors_preset(Control.PRESET_FULL_RECT)
+		tex.offset_left = 9
+		tex.offset_right = -9
+		tex.offset_top = 9
+		tex.offset_bottom = -9
+		tex.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		tex.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		b.add_child(tex)
 		b.pressed.connect(func():
 			car_skin = idx
 			Storage.set_pref("carSkin", idx)
@@ -439,8 +502,7 @@ func _build_track_list(parent: Node) -> void:
 # The Tracks overlay: its own card, so the menu does not have to carry thirteen
 # buttons at once.
 func _build_tracks() -> void:
-	var col := _new_overlay("tracks")
-	col.add_child(_label("Tracks", 24))
+	var col := _new_overlay("tracks", "Tracks")
 	var hint := _label("Pick a track, then Play.", 13)
 	hint.add_theme_color_override("font_color", Color(1, 1, 1, 0.6))
 	col.add_child(hint)
@@ -519,8 +581,7 @@ func _refresh_account_bar() -> void:
 # =============================================================================
 
 func _build_board() -> void:
-	var col := _new_overlay("board")
-	col.add_child(_label("Leaderboard", 24))
+	var col := _new_overlay("board", "Leaderboard")
 	lb_title = _label("Track 1", 20)
 	col.add_child(lb_title)
 	lb_note = _label("", 14)
@@ -620,8 +681,7 @@ func _show_leaderboard(seed: int) -> void:
 # =============================================================================
 
 func _build_history() -> void:
-	var col := _new_overlay("history")
-	col.add_child(_label("History", 24))
+	var col := _new_overlay("history", "History")
 	hist_sub = _label("", 14)
 	col.add_child(hist_sub)
 	var scroll := ScrollContainer.new()
@@ -659,7 +719,7 @@ func _show_history() -> void:
 
 func _build_account() -> void:
 	var col := _new_overlay("account")
-	acct_title = _label("Sign in", 24)
+	acct_title = _style_title(_label("Sign in", 26))
 	col.add_child(acct_title)
 	acct_user = LineEdit.new()
 	acct_user.placeholder_text = "Username"
@@ -847,7 +907,7 @@ func _load_reals(seed: int) -> void:
 
 func _build_dead() -> void:
 	var col := _new_overlay("dead")
-	dead_tag = _label("Crashed", 26)
+	dead_tag = _style_title(_label("Crashed", 26))
 	col.add_child(dead_tag)
 	dead_dist = _label("", 30)
 	col.add_child(dead_dist)
@@ -859,7 +919,7 @@ func _build_dead() -> void:
 
 func _build_finish() -> void:
 	var col := _new_overlay("finish")
-	finish_tag = _label("Finished", 26)
+	finish_tag = _style_title(_label("Finished", 26))
 	col.add_child(finish_tag)
 	finish_time = _label("", 30)
 	col.add_child(finish_time)
@@ -883,7 +943,7 @@ func _build_finish() -> void:
 
 func _build_replay_done() -> void:
 	var col := _new_overlay("replay_done")
-	replay_tag = _label("Replay", 26)
+	replay_tag = _style_title(_label("Replay", 26))
 	col.add_child(replay_tag)
 	replay_sub = _label("", 16)
 	col.add_child(replay_sub)
@@ -903,8 +963,7 @@ func _build_replay_done() -> void:
 
 
 func _build_pause() -> void:
-	var col := _new_overlay("pause")
-	col.add_child(_label("Paused", 26))
+	var col := _new_overlay("pause", "Paused")
 	col.add_child(_button("Resume", func():
 		_hide_overlays()
 		game.state = "running"
