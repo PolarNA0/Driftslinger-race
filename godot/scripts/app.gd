@@ -321,7 +321,11 @@ func _build_hud() -> void:
 	hud_sub.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top.add_child(hud_sub)
 
-	hint_label = _label("Hold anywhere to swing", 22)
+	# Name the input the player actually has: a phone taps the screen, a desktop
+	# holds the mouse or Space. A touch-first hint on a laptop reads as "I need a
+	# touchscreen".
+	var hint_text := "Hold anywhere to swing" if DisplayServer.is_touchscreen_available() else "Hold click or Space to swing"
+	hint_label = _label(hint_text, 22)
 	hint_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.95))
 	hint_label.add_theme_constant_override("outline_size", 6)
 	hint_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
