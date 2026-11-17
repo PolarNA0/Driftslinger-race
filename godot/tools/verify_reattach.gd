@@ -84,6 +84,71 @@ func _plain_spent() -> bool:
 	return released and car.regrabs == 0
 
 
+# A scripted reattach on the first reattach pillar, then a clean ride of the
+# rest. `bails` is how many times to bail out and catch the pole again before the
+# final ride to the arc's end; `final_frac` releases the last pass early (before
+# the end window) instead of carrying it, which is a plain bail.
+func _scripted(track: Track, bails: int, final_frac: float = 1.0) -> Dictionary:
+	var car := Car.new()
+	car.reset(track)
+	var corner := -1
+	var bailed := 0
+	var max_s := 1.0
+	var min_s := 1.0
+	var i := 0
+	while car.alive and not car.finished and i < 200000:
+		i += 1
+		var held := false
+		if car.attached:
+			var f: Dictionary = track.fillets[car.corner]
+			if corner < 0 and f.get("reattach", false):
+				corner = car.corner
+			if car.corner == corner and corner >= 0:
+				var arc := absf(float(f["a2"]) - float(f["a1"]))
+				var frac := 1.0 - car.remaining() / arc
+				if bailed < bails and frac >= 0.4 + 0.25 * bailed:
+					held = false
+					bailed += 1
+				else:
+					# The payoff release: ride to the end, or release early on purpose.
+					held = car.remaining() > 0.0 and frac < final_frac
+			else:
+				held = car.remaining() > 0.0
+		else:
+			var f2: Dictionary = track.fillets[car.corner]
+			var c: Vector2 = f2["c"]
+			held = U.dist(c.x, c.y, car.x, car.y) <= Cfg.GRAB_RANGE
+		car.step(DT, held)
+		max_s = maxf(max_s, car.speed_scale)
+		min_s = minf(min_s, car.speed_scale)
+	return {
+		"finished": car.finished, "time": car.time, "regrabs": car.regrabs,
+		"max_s": max_s, "min_s": min_s,
+	}
+
+
+# The clean line for comparison: grab when in reach, ride every arc to its end.
+func _clean(track: Track) -> Dictionary:
+	var car := Car.new()
+	car.reset(track)
+	var max_s := 1.0
+	var min_s := 1.0
+	var i := 0
+	while car.alive and not car.finished and i < 200000:
+		i += 1
+		var held := false
+		if car.attached:
+			held = car.remaining() > 0.0
+		else:
+			var f: Dictionary = track.fillets[car.corner]
+			var c: Vector2 = f["c"]
+			held = U.dist(c.x, c.y, car.x, car.y) <= Cfg.GRAB_RANGE
+		car.step(DT, held)
+		max_s = maxf(max_s, car.speed_scale)
+		min_s = minf(min_s, car.speed_scale)
+	return {"finished": car.finished, "time": car.time, "max_s": max_s, "min_s": min_s}
+
+
 func _init() -> void:
 	var pass_all := true
 
@@ -128,5 +193,29 @@ func _init() -> void:
 	pass_all = pass_all and clean_ok
 
 	print("total re-grabs observed across showcase tracks: %d" % total_regrabs)
+
+	# 4) the reattach pays off: one reattach boosts, a second slows down, a bail
+	#    that is not caught again never boosts, and the clean line is untouched.
+	print("== reattach speed effect ==")
+	for n in [Tracks.FIRST_REATTACH_TRACK, Tracks.FIRST_REATTACH_TRACK + 1, Tracks.FIRST_REATTACH_TRACK + 2]:
+		var t := Track.new(n, Tracks.track_opts(n))
+		var clean := _clean(t)
+		var once := _scripted(t, 1)
+		var twice := _scripted(t, 2)
+		# A reattach whose final release is early (before the end window) is just a
+		# bail: it must never boost, however it ends.
+		var bail_only := _scripted(t, 1, 0.5)
+		var boosted: bool = once["finished"] and once["regrabs"] == 1 and once["max_s"] > 1.0
+		var slowed: bool = twice["finished"] and twice["regrabs"] == 2 and twice["min_s"] < 1.0
+		var bail_plain: bool = bail_only["max_s"] == 1.0
+		var clean_plain: bool = clean["finished"] and clean["max_s"] == 1.0 and clean["min_s"] == 1.0
+		var ok: bool = boosted and slowed and bail_plain and clean_plain
+		print("track %2d: boost=%s(regrabs=%d maxS=%.3f) slow=%s(regrabs=%d minS=%.3f) bail=%s(maxS=%.3f) clean=%s(maxS=%.3f) %s"
+			% [n, str(boosted), int(once["regrabs"]), float(once["max_s"]),
+			   str(slowed), int(twice["regrabs"]), float(twice["min_s"]),
+			   str(bail_plain), float(bail_only["max_s"]), str(clean_plain), float(clean["max_s"]),
+			   "OK" if ok else "FAIL"])
+		pass_all = pass_all and ok
+
 	print("RESULT: %s" % ("PASS" if pass_all else "FAIL"))
 	quit(0 if pass_all else 1)

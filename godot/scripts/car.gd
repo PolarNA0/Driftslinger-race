@@ -16,6 +16,9 @@ var regrabs: int
 var released_corner: int
 var released_angle: float
 var grabbed_corners: Dictionary
+var reattach_attempt: bool
+var speed_scale: float
+var effect_timer: float
 var alive: bool
 var dead: Variant
 var finished: bool
@@ -47,6 +50,9 @@ func reset(p_track: Track) -> void:
 	released_corner = -1
 	released_angle = 0.0
 	grabbed_corners = {}
+	reattach_attempt = false
+	speed_scale = 1.0
+	effect_timer = 0.0
 	alive = true
 	dead = null
 	finished = false
@@ -82,6 +88,12 @@ func step(dt: float, held: bool) -> void:
 	if not alive or finished:
 		return
 	time += dt
+	# A reattach boost/slow is brief: count it down so the next step is back to the
+	# base speed unless another reattach lands.
+	if effect_timer > 0.0:
+		effect_timer = maxf(0.0, effect_timer - dt)
+		if effect_timer == 0.0:
+			speed_scale = 1.0
 
 	if held:
 		if not attached:
@@ -155,9 +167,15 @@ func try_grab() -> bool:
 	# there would drop the car back to the start and throw away its progress.
 	var ref := released_angle if corner == released_corner else float(f["a1"])
 	orbit_angle = raw + TAU * round((ref - raw) / TAU)
-	if grabbed_corners.has(corner):
+	var is_regrab := corner == released_corner and grabbed_corners.has(corner)
+	if is_regrab:
 		regrabs += 1
-	grabbed_corners[corner] = true
+		# A reattach in progress: this pillar was bailed out of and is now caught
+		# again, so a later release may pay off.
+		reattach_attempt = true
+	# Count the grabs per pillar: one reattach pays, a second on the same pillar does
+	# not, and each pillar is counted on its own.
+	grabbed_corners[corner] = int(grabbed_corners.get(corner, 0)) + 1
 	grabbed += 1
 	return true
 
@@ -183,7 +201,7 @@ func drift(dt: float) -> void:
 	# One step's travel split between the tangential and radial directions, so the
 	# total speed stays at SPEED while the radius reels in. Adding the two motions
 	# instead would inject free tangential speed and make a wide grab fastest.
-	var total := Cfg.SPEED * dt
+	var total := Cfg.SPEED * speed_scale * dt
 	var tangential := sqrt(maxf(0.0, total * total - dr * dr))
 	orbit_angle += sgn * tangential / radius
 	radius += dr
@@ -192,8 +210,8 @@ func drift(dt: float) -> void:
 
 func fly(dt: float) -> void:
 	centre(dt)
-	x += cos(angle) * Cfg.SPEED * dt
-	y += sin(angle) * Cfg.SPEED * dt
+	x += cos(angle) * Cfg.SPEED * speed_scale * dt
+	y += sin(angle) * Cfg.SPEED * speed_scale * dt
 
 
 # Steer gently back toward the centreline while flying (pure pursuit).
@@ -223,6 +241,17 @@ func release(dt: float) -> void:
 	# spent only by riding the arc to its end: bail out early and it stays open,
 	# so the same pole can be caught again. An ordinary clean line rides every
 	# arc out, so its behaviour is unchanged.
+	# A reattach that is carried to the end of the arc pays off: the first one on a
+	# pillar is a brief boost, and a second one on the same pillar is a slow-down
+	# instead, so spamming it costs. It only counts as a reattach if this release is
+	# near the end of the arc - bailing out early and flying on is just a bail, and
+	# leaves the pillar open for the catch that does pay.
+	var arc := absf(float(f["a2"]) - float(f["a1"]))
+	if reattach_attempt and f.get("reattach", false) and remaining() <= Cfg.REATTACH_END_FRAC * arc:
+		reattach_attempt = false
+		var good := int(grabbed_corners.get(corner, 1)) <= 2
+		speed_scale = Cfg.REATTACH_BOOST if good else Cfg.REATTACH_SLOW
+		effect_timer = Cfg.REATTACH_EFFECT_TIME
 	if carried or not f.get("reattach", false):
 		spent = corner
 

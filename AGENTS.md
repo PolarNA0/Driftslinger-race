@@ -277,6 +277,18 @@ length and a small release error accumulates into a wall hit by the far end.
   line - spends the pillars exactly as before, which is why ordinary play is
   unchanged. Tracks 26-28 (`Tracks.REATTACH_TRACKS`) showcase it; the renderer
   paints a live reattach pillar amber and a spent one bronze.
+- **A reattach carried to the arc's end pays off, once per pillar.** The payoff
+  lands on the *release* that ends a reattach, and only when that release is
+  inside the last `CFG.REATTACH_END_FRAC` of the arc - bail out early and fly on
+  and nothing happens, which keeps the "only near the end of a sling" rule. The
+  first reattach on a pillar sets `CFG.REATTACH_BOOST` (a brief speed-up) for
+  `CFG.REATTACH_EFFECT_TIME`; a second reattach on the *same* pillar sets
+  `CFG.REATTACH_SLOW` instead, so spamming it costs. The multiplier rides in
+  `Car.speed_scale`, which `drift` and `fly` fold into one step's travel, so the
+  speed change is real but short-lived. It exists only in the Godot physics
+  (`car.gd`); the verified JS `physics/` has no reattach at all, so 26-28 stay
+  local-only and the parity goldens are untouched. `verify_reattach.gd` proves
+  boost / slow / no-boost-on-a-plain-bail / clean-line-untouched.
 
 ## Gotchas
 

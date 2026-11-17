@@ -23,3 +23,16 @@ const SPEEDRUN_CORNERS := 11
 const SPEEDRUN_FINISH := 460.0
 const SPEEDRUN_START_FRAC := 0.15
 const DT := 1.0 / 120.0
+
+# --- reattach pillars (tracks 26-28) -----------------------------------------
+# Bail out of a reattach pillar, catch the same pole again, and ride it to the
+# end, and the final release lands you a brief turn of speed. The first reattach
+# on a pillar is worth it; doing it again on the same pillar costs you instead,
+# so one clean reattach pays and spamming it does not. The effect only lands when
+# that final release is near the end of the arc, which is what makes it a
+# reattach rather than a plain bail. These pillars exist only in the Godot build,
+# so nothing here touches the verified JS physics.
+const REATTACH_BOOST := 1.10
+const REATTACH_SLOW := 0.82
+const REATTACH_EFFECT_TIME := 0.18
+const REATTACH_END_FRAC := 0.35
