@@ -85,14 +85,22 @@ func _check_size(vp: Vector2i) -> void:
 	# The flow: the shell is up at the menu, hidden during a run, and back after.
 	if not shell.visible:
 		_fail("shell hidden at boot")
+	if app.btn_restart_round.visible:
+		_fail("restart button visible at the menu")
 	app._start_run(1)
 	await process_frame
 	if shell.visible:
 		_fail("shell still visible during a run")
+	if not app.btn_restart_round.visible:
+		_fail("restart button hidden during a run")
+	elif not _in_view(app.btn_restart_round, vp):
+		_fail("restart button out of view at %s" % app.btn_restart_round.get_global_rect())
 	app._to_menu()
 	await process_frame
 	if not shell.visible:
 		_fail("shell not restored by returning to the menu")
+	if app.btn_restart_round.visible:
+		_fail("restart button still visible at the menu")
 
 	sub.queue_free()
 	await process_frame

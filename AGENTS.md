@@ -61,7 +61,8 @@ build is the only client.
 - `godot/scenes/main.tscn`, `godot/project.godot` — scene and project settings.
 - `godot/tools/` — headless verifiers (`parity.gd`, `verify_tracks.gd`,
   `verify_reattach.gd`, `verify_board.gd`, `verify_online.gd`,
-  `verify_guard.gd`, `verify_ui.gd`) and the ghost baker
+  `verify_guard.gd`, `verify_ui.gd`, `verify_cars.gd`) and the ghost
+  baker
   (`bake_ghosts.gd`). See `godot/README.md`.
 
 ### JavaScript (the server's physics)
@@ -99,6 +100,7 @@ godot --headless --path godot --script res://tools/verify_board.gd    # board pa
 godot --headless --path godot --script res://tools/verify_online.gd   # online layer (offline paths)
 godot --headless --path godot --script res://tools/verify_guard.gd    # holding/mashing must lose
 godot --headless --path godot --script res://tools/verify_ui.gd       # menu fits every screen
+godot --headless --path godot --script res://tools/verify_cars.gd     # every car has its own sprite
 godot --headless --path godot --script res://tools/bake_ghosts.gd     # regenerate ghostdata.gd (slow)
 
 # Physics + server verifier (JavaScript, must stay green)

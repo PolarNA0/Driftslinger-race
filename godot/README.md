@@ -158,6 +158,14 @@ pressed.
 godot --headless --path . --script res://tools/verify_ui.gd
 ```
 
+`tools/verify_cars.gd` checks that every car in `Renderer2D.CAR_MODELS` names
+its own texture and that the texture loads - so a car is never drawn as a
+placeholder or a repeat of another.
+
+```sh
+godot --headless --path . --script res://tools/verify_cars.gd
+```
+
 `tools/bake_ghosts.gd` regenerates `scripts/ghostdata.gd` from the Godot physics.
 It is slow (a thousand ids per track), so it is a manual step, not a verifier:
 
