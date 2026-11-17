@@ -1,7 +1,7 @@
 extends RefCounted
 class_name Leaderboard
 
-# Port of js/leaderboard.js. The head of the board is real (js/ghostdata.js, baked)
+# The board: the head is real (scripts/ghostdata.gd, baked by tools/bake_ghosts.gd)
 # and watchable; the tail is generated from a formula and is a backdrop to rank
 # against. The player is slotted in by time, so their rank is real.
 

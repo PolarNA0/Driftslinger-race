@@ -1,7 +1,7 @@
 extends RefCounted
 class_name Storage
 
-# Port of js/storage.js. Records, best times, replays and history are namespaced
+# Port of the old js/storage.js (removed with the JS client). Records, best times, replays and history are namespaced
 # per signed-in account, so two people on one device do not overwrite each other.
 # Signed out, everything falls back to a "guest" bucket. Preferences (the car
 # skin) are global - they are about the device, not the person.

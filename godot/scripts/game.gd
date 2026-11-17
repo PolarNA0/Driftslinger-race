@@ -1,7 +1,7 @@
 extends Node2D
 class_name Game
 
-# Port of js/game.js: the loop, the three modes, records, replays and ghosts.
+# Port of the old js/game.js (removed with the JS client): the loop, the three modes, records, replays and ghosts.
 #
 # One button: hold to hook the next pole and swing, let go to fly straight.
 # Leaving the road ends the run.

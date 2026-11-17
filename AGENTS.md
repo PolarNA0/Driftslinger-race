@@ -5,37 +5,34 @@ round a pillar, let go to fly straight to the next one. Leave the road and the
 run ends. Two modes: **speedrun** (a finite ~10s track, scored by time) and
 **endless** (an infinite road, scored by distance in metres).
 
-## Two builds, and which one is the game
+## One build, and one piece of JavaScript
 
-**The Godot build (`godot/`) is the game.** It is the future of the project: the
-web build served to players and the Android app both come from it. New work goes
-there.
+**The Godot build (`godot/`) is the game.** The web build served to players and
+the Android app both come from it. New work goes there.
 
-The JavaScript build (`index.html`, `css/`, `js/`) was the original
-implementation and is now **legacy**. It is kept for exactly two reasons:
+The original JavaScript client (`index.html`, `css/`, `js/`, `sw.js`, the WebView
+`android/` shell) has been **removed**. What is left of that era is `physics/`:
+the five modules `{config,util,track,car,tracks}.js`, kept for exactly two reasons.
 
 1. **It is the leaderboard's verification engine.** The Supabase Edge Function
-   replays every uploaded run through the JS physics, vendored by
+   replays every uploaded run through this physics, vendored by
    `tools/sync-physics.mjs` (see "The shared leaderboard runs on Supabase"). The
    rule that a client sends button steps and never a time depends on this. Do not
-   delete `js/{config,util,track,car,tracks}.js` while the online leaderboard
-   exists.
+   delete `physics/` while the online leaderboard exists.
 2. **It is the reference the port is verified against.** `godot/tools/parity.gd`
-   compares the two builds number for number, so the JS physics is what tells us
-   the Godot physics is right.
+   asserts the Godot physics against numbers this physics produced (frozen as
+   golden values), so it is what tells us the Godot physics is right.
 
-The rest of `js/` (`app.js`, `render.js`, `account.js`, `api.js`, `discord.js`,
-the service worker, `index.html`, `css/`) is the legacy *client* and is on its way
-out. Do not add features there. The Godot build now has its own port of the online
-layer (`godot/scripts/{net,netconfig,api,account}.gd`, see "The online layer"),
-so the legacy client has no job left that the Godot build does not do.
+It is not a client. `physics/` has no rendering, no game loop, no UI - just the
+road, the car and the tunables the server needs to re-simulate a run. The Godot
+build is the only client.
 
 ## Layout
 
 ### Godot build (primary)
 
-- `godot/scripts/cfg.gd` — all tunables (`CFG`), port of `js/config.js`. Start
-  here before changing feel.
+- `godot/scripts/cfg.gd` — all tunables (`CFG`), port of `physics/config.js`.
+  Start here before changing feel.
 - `godot/scripts/track.gd` — the road: a staircase of straight legs joined by
   quarter-turn circular-arc corners, sampled into `road[]` (points) and `rs[]`
   (arc-length per point).
@@ -54,50 +51,31 @@ so the legacy client has no job left that the Godot build does not do.
   and leaderboard client (see "The online layer").
 - `godot/scenes/main.tscn`, `godot/project.godot` — scene and project settings.
 - `godot/tools/` — headless verifiers (`parity.gd`, `verify_tracks.gd`,
-  `verify_reattach.gd`, `verify_board.gd`, `verify_online.gd`). See
+  `verify_reattach.gd`, `verify_board.gd`, `verify_online.gd`,
+  `verify_guard.gd`) and the ghost baker (`bake_ghosts.gd`). See
   `godot/README.md`.
 
-### JS build (legacy)
+### JavaScript (the server's physics)
 
-- `index.html` — single page, `#view` canvas, HUD and overlays.
-- `css/style.css` — HUD, menu and overlay styling.
-- `js/config.js` — all tunables (`CFG`). Start here before changing feel.
-- `js/track.js` — procedural road: a staircase of straight legs joined by
+- `physics/config.js` — all tunables (`CFG`). The single source of the feel; the
+  Godot `cfg.gd` mirrors it.
+- `physics/track.js` — procedural road: a staircase of straight legs joined by
   quarter-turn circular-arc corners, sampled into `road[]` (points) and `rs[]`
   (arc-length per point). Takes `opts` (`corners`, `radius`, `leadIn`,
   `finishLen`, `segLens`, `targetTime`) so a finite track can have its own shape;
   endless play passes none and gets the uniform `CFG` lengths.
-- `js/tracks.js` — the ten playable time-attack tracks (`PLAYABLE_TRACKS`:
+- `physics/tracks.js` — the ten playable time-attack tracks (`PLAYABLE_TRACKS`:
   1–5 and 21–25; 6–20 were removed). `trackDef(n)` is a pure
   function of the track number: radius, corner count, lead-in and the straight
   rhythm all come out of `n`, so a track is identical on every device (which the
   leaderboard and replays rely on). `targetTime` makes `Track.buildFinish` size
   the closing straight to land the clock on ~10s.
-- `js/car.js` — the physics. `step(dt, held)` is pure and testable.
-- `js/game.js` — fixed-step loop (`FIXED_DT`, `MAX_STEPS`) and run state.
-  Modes: `endless` (distance), `speedrun` (time on a track) and `replay`
-  (re-simulates stored button steps). While running it logs the held/not-held
-  value of every fixed step; that log *is* the replay.
-- `js/replay.js` — encode/decode a run's button steps to a `'0'/'1'` string.
-  Because the physics is deterministic, replaying the steps reproduces the run
-  bit for bit; a replay stores no positions at all.
-- `js/ghostrun.js` — a ghost is a run of the *real physics* driven by a
-  deterministic policy (`ghostPolicy(id)`), so it can be replayed. `simulateGhost`
-  plays one out. This is what makes a leaderboard ghost watchable.
-- `js/ghostdata.js` — GENERATED by `tools/bake-ghosts.mjs`. Per track, a sorted
-  list of `[time, ghostId]`: the baked field of real, watchable runs. A ghost's
-  replay is re-simulated from its id, so the file is only times and ids.
-- `js/leaderboard.js` — pages over `ghostdata.js` (`boardPage`), ranks the player
-  by time (`playerRank`), and exposes the fastest ghost (`worldRecord`). The field
-  is sorted, so ranking and paging are binary searches - no full list is built.
-- `js/account.js` — local accounts (username + password). Passwords are salted and
-  SHA-256 hashed, never stored plain. Device-local, so the UI says so.
-- `js/storage.js` — records/times/replays are namespaced per account (or `guest`).
-- `js/render.js` — top-down orthographic view. `toScreen()` maps world -> screen.
-  `CAR_COLOURS` are the car skins; `Renderer.setCar(i)` picks one.
-- `js/app.js` — input, overlays, track list, car picker, leaderboard pager,
-  accounts, ghost watching, the round restart button, service-worker registration.
-- `sw.js` + `manifest.webmanifest` — offline PWA shell.
+- `physics/car.js` — the physics. `step(dt, held)` is pure and testable.
+- `physics/util.js` — `angDiff`, `mulberry32` (bit-exact with the Godot port).
+- `tools/test.mjs` — headless tests for the physics and the server's run
+  verifier. Must stay green.
+- `tools/sync-physics.mjs` — vendors `physics/` into the Edge Function, and
+  `--check` fails if the copies drift.
 
 ## Commands
 
@@ -105,17 +83,18 @@ so the legacy client has no job left that the Godot build does not do.
 # Godot build (the game)
 godot --path godot                                        # play
 godot --headless --path godot --import                    # first-time import
-godot --headless --path godot --script res://tools/parity.gd          # parity vs JS
+godot --headless --path godot --script res://tools/parity.gd          # physics vs golden JS numbers
 godot --headless --path godot --script res://tools/verify_tracks.gd   # all tracks finish
 godot --headless --path godot --script res://tools/verify_reattach.gd # reattach pillar
 godot --headless --path godot --script res://tools/verify_board.gd    # board paging
 godot --headless --path godot --script res://tools/verify_online.gd   # online layer (offline paths)
+godot --headless --path godot --script res://tools/verify_guard.gd    # holding/mashing must lose
+godot --headless --path godot --script res://tools/bake_ghosts.gd     # regenerate ghostdata.gd (slow)
 
-# Legacy JS build (kept for leaderboard verification and parity reference)
-node tools/test.mjs            # 759 headless core tests (must stay green)
-node tools/bake-ghosts.mjs     # regenerate js/ghostdata.js (slow, ~15 min)
-node tools/serve.mjs 12000     # static server, POST /__shot writes /tmp/shot.png
-SDK=/workspace/android-sdk JDK=/workspace/jdk ./android/build.sh   # signed APK
+# Physics + server verifier (JavaScript, must stay green)
+node tools/test.mjs            # headless core tests
+node tools/sync-physics.mjs    # vendor physics into the Edge Function
+node tools/sync-physics.mjs --check  # fail if the vendored copies are stale
 ```
 
 ## Speedrun mode
@@ -126,12 +105,12 @@ A finite track with a finish line, scored by time. Built by passing
 - `CFG.speedrunCorners` (11) sets the corner count and `CFG.speedrunFinish`
   (520px) the closing straight. Each corner costs ~0.70s and the lead-in ~2.48s,
   so 11 corners lands the clock at **~10.4s**.
-- `Track.buildFinish()` runs a straight on from the last corner's exit and
-  records `finishS`. `car.step` sets `finished` when `s >= finishS` (checked
+- `Track.build_finish()` runs a straight on from the last corner's exit and
+  records `finish_s`. `car.step` sets `finished` when `s >= finish_s` (checked
   before the wall, so winning on the line is not a crash).
-- The clock is `game.elapsed`, advanced in fixed steps while the car is alive,
-  so it is refresh-rate independent. Best time per seed lives in
-  `slingdrift.times.v1` via `getBestTime`/`saveBestTime`.
+- The clock is the fixed-step count (`Game` advances it only while the car is
+  alive), so it is refresh-rate independent. The best time per seed is stored per
+  account by `Storage`.
 - Endless mode is unchanged: no `corners`, `cornerLimit` is `Infinity`,
   `finishS` is `Infinity`, and nothing about the timer runs.
 
@@ -181,27 +160,14 @@ Two things there are load-bearing:
 `wrangler.toml` also carries `main = "worker.js"` and `binding = "ASSETS"`; the
 binding is what gives the worker `env.ASSETS.fetch`.
 
-### Legacy: the JavaScript app
+### The old JavaScript app is gone
 
-The paragraphs below describe the old JS build and its WebView APK. They are kept
-only until that client is removed; the Godot build supersedes all of it.
-
-- `download.html` is the install landing page (browser play + APK download).
-- `slingdrift.apk` at the repo root is a copy of `android/build/slingdrift.apk`;
-  the server serves it as `application/vnd.android.package-archive`.
-- The APK is a thin WebView shell that loads the game from `android/assets/www`,
-  so it is immune to the browser's service-worker cache. `android/build.sh` stages
-  `index.html`, `manifest.webmanifest`, `css/`, `js/` and `icons/` into that dir on
-  every build — `sw.js` is deliberately not bundled, since a local-asset app needs
-  no service worker. Bump `versionCode`/`versionName` in the script per release.
-- The signing key is `android/debug.keystore` (kept in the repo on purpose):
-  Android identifies an app by its key, so a new key means updates refuse to
-  install over an existing build. Never regenerate it.
-- **Rebuild the APK whenever `js/` changes.** `slingdrift.apk` is a snapshot of
-  the JS at build time, so a stale copy ships an old game (missing tracks, no
-  ghosts, no skins) even though the served browser build is current. Re-run
-  `android/build.sh`, copy the result over `slingdrift.apk`, and bump
-  `versionCode`/`versionName` so devices update instead of ignoring the install.
+The legacy JS build, its PWA shell (`sw.js`, `manifest.webmanifest`,
+`index.html`, `css/`, `icons/`), the `download.html` landing page, and the
+WebView APK (`android/`, `slingdrift.apk`) have all been removed. `godot/` is
+the only client. Nothing here needs a rebuild-on-`js/`-change step any more; the
+Android app is the Godot export, published to `android-latest` by
+`.github/workflows/build-godot-android.yml`.
 
 ## The on-screen keyboard (signing in on a phone)
 
@@ -238,7 +204,10 @@ back:
 - every mash pattern (alternating, 3-on/3-off, 5-on/1-off) dies within ~3,
 - a cleanly-timed line survives 120+ corners.
 
-If you touch `car.js` or `config.js`, run `tools/test.mjs` first and last.
+The rule is proved twice, against both physics. `godot/tools/verify_guard.gd`
+runs it against the Godot build players actually run; `tools/test.mjs` runs it
+against the JS physics the server verifies with. If you touch `car.gd`,
+`physics/car.js`, `cfg.gd` or `physics/config.js`, run both.
 
 ## Track shape: one corner, one pole, one sling
 
@@ -255,12 +224,14 @@ right**. This is not cosmetic:
   emits one. The advanced tracks (21–28) opt out of the staircase and are built
   from an explicit op list, which is what lets a hairpin (180) or a loop (270)
   exist at all; those corners are single arcs round a single pivot, so they still
-  read as one pole. See `js/tracks.js` (`ADVANCED`) and `godot/scripts/tracks.gd`.
+  read as one pole. See `physics/tracks.js` (`ADVANCED`) and
+  `godot/scripts/tracks.gd`.
 
 Because the fillets of a quarter turn are exactly `driftRadius` long, two
 neighbouring fillets eat `2*driftRadius` of each `segLen`. `segLen` must clear
-`2*driftRadius + minStraight` or `track.js` throws. See `tools/window.mjs` for how
-straight length trades against the early-release window.
+`2*driftRadius + minStraight` or `track.js` throws. Straight length trades against
+the early-release window: a longer straight is more forgiving of a late release but
+is also where a run falls apart, because the car flies its whole length.
 
 A finite track may pass its own `radius` in `opts`, and then the same rule uses
 that radius, not `CFG.driftRadius`. A wide corner both needs a longer straight and
@@ -352,28 +323,22 @@ length and a small release error accumulates into a wall hit by the far end.
   than 420 is the bug coming back. A headless check that presses Sign in and asserts
   every menu button's `get_global_rect()` is inside the viewport is the cheapest
   guard.
-- **The service worker is network-first for code on purpose.** A cache-first
-  shell silently pins you to the first build ever cached: you edit a file, reload,
-  and keep seeing the old version. That wasted a lot of time here. Icons are
-  cache-first (they never change); everything else is network-first with the
-  cache as the offline fallback. Bump `VERSION` in `sw.js` when the shell changes.
-- No build step. Plain ES modules, served as-is. Do not add cache-busting query
-  strings — the service worker precaches bare paths.
-- Themes live in `js/render.js` (`THEMES`, `themeFor(seed)`); `game.load` calls
-  `renderer.setSeed(seed)` so each road has its own palette. Keep `road` and
-  `ground` contrasting, or the ribbon disappears.
-- `tools/` holds dev-only harnesses (`test.mjs`, `sim.mjs`, `serve.mjs`,
-  `shot.html`, `offline_test.html`, `browser_test.html`, `input_test.html`,
-  `ref/` comparison page). They are not part of the shipped game.
+- Themes live in `godot/scripts/render.gd` (`THEMES`, `theme_for(seed)`);
+  `Game.load` calls `renderer.set_seed(seed)` so each road has its own palette.
+  Keep `road` and `ground` contrasting, or the ribbon disappears.
+- `tools/` holds only `test.mjs` (physics + server verifier) and
+  `sync-physics.mjs`. The old JS dev harnesses (`sim.mjs`, `serve.mjs`, the
+  `.html` test pages, `ref/`) are gone with the client.
 
 ## Leaderboard, ghosts and accounts
 
-- The **head** of each board is real and watchable: `tools/bake-ghosts.mjs` runs
-  `simulateGhost` over a few hundred ids and writes the fastest 10 per track to
-  `js/ghostdata.js` as `[time, ghostId, name]`. `js/ghostrun.js` turns an id into a
-  deterministic button policy, so a ghost's replay is re-simulated on demand.
+- The **head** of each board is real and watchable: `godot/tools/bake_ghosts.gd`
+  runs the ghost policy over many ids and writes the fastest few per track to
+  `godot/scripts/ghostdata.gd` as `[time, ghost_id, name]`.
+  `godot/scripts/ghostrun.gd` turns an id into a deterministic button policy, so a
+  ghost's replay is re-simulated on demand.
 - The **tail** of the board is generated from a monotonic curve in
-  `js/leaderboard.js` and is *not* watchable (`row.watchable === false`). This is
+  `godot/scripts/leaderboard.gd` and is *not* watchable (`row.watchable == false`). This is
   the deliberate trade: a watchable ghost needs a real simulation behind it, and
   only the world record and the few runs behind it are ever actually watched. A
   whole 50,000-run watchable field is slow to bake and large to ship.
@@ -381,41 +346,35 @@ length and a small release error accumulates into a wall hit by the far end.
   0.25s of distinct times per track, with ties beyond that), so a large field has
   many tied times. That is why the field is baked rather than invented: a made-up
   time would have no run behind it, and a ghost you cannot watch is not a ghost.
-- `js/leaderboard.js` pages over the field (`boardPage`, 50 rows/page), slots the
-  player in by time (`playerRank`), and exposes the fastest ghost (`worldRecord`).
+- `godot/scripts/leaderboard.gd` pages over the field (`board_page`, 50
+  rows/page), slots the player in by time (`player_rank`), and exposes the fastest
+  ghost (`world_record`).
   The real head is a sorted array; the generated tail is a monotonic curve, so
   both rank by binary search and the whole board is sorted by construction.
 - **Ghosting**: pick Off / World record / Your best in the menu. The ghost is a
-  second `Car` stepped in lockstep inside the fixed-step loop (`Game.setGhostReplay`
-  / `setGhostSelf`), drawn translucent by `Renderer.drawGhost`. It shares the
-  track and the clock with the player, so the two are directly comparable.
+  second `Car` stepped in lockstep inside the fixed-step loop
+  (`Game.set_ghost_replay` / `set_ghost_self`), drawn translucent by the
+  renderer. It shares the track and the clock with the player, so the two are
+  directly comparable.
 - **History**: every finish is appended to `storage.addRun`, namespaced per
   account. The History overlay lists them newest first and flags personal bests.
-- `js/account.js` talks to Supabase Auth; the session (tokens, expiry, the
-  public name) lives in `localStorage`. `js/storage.js` namespaces
+- `godot/scripts/account.gd` talks to Supabase Auth; the session (tokens, expiry,
+  the public name) lives on disk. `godot/scripts/storage.gd` namespaces
   records/times/replays per account (`guest` when signed out). Preferences stay
   global.
 - **Records are keyed by the username, so a session that loses its name reads the
   guest bucket.** A Supabase token refresh returns a session with *no* username on
   it; storing that verbatim resolved the account to `null` and every PB vanished
   until the next sign-in. The name is now carried across a refresh, remembered by
-  user id (`slingdrift.idnames.v1`) as a fallback, and healed at boot
-  (`resolveAccount`). If you ever key records by something else, key them by user
+  user id (`idnames.v1` in the account store) as a fallback, and healed at boot
+  (`resolve_account`). If you ever key records by something else, key them by user
   id, not by a name the server may not resend.
 - Guest PBs do **not** migrate into an account on sign-in: the `guest` bucket and
   the account bucket are separate. Guest runs do still queue and upload
-  (`js/api.js`), but the local best time stays under `guest`.
+  (`godot/scripts/api.gd`), but the local best time stays under `guest`.
 - The run clock is `Car.time` (the simulated time). Do not add a second clock:
   the HUD, the saved best and a ghost's time must all be the same number, or a
   run and a ghost of that run disagree by a step (8ms) - enough to change a rank.
-
-## Overlays and the `[hidden]` trap
-
-Any element toggled with the `hidden` attribute must have its own
-`[hidden] { display: none }` rule if the element also sets `display`. An author
-`display: flex` beats the browser's `[hidden]` rule, so the element stays on
-screen and the control "does nothing". This has bitten `.over` and `.watch`;
-check for it before debugging any show/hide logic.
 
 ## Speed is constant - do not let the reel add to it
 
@@ -429,9 +388,10 @@ produces - the fastest line on every track. If you touch `drift`, keep the total
 at `speed`, and re-check that a wide grab is not faster than a clean one
 (`tools/test.mjs`, "grabbing wide is allowed and reels back to the road").
 
-Any change to `drift` or `fly` invalidates `js/ghostdata.js`: the baked ghosts are
-real runs of the real physics. Re-run `node tools/bake-ghosts.mjs` after a physics
-change, or every ghost fails to reproduce its claimed time.
+Any change to `drift` or `fly` invalidates `godot/scripts/ghostdata.gd`: the
+baked ghosts are real runs of the real physics. Re-run
+`godot --headless --path godot --script res://tools/bake_ghosts.gd` after a
+physics change, or every ghost fails to reproduce its claimed time.
 
 ## The shared leaderboard runs on Supabase
 
@@ -447,10 +407,10 @@ moment a time becomes an input, the board is worthless.
 Three consequences worth knowing before editing:
 
 - **The physics is vendored into the function.** Deno cannot import across the
-  function directory, so `tools/sync-physics.mjs` copies `js/{config,util,track,
-  car,tracks}.js` into `supabase/functions/_shared/physics/`. Never edit those
-  copies; edit `js/` and re-run the script. `node tools/sync-physics.mjs --check`
-  fails if they are stale, so run it in CI.
+  function directory, so `tools/sync-physics.mjs` copies `physics/{config,util,
+  track,car,tracks}.js` into `supabase/functions/_shared/physics/`. Never edit
+  those copies; edit `physics/` and re-run the script.
+  `node tools/sync-physics.mjs --check` fails if they are stale, so run it in CI.
 - **Runs are stored as whole ticks, not seconds.** The clock is `ticks / 120`
   exactly. The client's own accumulated `car.time` drifts by ~4e-15 over a run,
   which is enough to reorder a tie; the step count does not drift.
@@ -471,19 +431,15 @@ real domain for test accounts.
 
 ### Where the client finds the project
 
-`index.html` carries two meta tags, `sling-supabase` (the project URL) and
-`sling-supabase-key` (the public anon key). `js/account.js` reads them; there is no
-build step and no secret, because the anon key is designed to be visible and RLS is
-what constrains it. To point the game at a different project, change those two tags.
+`godot/scripts/netconfig.gd` holds the project URL and the public anon key. There
+is no build step and no secret, because the anon key is designed to be visible and
+RLS is what constrains it. Override them without editing the file via
+`user://slingdrift.net.json` or the `--net-url`/`--net-key` command-line flags. To
+point the game at a different project, change the defaults in `netconfig.gd`.
 
-`js/api.js` reads the older `sling-api` tag, which `tools/build-pages.mjs` still
-rewrites when it stages a static bundle for any file host. That tag is now only
-about the *old* same-origin API and does nothing for the Supabase path; leave it
-empty.
-
-The player's session lives in `localStorage` under `slingdrift.session.v2`, and the
-upload queue under `slingdrift.queue.v2`. Bumping either suffix deliberately
-invalidates whatever the old shape was, which is why the versions are there.
+The player's session and the upload queue live under `user://` (see
+`godot/scripts/storage.gd`). Bumping a filename suffix deliberately invalidates
+whatever the old shape was, which is why the versions are there.
 
 ### Deploying the functions
 
@@ -535,41 +491,34 @@ The failure mode is worth remembering: the wrong query does not degrade, it take
 the entire board down with a 500. If the board ever goes blank, check the select
 list before anything else.
 
-### Settings and the admin code
+### The record tracker, and the client settings that are gone
 
-`js/settings.js` owns zoom, the hook colour and the admin flag. All three are
-preferences in `slingdrift.prefs.v1`, so they are per-device and need no account.
+The record tracker posts from the server, not the browser. The `run` Edge Function
+(`supabase/functions/run/index.ts`) reads the webhook and the two message templates
+from `tracker_config` and announces an improvement itself, so every player's run is
+announced rather than only the admin's. RLS lets a signed-in player write
+`webhook_url` but not read it back, so the credential goes up and never comes down,
+and the `run` function only ever posts to discord.com.
 
-The admin code (`0404`) is checked in the client. That is a lock on a cupboard, not
-a safe: the code ships in `js/settings.js`, so anyone who opens devtools can read it.
-It exists to keep the Discord webhook field out of a normal player's way. Do not
-treat "admin" as a security boundary - if anything that matters ever hangs off it,
-gate it on the server instead.
-
-The record tracker posts from the server, not the browser. The `run` Edge
-Function (`supabase/functions/run/index.ts`) reads the webhook and the two message
-templates from `tracker_config` and announces an improvement itself, so every
-player's run is announced rather than only the admin's. The admin sets the webhook
-from `js/app.js`, which writes it to `tracker_config` with the admin's token; RLS
-lets a signed-in player write `webhook_url` but not read it back, so the credential
-goes up and never comes down. `validWebhook` pins the host and path, and the
-`run` function only ever posts to discord.com.
-
-`js/discord.js` remains for the admin's "Send test" button, which posts straight
-from the browser so the admin can check the webhook works without a round trip.
+The old JS client had a settings screen (zoom, the hook colour) and an admin code
+(`0404`, checked in the client - a lock on a cupboard, not a safe) that revealed the
+webhook field and the message templates, plus a "Send test" button
+(`js/discord.js`). None of that is in the Godot build; the tracker is server-only
+now. If an in-game admin panel is wanted again, treat "admin" as a UI convenience
+and keep anything that matters gated on the server, never on a client-side code.
 
 ## The online layer (Godot)
 
-The Godot build talks to the same Supabase project the legacy client does. The
-port lives in four files, and the split is deliberate:
+The Godot build talks to the same Supabase project the server runs. The online
+layer lives in four files, and the split is deliberate:
 
 - `godot/scripts/net.gd` — the transport. One shared `HTTPRequest`, one request in
   flight at a time, 8s timeout, every call resolving to
   `{ok, status, body, error}` so no caller has to catch anything.
 - `godot/scripts/netconfig.gd` — the project URL and public anon key, plus the
   headers and endpoint helpers.
-- `godot/scripts/api.gd` — the run queue and the board client (port of `js/api.js`).
-- `godot/scripts/account.gd` — Supabase Auth (port of `js/account.js`).
+- `godot/scripts/api.gd` — the run queue and the board client.
+- `godot/scripts/account.gd` — Supabase Auth.
 
 Four things are load-bearing and easy to break:
 
@@ -585,12 +534,12 @@ Four things are load-bearing and easy to break:
   (`user://slingdrift.queue.v2.json`, capped at 50) and is retried on the next
   flush. A guest's run queues too and is sent after they sign in.
 - **The client still never sends a time.** It sends the button steps and the server
-  replays them, exactly as the legacy client does. Do not add a time field.
+  replays them through the vendored `physics/`. Do not add a time field.
 - **The board is one board, not two.** `Leaderboard.board_page` merges the server's
   real runs into the baked ghost field by time, so a real run displaces the ghosts
   it beats and its rank is its merged position. `verify_online.gd` checks that
-  merge against reference values produced by the JS `boardPage`, so the two builds
-  agree number for number.
+  merge against reference values recorded from the old JS `boardPage`, so the port
+  still agrees with the original.
 
 A real submitted run has no ghost id, so it cannot be re-simulated from an id the
 way a baked ghost can. It carries its own `steps` instead, and `Game.set_ghost_steps`

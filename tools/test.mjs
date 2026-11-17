@@ -1,18 +1,21 @@
-// Headless tests for the core. Three things together mean "the game works":
-// the road is geometrically valid, a clean line survives, and every lazy policy
-// dies. The last one is the point of the whole exercise - an earlier build let
-// you beat a lap by mashing, and the tests are here so that cannot come back.
-import { Track } from '../js/track.js';
-import { Car } from '../js/car.js';
-import { CFG } from '../js/config.js';
-import { TRACK_COUNT, PLAYABLE_TRACKS, isPlayableTrack, trackDef, trackOpts } from '../js/tracks.js';
-import {
-  boardPage, pageForRank, playerRank, worldRecord, ghostCount, PER_PAGE,
-} from '../js/leaderboard.js';
-import { simulateGhost, ghostPolicy } from '../js/ghostrun.js';
-import { makeReplay, decodeSteps } from '../js/replay.js';
-import { hexToRgb, rgbToHex, MIN_ZOOM, MAX_ZOOM } from '../js/render.js';
-import { isAdminCode, clampZoom, validWebhook, loadSettings } from '../js/settings.js';
+// Headless tests for the game's physics and the server's run verifier.
+//
+// The Godot build is the game, but the physics lives on in JavaScript for one
+// job: the Supabase Edge Function replays every uploaded run through it to find
+// out what the run was worth. The client sends button steps and never a time, so
+// this is the code that decides the leaderboard. `tools/sync-physics.mjs` vendors
+// these modules into the function, and `godot/tools/parity.gd` checks the Godot
+// port against the numbers they produce.
+//
+// Three things together mean "the game works": the road is geometrically valid,
+// a clean line survives, and every lazy policy dies. The last one is the point of
+// the whole exercise - an earlier build let you beat a lap by mashing, and these
+// tests are here so that cannot come back.
+import { Track } from '../physics/track.js';
+import { Car } from '../physics/car.js';
+import { CFG } from '../physics/config.js';
+import { TRACK_COUNT, PLAYABLE_TRACKS, isPlayableTrack, trackDef, trackOpts } from '../physics/tracks.js';
+import { replayRun, FIXED_DT } from '../supabase/functions/_shared/physics/verify.js';
 
 const DT = 1 / 60;
 const seeds = [1, 2, 3, 7, 11, 42, 99, 123, 777, 2024];
@@ -34,6 +37,11 @@ const timing = (deg) => (c) => (c.attached
   ? c.remaining > (deg * Math.PI) / 180
   : Math.hypot(c.fillet.c.x - c.x, c.fillet.c.y - c.y) <= CFG.grabRange);
 
+// A replay is just the button steps; the game re-simulates it. Kept here because
+// the physics tests round-trip one, and the format is one bit per step.
+const encodeSteps = (steps) => steps.map((h) => (h ? '1' : '0')).join('');
+const decodeSteps = (str) => Array.from(String(str), (c) => c === '1');
+const makeReplay = (track, steps, time) => ({ track, time, steps: encodeSteps(steps) });
 console.log('the road is geometrically valid');
 for (const seed of seeds) {
   const t = new Track(seed);
@@ -355,582 +363,50 @@ console.log('the run clock is exactly the simulated time');
       `track ${n}: car clock ${c.time} != ${steps} steps (${steps * DT})`);
   }
 }
-
-console.log('the watchable head of the board is real runs');
+// --- server: the run verifier ------------------------------------------------
+// This is the anti-cheat. A client uploads button steps, never a time, and the
+// server replays them to find out what the run was worth. These tests run the
+// same `replayRun` the Edge Function imports.
+console.log('a submitted run is verified by re-simulation, never trusted');
 {
-  ok(ghostCount(1) > 1000, `the board should be deep, got ${ghostCount(1)}`);
-  // The head is baked from real simulations: each of the top rows must carry a
-  // ghost id whose re-simulation reproduces the time on the board exactly. Those
-  // are the rows that can be watched, so they are the rows that must be honest.
-  for (const n of [1, 21, 25]) {
-    const rows = boardPage(n, 1, { perPage: PER_PAGE }).rows;
-    const watchable = rows.filter((r) => r.watchable);
-    ok(watchable.length >= 5, `track ${n}: expected a watchable head, got ${watchable.length}`);
-    for (const r of watchable) {
-      const run = simulateGhost(n, r.ghostId);
-      ok(run && Math.abs(run.time - r.time) < 5e-4,
-        `track ${n} rank ${r.rank}: ghost ${r.ghostId} claimed ${r.time}, simulates to ${run && run.time}`);
-    }
-    // The head must be sorted, and the generated tail must not claim to be watchable.
-    for (let i = 1; i < watchable.length; i++) {
-      ok(watchable[i].time >= watchable[i - 1].time, `track ${n}: watchable head not sorted`);
-    }
-    ok(watchable.every((r) => r.ghostId !== null), `track ${n}: watchable row with no ghost id`);
-    const gen = boardPage(n, 20, { perPage: PER_PAGE }).rows;
-    ok(gen.every((r) => !r.watchable), `track ${n}: generated tail should not be watchable`);
+  // A reference run on track 1: drive the clean line and keep the steps.
+  const t = new Track(1, trackOpts(1));
+  const c = new Car(); c.reset(t);
+  const steps = [];
+  let i = 0;
+  while (c.alive && i++ < 200000) {
+    const h = timing(0)(c);
+    steps.push(h);
+    c.step(FIXED_DT, h);
   }
-  // The world record is the fastest watchable run, and it is watchable.
-  const wr = worldRecord(1);
-  ok(wr && wr.watchable && wr.ghostId !== null, 'the world record should be watchable');
-  const run = simulateGhost(1, wr.ghostId);
-  ok(run && Math.abs(run.time - wr.time) < 5e-4, 'the world record must reproduce its run');
-}
+  ok(c.finished, 'the reference run should finish');
+  const encoded = encodeSteps(steps);
 
-console.log('the leaderboard pages and ranks correctly');
-{
-  for (const n of [1, 21, 25]) {
-    const total = ghostCount(n);
-    const pages = Math.ceil(total / PER_PAGE);
-    // Page 1 is the fastest, ranks are 1..PER_PAGE and ascending.
-    const p1 = boardPage(n, 1, { perPage: PER_PAGE });
-    ok(p1.rows[0].rank === 1, `track ${n}: first row should be rank 1`);
-    for (let i = 1; i < p1.rows.length; i++) {
-      ok(p1.rows[i].time >= p1.rows[i - 1].time, `track ${n}: page 1 not sorted`);
-    }
-    // A deep page works, and page numbers are clamped into range.
-    const deep = boardPage(n, 27, { perPage: PER_PAGE });
-    ok(deep.page === Math.min(27, pages), `track ${n}: page 27 clamped to ${deep.page}`);
-    ok(deep.rows.every((r) => r.rank > (deep.page - 1) * PER_PAGE), `track ${n}: page 27 ranks out of range`);
-    const past = boardPage(n, 100000, { perPage: PER_PAGE });
-    ok(past.page === pages, `track ${n}: past-the-end page should clamp to ${pages}, got ${past.page}`);
-    const zero = boardPage(n, 0, { perPage: PER_PAGE });
-    ok(zero.page === 1, `track ${n}: page 0 should clamp to 1`);
-  }
-
-  // The player is slotted in by time, and their rank is real.
-  const total = ghostCount(1);
-  const slowest = boardPage(1, 1, { perPage: PER_PAGE }).rows[0];
-  const wr = worldRecord(1);
-  ok(wr && wr.rank === 1, 'there should be a world record at rank 1');
-  ok(wr.time <= slowest.time, 'the world record should be the fastest time');
-
-  const fast = { name: 'Me', time: wr.time - 0.001 };
-  ok(playerRank(1, fast.time) === 1, 'a time under the WR should rank 1');
-  const slow = { name: 'Me', time: wr.time + 100 };
-  ok(playerRank(1, slow.time) === total + 1, 'a very slow time should rank last');
-  const mid = { name: 'Me', time: (wr.time + slowest.time) / 2 };
-  const midRank = playerRank(1, mid.time);
-  ok(midRank > 1 && midRank < total, `a middling time should rank inside the field, got ${midRank}`);
-
-  // The page the player lands on shows their row, marked, exactly once.
-  const page = pageForRank(midRank);
-  const shown = boardPage(1, page, { player: mid, perPage: PER_PAGE });
-  ok(shown.playerRank === midRank, 'boardPage should report the player rank');
-  const mine = shown.rows.filter((r) => r.you);
-  ok(mine.length === 1, 'the player should appear exactly once on their page');
-  ok(mine[0].rank === midRank, 'the player row should carry their real rank');
-  // And the row ordering around the player is still by time.
-  for (let i = 1; i < shown.rows.length; i++) {
-    ok(shown.rows[i].time >= shown.rows[i - 1].time, 'player page is not sorted by time');
-  }
-
-  // Real runs count toward the rank. Ignoring them ranks the player among the
-  // baked ghosts alone, which reports a place they do not hold: with three real
-  // runs ahead, the same time has to drop three places.
-  const t0 = wr.time + 0.001;
-  const ahead = [
-    { name: 'Cola', time: wr.time - 0.02 },
-    { name: 'Polar', time: wr.time - 0.01 },
-    { name: 'Ash-8', time: wr.time },
-  ];
-  ok(playerRank(1, t0, ahead) === playerRank(1, t0) + ahead.length,
-    'each real run ahead must push the rank down by one');
-  // Exactly one real run ahead, and both it and the player are faster than the whole
-  // ghost field, so the rank is second on that run's account alone.
-  const onlyOne = [{ name: 'Polar', time: wr.time - 0.01 }];
-  ok(playerRank(1, wr.time - 0.001, onlyOne) === 2,
-    'a run behind one real run ranks second, whatever the ghost field says');
-  // A real run behind the player must not affect their rank at all.
-  const behind = [{ name: 'Slow', time: t0 + 5 }];
-  ok(playerRank(1, t0, behind) === playerRank(1, t0),
-    'a real run behind the player must not change the rank');
-  // And the two rankers agree on the same merged board.
-  const merged = boardPage(1, 1, { player: { name: 'Me', time: t0 }, reals: ahead, perPage: PER_PAGE });
-  ok(merged.playerRank === playerRank(1, t0, ahead),
-    `playerRank and boardPage must agree, got ${playerRank(1, t0, ahead)} vs ${merged.playerRank}`);
-}
-
-// --- server: replay verification and the store --------------------------------
-// A submitted run must be checked by re-simulating it, so a forged time cannot
-// enter the board. These are the rules the server enforces.
-{
-  const { verifyRun } = await import('../server/verify.mjs');
-  const { Store } = await import('../server/store.mjs');
-
-  const good = simulateGhost(1, 1);
-  ok(good, 'ghost 1 on track 1 should finish, or the fixtures are wrong');
-
-  // A genuine run re-simulates to exactly the time the client would claim.
-  const v = verifyRun(1, good.replay.steps);
+  const v = replayRun(1, encoded);
   ok(v.ok, 'a real finishing run should verify');
-  ok(Math.abs(v.time - good.time) < 1e-9,
-    `the server should reproduce the time exactly, got ${v.time} vs ${good.time}`);
+  ok(v.time === v.ticks / 120, 'the clock is whole ticks, not a float sum');
+  ok(Math.abs(v.time - c.time) < 1e-9,
+    `the server should reproduce the time, got ${v.time} vs ${c.time}`);
+  ok(replayRun(1, encoded).time === v.time, 'verification must be deterministic');
 
-  // Tampering is rejected, or silently corrected by recomputation.
-  // Note: the same steps may well finish a different track - the tracks are
-  // similar enough. That is not a hole, because the server never trusts a claimed
-  // time: it recomputes for whatever track was named, so the recorded time is
-  // always honest for that track. What a client cannot do is pick a time.
-  const cross = verifyRun(2, good.replay.steps);
-  ok(!cross.ok || Math.abs(cross.time - v.time) > 1e-9,
-    'a run must not carry its time over to another track unchanged');
-  ok(!verifyRun(1, 'nonsense').ok, 'non-binary steps must be rejected');
-  ok(!verifyRun(1, '0'.repeat(2000)).ok, 'a run that never finishes must be rejected');
-  ok(!verifyRun(1, good.replay.steps.slice(0, 120)).ok, 'a truncated run must be rejected');
-  ok(!verifyRun(99, good.replay.steps).ok, 'a track outside the playable set must be rejected');
-  // 6-20 were removed, so the playable set is not a range: a run on a removed
+  // The playable set is not a range (6-20 were removed), so a run on a removed
   // track must be refused even though it is under the old 1..25 ceiling.
-  ok(!verifyRun(6, good.replay.steps).ok, 'a run on a removed track must be rejected');
-  ok(!verifyRun(20, good.replay.steps).ok, 'a run on a removed track must be rejected');
-  ok(verifyRun(1, good.replay.steps).time === v.time, 'verification must be deterministic');
+  for (const gone of [6, 20, 26, 0, 1.5]) {
+    ok(!replayRun(gone, encoded).ok, `a run on track ${gone} must be rejected`);
+  }
+  ok(!replayRun(1, 'nonsense').ok, 'non-binary steps must be rejected');
+  ok(!replayRun(1, '').ok, 'an empty step string must be rejected');
+  ok(!replayRun(1, '0'.repeat(2000)).ok, 'a run that never finishes must be rejected');
+  ok(!replayRun(1, encoded.slice(0, 120)).ok, 'a truncated run must be rejected');
 
-  // Flipping one step changes the run; if it still finishes it is a different time,
-  // so a client cannot nudge a time without driving the line.
-  const flipped = good.replay.steps.split('');
+  // Flipping one step changes the run. If it still finishes it is a different
+  // time, so a client cannot nudge a time without actually driving the line.
+  const flipped = encoded.split('');
   const mid = Math.floor(flipped.length / 2);
   flipped[mid] = flipped[mid] === '1' ? '0' : '1';
-  const fv = verifyRun(1, flipped.join(''));
-  ok(!fv.ok || Math.abs(fv.time - v.time) > 1e-9,
-    'a tampered step sequence must not reproduce the same time');
-
-  // The store ranks by time, keeps one row per client, and pages correctly.
-  const s = new Store('/tmp/slingdrift-test-board.json');
-  const runA = simulateGhost(1, 1), runB = simulateGhost(1, 2);
-  const a = s.add(1, { time: runA.time, name: 'A', steps: runA.replay.steps, clientId: 'a' });
-  ok(a.rank === 1, 'the first entry should rank 1');
-  const b = s.add(1, { time: runB.time, name: 'B', steps: runB.replay.steps, clientId: 'b' });
-  const list = s.list(1);
-  ok(list[0].time <= list[1].time, 'the board must be sorted by time');
-  ok(b.rank === (runB.time < runA.time ? 1 : 2), 'a new run should be slotted by time');
-
-  // The same player posting a slower time does not get a second row.
-  const worse = s.add(1, { time: runA.time + 5, name: 'A', steps: '10'.repeat(50), clientId: 'a' });
-  ok(!worse.improved, 'a slower run from the same player must not improve their row');
-  ok(s.list(1).filter((e) => e.clientId === 'a').length === 1, 'one row per player per track');
-
-  // The same button sequence is not stored twice, whoever sends it.
-  const dupe = s.add(1, { time: runB.time, name: 'Copy', steps: runB.replay.steps, clientId: 'c' });
-  ok(!dupe.improved, 'an identical run must not be stored twice');
-
-  const page = s.page(1, 1, 50);
-  ok(page.rows.length === 2, `the page should hold both real runs, got ${page.rows.length}`);
-  ok(page.rows[0].rank === 1 && page.rows[1].rank === 2, 'ranks should be 1-based and ordered');
-  ok(page.rows.every((r) => r.watchable), 'stored runs should be watchable');
-  ok(s.rankOf(1, 'a') !== null, 'the store should find a player by client id');
-  ok(s.rankOf(1, 'nobody') === null, 'an unknown client id should have no rank');
+  const fv = replayRun(1, flipped.join(''));
+  ok(!fv.ok || fv.time !== v.time, 'a tampered step sequence must not reproduce the time');
 }
+  console.log(`\n${pass} passed, ${fail} failed`);
 
-
-console.log('real runs merge into the ghost field as one board');
-{
-  const wr = worldRecord(1, []);
-  const real = (name, time, steps = '01'.repeat(20)) => ({ name, time, steps });
-
-  // A run under the record takes rank 1, is flagged real, and the ghost that was
-  // the record is still there right behind it - the field is not replaced.
-  const fast = real('Real', wr.time - 0.05);
-  const p = boardPage(1, 1, { reals: [fast] });
-  ok(p.rows[0].rank === 1 && p.rows[0].name === 'Real', 'a real run under the WR should top the board');
-  ok(p.rows[0].real === true, 'the real row should be flagged real');
-  ok(p.rows[0].watchable === true, 'a real run with steps should be watchable');
-  ok(p.rows[1].real !== true, 'the ghost field should still be under it');
-  ok(p.total === ghostCount(1) + 1, 'the field should grow by one, not shrink to one');
-
-  // The merged board is sorted, whatever order the runs arrive in.
-  const mid = real('Mid', wr.time + 0.4);
-  const slow = real('Slow', wr.time + 2);
-  const many = boardPage(1, 1, { reals: [slow, mid, fast] });
-  for (let i = 1; i < many.rows.length; i++) {
-    ok(many.rows[i].time >= many.rows[i - 1].time, `merged board not sorted at ${i}`);
-  }
-
-  // A run slower than the entire field lands after it, not partway up. This is
-  // the bug the old merge had: it placed by ghost count and ignored the tail.
-  const turtle = real('Turtle', 9999);
-  const all = boardPage(1, 1, { reals: [turtle] });
-  const last = boardPage(1, all.pages, { reals: [turtle] });
-  const found = last.rows.find((r) => r.real);
-  ok(found && found.rank === all.total, `a run past the field should rank last, got ${found && found.rank}`);
-  ok(found && found.rank === last.rows[last.rows.length - 1].rank, 'and it should be the final row');
-
-  // Two runs on the same time both appear, with distinct ranks. They tie the same
-  // ghost, so they sit adjacent to it rather than on top of each other.
-  const a = real('A', wr.time + 1), b = real('B', wr.time + 1);
-  const tiePage = pageForRank(playerRank(1, a.time));
-  const seenReal = new Map();
-  for (let pg = tiePage - 1; pg <= tiePage + 1; pg++) {
-    if (pg < 1) continue;
-    for (const r of boardPage(1, pg, { reals: [a, b] }).rows) {
-      if (r.real) seenReal.set(r.name, r.rank);
-    }
-  }
-  ok(seenReal.has('A') && seenReal.has('B'), `both tied runs should be shown, saw ${[...seenReal.keys()]}`);
-  ok(seenReal.get('A') !== seenReal.get('B'), 'tied runs should have distinct ranks');
-
-  // The rank boardPage reports is the rank the player's own row carries, and their
-  // row appears on exactly the page that rank falls on.
-  const mine = { ...real('Me', wr.time + 0.5), you: true };
-  const anyPage = boardPage(1, 1, { reals: [mine] });
-  ok(anyPage.playerRank !== null, 'a signed-in player with a time should have a rank');
-  const minePage = boardPage(1, pageForRank(anyPage.playerRank), { reals: [mine] });
-  const myRow = minePage.rows.find((r) => r.you);
-  ok(!!myRow, 'the signed-in player should appear on their own page');
-  ok(myRow && myRow.rank === anyPage.playerRank,
-    `their row should carry rank ${anyPage.playerRank}, got ${myRow && myRow.rank}`);
-  ok(minePage.rows.filter((r) => r.you).length === 1, 'they should appear exactly once');
-
-  // The world record follows the real runs, and a real record is watchable by
-  // steps rather than by a ghost id.
-  const rw = worldRecord(1, [fast]);
-  ok(rw.real === true && rw.name === 'Real', 'the WR should be the real run');
-  ok(rw.steps === fast.steps && rw.watchable, 'a real WR should replay from its steps');
-  ok(worldRecord(1, []).real === false, 'with no real runs the WR is the baked ghost');
-}
-
-console.log('a replay of a real run reproduces its time');
-{
-  // The board hands the game a real run's steps; replaying them must land on the
-  // time shown. This is what "watch" relies on, and what broke when a real row
-  // was watched as a baked ghost.
-  const run = simulateGhost(1, 746);
-  ok(!!run, 'the reference ghost should simulate');
-  const fromSteps = new Car();
-  fromSteps.reset(new Track(1, trackOpts(1)));
-  const steps = decodeSteps(run.replay.steps);
-  let i = 0;
-  while (fromSteps.alive && i < steps.length) fromSteps.step(1 / 120, steps[i++]);
-  ok(fromSteps.finished, 'replaying stored steps should finish');
-  ok(Math.abs(fromSteps.time - run.time) < 1e-9,
-    `replayed time ${fromSteps.time} should equal ${run.time}`);
-}
-
-console.log('settings: the admin code, zoom and webhook checks hold');
-{
-  // The admin code is compared as a string, so the leading zero is not lost.
-  ok(isAdminCode('0404'), 'the admin code should be accepted');
-  ok(isAdminCode(' 0404 '), 'surrounding space should be forgiven');
-  ok(!isAdminCode('404'), 'a numeric reading of the code must not work');
-  ok(!isAdminCode(404), 'nor a number with no leading zero');
-  ok(!isAdminCode(''), 'an empty code must not work');
-  ok(!isAdminCode('04040'), 'a longer code must not work');
-
-  // Zoom is clamped to what the renderer can actually draw.
-  ok(clampZoom(1) === 1, 'zoom 1 is the default and must be unchanged');
-  ok(clampZoom(0.1) === MIN_ZOOM, 'zoom below the floor should clamp up');
-  ok(clampZoom(9) === MAX_ZOOM, 'zoom above the ceiling should clamp down');
-  ok(clampZoom('0.5') === MIN_ZOOM, 'a numeric string should be read as a number');
-  ok(clampZoom('nonsense') === 1, 'a non-number should fall back to 1');
-  ok(clampZoom(NaN) === 1, 'NaN should fall back to 1');
-
-  // A webhook URL is only a Discord webhook if it is https on discord.com's
-  // webhook path. This is what stops a typo pointing the sender at another host.
-  const good = 'https://discord.com/api/webhooks/123456789012345678/abcdefghijklmnop';
-  ok(validWebhook(good), 'a real-shaped Discord webhook should be accepted');
-  ok(validWebhook('https://discord.com/api/v10/webhooks/1/abc'), 'a versioned path should be accepted');
-  ok(validWebhook('https://discordapp.com/api/webhooks/1/abc'), 'the legacy host should be accepted');
-  ok(!validWebhook('http://discord.com/api/webhooks/1/abc'), 'plain http must be rejected');
-  ok(!validWebhook('https://evil.com/api/webhooks/1/abc'), 'another host must be rejected');
-  ok(!validWebhook('https://discord.com.evil.com/api/webhooks/1/abc'), 'a lookalike host must be rejected');
-  ok(!validWebhook('https://discord.com/api/webhooks/1'), 'a missing token must be rejected');
-  ok(!validWebhook('https://discord.com/'), 'the bare host must be rejected');
-  ok(!validWebhook('not a url'), 'garbage must be rejected');
-  ok(!validWebhook(''), 'empty must be rejected');
-}
-
-console.log('settings: colours round-trip, and malformed values are repaired');
-{
-  // The colour picker deals in hex; the renderer deals in channels. Both ways
-  // must agree or the hook is drawn a different colour from the one chosen.
-  ok(hexToRgb('#ffffff').join(',') === '255,255,255', 'white should parse');
-  ok(hexToRgb('#000000').join(',') === '0,0,0', 'black should parse');
-  ok(hexToRgb('38d96b').join(',') === '56,217,107', 'a bare hex should parse');
-  ok(hexToRgb('not a colour').join(',') === '255,255,255', 'a bad value should fall back to white');
-  ok(hexToRgb('#fff').join(',') === '255,255,255', 'a short hex should fall back to white');
-  for (const hex of ['#ffffff', '#000000', '#38d96b', '#123456', '#aabbcc']) {
-    ok(rgbToHex(hexToRgb(hex)) === hex, `${hex} should survive a round trip`);
-  }
-
-  // A device with nothing saved gets sane defaults rather than undefined.
-  const s = loadSettings();
-  ok(s.zoom === 1, 'the default zoom should be 1');
-  ok(s.rope === '#ffffff', 'the default hook colour should be white');
-  ok(s.ropeRgb.join(',') === '255,255,255', 'and it should be handed to the renderer as white');
-  ok(s.admin === false, 'nobody is an admin by default');
-  ok(s.webhook === '', 'and there is no webhook by default');
-}
-
-console.log('account: a token refresh keeps the name, so the PBs stay visible');
-{
-  // Records are keyed by the signed-in username. A refresh hands back a session
-  // with no username on it, and the old code stored that verbatim, so the next
-  // refresh resolved the account to null and moved every best time to the guest
-  // bucket. This walks the real refresh path and checks the name survives.
-  const store = new Map();
-  const realLS = globalThis.localStorage;
-  const realFetch = globalThis.fetch;
-  globalThis.localStorage = {
-    getItem: (k) => (store.has(k) ? store.get(k) : null),
-    setItem: (k, v) => store.set(k, String(v)),
-    removeItem: (k) => store.delete(k),
-    clear: () => store.clear(),
-  };
-  globalThis.document = { querySelector: () => null };
-  globalThis.window = { SLING_SUPABASE_URL: 'https://x.supabase.co', SLING_SUPABASE_ANON_KEY: 'k' };
-  globalThis.fetch = async (url) => (
-    String(url).includes('grant_type=refresh_token')
-      ? { ok: true, json: async () => ({
-          access_token: 't2', refresh_token: 'r2', expires_in: 3600,
-          user: { id: 'u1', email: 'p@example.com' },        // no username, as the real service returns
-        }) }
-      : { ok: false, json: async () => ({}) }
-  );
-
-  const A = await import('../js/account.js');
-  const S = await import('../js/storage.js');
-
-  localStorage.setItem('slingdrift.session.v2', JSON.stringify({
-    access_token: 't1', refresh_token: 'r1',
-    expires_at: Math.floor(Date.now() / 1000) + 5,           // inside the refresh window
-    user: { id: 'u1', email: 'p@example.com' }, username: 'Polar',
-  }));
-  S.saveBestTime(1, 10.125);
-  ok(A.currentAccount() === 'Polar', 'the signed-in name should read back');
-  ok(S.getBestTime(1) === 10.125, 'and the PB should be under that name');
-
-  await A.authToken();                                       // the real refresh path
-  ok(A.currentAccount() === 'Polar', 'a token refresh must not drop the name');
-  ok(S.getBestTime(1) === 10.125, 'so the PB is still the player\'s after a refresh');
-
-  // A session that arrives nameless anyway still resolves from the id -> name map.
-  const s = JSON.parse(localStorage.getItem('slingdrift.session.v2'));
-  delete s.username;
-  localStorage.setItem('slingdrift.session.v2', JSON.stringify(s));
-  ok(A.currentAccount() === 'Polar', 'a nameless session should still resolve from the remembered id');
-  ok(S.getBestTime(1) === 10.125, 'and still find the PB');
-
-  globalThis.localStorage = realLS;
-  globalThis.fetch = realFetch;
-}
-
-console.log('tracker: a record reads with a minus delta, an improvement with a plus');
-{
-  const T = await import('../js/tracker.js');
-
-  // A world record: the run beat the record that stood before it, so the delta is
-  // how much it won by, and it is signed minus.
-  const wr = T.recordMessage({ player: 'Polar', track: 1, time: 9.3416, rank: 1, wrBefore: 9.3583 });
-  ok(wr.isRecord, 'beating the standing record is a world record');
-  ok(wr.message.includes('[WR -0.017]'), `a record carries a minus delta, got: ${wr.message}`);
-  ok(wr.message.startsWith('Polar set a new world record'), 'and uses the WR wording');
-
-  // The first run on a track has no record to beat: it is a record by default.
-  const first = T.recordMessage({ player: 'Polar', track: 4, time: 10.5, rank: 1, wrBefore: null });
-  ok(first.isRecord, 'the first run on a track is a world record');
-  ok(first.message.includes('[WR -0.000]'), 'with a zero delta');
-
-  // An ordinary improvement sits behind the record, so the delta is how far behind
-  // and it is signed plus - the same number the player sees on the board.
-  const pos = T.recordMessage({ player: 'Cola', track: 1, time: 9.5916, rank: 2, wrBefore: 9.5746 });
-  ok(!pos.isRecord, 'a run behind the record is not a world record');
-  ok(pos.message.includes('[WR +0.017]'), `a non-record carries a plus delta, got: ${pos.message}`);
-  ok(pos.message.includes('position 2'), 'and reports the position');
-  ok(pos.message.includes('9.592'), 'and the time to three places');
-
-  // Equalling the record is NOT beating it. The player shares the record's time
-  // but not its place at the top, so this is a position with a zero delta - not a
-  // "new world record by 0.000", which is what the old `<=` wrongly reported.
-  const tie = T.recordMessage({ player: 'A', track: 1, time: 9.5746, rank: 2, wrBefore: 9.5746 });
-  ok(!tie.isRecord, 'equalling the record is not a world record');
-  ok(tie.message.includes('[WR +0.000]'), `a tie carries a plus zero delta, got: ${tie.message}`);
-  ok(tie.message.includes('took position 2'), 'and reports the shared position, not a new record');
-
-  // The admin can reword both, and the placeholders fill from the run.
-  const custom = T.recordMessage(
-    { player: 'Cola', track: 3, time: 9.9, rank: 4, wrBefore: 9.5 },
-    { posMessage: '{player} | T{track} | {time}s | P{rank} | {sign}{delta}' },
-  );
-  ok(custom.message === 'Cola | T3 | 9.900s | P4 | +0.400', `custom wording fills, got: ${custom.message}`);
-
-  // An unknown placeholder is left visible rather than silently blanked.
-  ok(T.formatMessage('a {nope} b', {}) === 'a {nope} b', 'an unknown placeholder is left alone');
-
-  // The Edge Function's copy of this rule is TypeScript on Deno, so it cannot be
-  // imported here. Read it instead: a tie must be a `+` position there too, or the
-  // announcement that actually reaches Discord would still call a tie a record.
-  const { readFileSync } = await import('node:fs');
-  const edgeTracker = readFileSync(new URL('../supabase/functions/_shared/tracker.ts', import.meta.url), 'utf8');
-  const edgeRun = readFileSync(new URL('../supabase/functions/run/index.ts', import.meta.url), 'utf8');
-  ok(/runTicks < wrBeforeTicks/.test(edgeTracker),
-    'the Edge Function must treat only a strictly faster run as beating the record');
-  ok(!/runTicks <= wrBeforeTicks/.test(edgeTracker),
-    'the Edge Function must not treat a tie as a record');
-  ok(/run\.ticks < run\.wrBefore/.test(edgeRun),
-    'the Edge Function must not pick the WR wording on a tie');
-  ok(!/run\.ticks <= run\.wrBefore/.test(edgeRun),
-    'the Edge Function must not treat a tie as a record');
-}
-
-console.log('settings: the tracker messages load, and a blank one falls back');
-{
-  const store = new Map();
-  const realLS = globalThis.localStorage;
-  globalThis.localStorage = {
-    getItem: (k) => (store.has(k) ? store.get(k) : null),
-    setItem: (k, v) => store.set(k, String(v)),
-    removeItem: (k) => store.delete(k),
-    clear: () => store.clear(),
-  };
-  globalThis.document = { querySelector: () => null };
-  globalThis.window = {};
-
-  const S = await import('../js/settings.js');
-  const T = await import('../js/tracker.js');
-
-  const def = S.loadSettings();
-  ok(def.wrMessage === T.DEFAULT_WR_MESSAGE, 'the WR message defaults to the built-in wording');
-  ok(def.posMessage === T.DEFAULT_POS_MESSAGE, 'and so does the position message');
-
-  S.saveTrackerMessages('my {player} line', 'pos {rank}');
-  const saved = S.loadSettings();
-  ok(saved.wrMessage === 'my {player} line', 'a saved WR message reads back');
-  ok(saved.posMessage === 'pos {rank}', 'and a saved position message');
-
-  // Blanking a field must fall back to the default rather than posting nothing.
-  S.saveTrackerMessages('', '   ');
-  const blanked = S.loadSettings();
-  ok(blanked.wrMessage === T.DEFAULT_WR_MESSAGE, 'a blank WR message falls back to the default');
-  ok(blanked.posMessage === T.DEFAULT_POS_MESSAGE, 'a blank position message too');
-
-  globalThis.localStorage = realLS;
-}
-
-console.log('account: a signed-in player\'s times come back from the server');
-{
-  // The records live on the server, but the game reads them from localStorage. A
-  // reinstall or a second device would show nothing after signing in unless the
-  // server's copy is folded back in. This walks that path with a stubbed server.
-  const store = new Map();
-  const realLS = globalThis.localStorage;
-  const realFetch = globalThis.fetch;
-  globalThis.localStorage = {
-    getItem: (k) => (store.has(k) ? store.get(k) : null),
-    setItem: (k, v) => store.set(k, String(v)),
-    removeItem: (k) => store.delete(k),
-    clear: () => store.clear(),
-  };
-  globalThis.document = { querySelector: () => null };
-  globalThis.window = { SLING_SUPABASE_URL: 'https://x.supabase.co', SLING_SUPABASE_ANON_KEY: 'k' };
-  globalThis.fetch = async (url) => {
-    if (String(url).includes('/rest/v1/runs')) {
-      return { ok: true, json: async () => ([
-        { track: 1, ticks: 1120, steps: 'ab' },          // 9.3333s on track 1
-        { track: 2, ticks: 1200, steps: null },          // 10s on track 2
-      ]) };
-    }
-    return { ok: false, json: async () => ({}) };
-  };
-
-  const A = await import('../js/account.js');
-  const S = await import('../js/storage.js');
-  const Api = await import('../js/api.js');
-
-  localStorage.setItem('slingdrift.session.v2', JSON.stringify({
-    access_token: 't1', refresh_token: 'r1',
-    expires_at: Math.floor(Date.now() / 1000) + 3600,
-    user: { id: 'u1', email: 'p@example.com' }, username: 'Polar',
-  }));
-
-  ok(A.currentUserId() === 'u1', 'the signed-in user id should read back');
-
-  const runs = await Api.fetchMyRuns();
-  ok(Array.isArray(runs) && runs.length === 2, 'the server runs should come back');
-  ok(Math.abs(runs[0].time - 1120 / 120) < 1e-9, 'and be in seconds, not ticks');
-
-  // A device that has never seen these runs adopts them.
-  const changed = S.mergeServerTimes(runs);
-  ok(changed === 2, `a fresh device should adopt both times, got ${changed}`);
-  ok(Math.abs(S.getBestTime(1) - 1120 / 120) < 1e-9, 'track 1 now shows the server time');
-  ok(Math.abs(S.getBestTime(2) - 10) < 1e-9, 'track 2 now shows the server time');
-
-  // A local time that is faster must win: the merge takes the better of the two,
-  // never blindly overwriting the device with the server.
-  S.saveBestTime(1, 9.0);
-  const again = S.mergeServerTimes(runs);
-  ok(again === 0, 'a slower server time changes nothing');
-  ok(S.getBestTime(1) === 9.0, 'and the faster local time survives');
-
-  // A faster server time (another device) does win.
-  S.mergeServerTimes([{ track: 1, time: 8.5, steps: 'zz' }]);
-  ok(S.getBestTime(1) === 8.5, 'a faster server time replaces the local one');
-
-  globalThis.localStorage = realLS;
-  globalThis.fetch = realFetch;
-}
-
-console.log('tracker: the admin\'s webhook reaches the server, not just the device');
-{
-  // The server announces records, so the webhook has to be written to
-  // `tracker_config` with the admin's token. Before this, "Save webhook" only
-  // wrote to localStorage, so the server's webhook was null and it announced
-  // nothing - which is why only the admin ever saw a post.
-  const store = new Map();
-  const realLS = globalThis.localStorage;
-  const realFetch = globalThis.fetch;
-  let seen = null;
-  globalThis.localStorage = {
-    getItem: (k) => (store.has(k) ? store.get(k) : null),
-    setItem: (k, v) => store.set(k, String(v)),
-    removeItem: (k) => store.delete(k),
-    clear: () => store.clear(),
-  };
-  globalThis.document = { querySelector: () => null };
-  globalThis.window = { SLING_SUPABASE_URL: 'https://x.supabase.co', SLING_SUPABASE_ANON_KEY: 'k' };
-  globalThis.fetch = async (url, opts) => {
-    seen = { url: String(url), opts };
-    return { ok: true, json: async () => ({}) };
-  };
-
-  const Api = await import('../js/api.js');
-
-  // No session yet: a guest's save cannot reach the server, and that is reported.
-  localStorage.clear();
-  ok(await Api.saveTrackerConfig({ webhook: 'https://discord.com/api/webhooks/1/abc' }) === false,
-    'a guest cannot write the server webhook');
-
-  localStorage.setItem('slingdrift.session.v2', JSON.stringify({
-    access_token: 't1', refresh_token: 'r1',
-    expires_at: Math.floor(Date.now() / 1000) + 3600,
-    user: { id: 'u1', email: 'p@example.com' }, username: 'Polar',
-  }));
-
-  const okWrite = await Api.saveTrackerConfig({ webhook: 'https://discord.com/api/webhooks/1/abc' });
-  ok(okWrite === true, 'a signed-in admin can write the server webhook');
-  ok(seen.url.endsWith('/rest/v1/tracker_config?id=eq.1'), 'the write targets the single config row');
-  ok(seen.opts.method === 'PATCH', 'and updates rather than inserts');
-  ok(seen.opts.headers.authorization === 'Bearer t1', 'with the admin token, so RLS lets it through');
-  ok(JSON.parse(seen.opts.body).webhook_url === 'https://discord.com/api/webhooks/1/abc',
-    'and carries the webhook url');
-
-  // The templates travel the same way, so the server posts the admin's wording.
-  await Api.saveTrackerConfig({ wrMessage: 'WR {player}', posMessage: 'POS {rank}' });
-  const body = JSON.parse(seen.opts.body);
-  ok(body.wr_message === 'WR {player}' && body.pos_message === 'POS {rank}',
-    'the message templates reach the server too');
-  ok(!('webhook_url' in body), 'and a template-only save does not blank the webhook');
-
-  globalThis.localStorage = realLS;
-  globalThis.fetch = realFetch;
-}
-
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+if (fail) process.exit(1);

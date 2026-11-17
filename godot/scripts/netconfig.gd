@@ -4,8 +4,8 @@ class_name NetConfig
 # Where the leaderboard server lives, and the public anon key that reaches it.
 #
 # Both values are public: the anon key is designed to ship in a client (it is
-# RLS-restricted, not secret) and is already committed in `index.html` for the JS
-# build. Keeping the same pair here means the two builds talk to one project.
+# RLS-restricted, not secret) and was already committed in the legacy JS client.
+# Keeping the same pair here means the game and the server talk to one project.
 #
 # Override order, lowest priority first:
 #   1. the baked-in defaults below

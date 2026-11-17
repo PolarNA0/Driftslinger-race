@@ -1,7 +1,7 @@
 extends RefCounted
 class_name Track
 
-# Port of js/track.js. The road is a staircase of straight legs joined by
+# Port of the old js/track.js (removed with the JS client). The road is a staircase of straight legs joined by
 # quarter-turn arcs of radius `radius`, and the pole you sling around is the
 # centre of the arc. A track may instead supply an explicit op list for corners
 # that are not quarter turns - hairpins (180) and loops (270). See the JS source

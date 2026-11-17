@@ -1,6 +1,6 @@
 extends Control
 
-# Port of js/app.js: the shell around the game. Menu, mode and track pickers,
+# Port of the old js/app.js (removed with the JS client): the shell around the game. Menu, mode and track pickers,
 # car skins, the leaderboard with watchable ghosts, run history, accounts, and
 # the overlays for pause / crash / finish / replay-done.
 #

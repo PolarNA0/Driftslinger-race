@@ -1,7 +1,8 @@
 extends Node
 class_name Net
 
-# HTTP for the online layer: the transport under the port of js/api.js.
+# HTTP for the online layer: the transport under the port of the old js/api.js
+# (removed with the JS client).
 #
 # The web export is built without thread support, so this uses HTTPRequest in
 # single-threaded mode and serialises every call through one in-flight slot. A

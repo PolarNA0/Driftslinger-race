@@ -2,7 +2,7 @@
 //
 // This is the whole anti-cheat: the client sends button steps, never a time, and
 // the server derives the time by replaying those steps through the same physics
-// the browser runs. A forged time has nothing to attach to, because the time is
+// the game runs. A forged time has nothing to attach to, because the time is
 // not an input.
 //
 // The same module is used by the Edge Function and by tools/test.mjs, so what the

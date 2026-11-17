@@ -18,7 +18,7 @@ import {
 
 // The service-role key bypasses RLS, which is the point: it is the only writer
 // allowed near the `runs` table. It is injected by the platform and never
-// reaches the browser.
+// reaches the player.
 const admin = createClient(
   Deno.env.get('SUPABASE_URL')!,
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,

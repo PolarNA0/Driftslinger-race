@@ -1,7 +1,7 @@
 extends RefCounted
 class_name GhostRun
 
-# Port of js/ghostrun.js. A ghost is defined by one integer id: the id turns into
+# Port of the old js/ghostrun.js (removed with the JS client). A ghost is defined by one integer id: the id turns into
 # a deterministic button policy, and the policy is played out on the real physics.
 # The same id gives the same run forever, on every device, so the board ships as
 # nothing but (time, id) pairs and is still watchable.

@@ -25,8 +25,8 @@ import { isPlayableTrack } from '../_shared/physics/tracks.js';
 // response; the ghost field behind it is unbounded and never travels.
 const MAX_ROWS = 1000;
 
-// The anon key is public by design; it ships in the browser. Using it here means
-// this read goes through RLS exactly as a browser would, rather than around it.
+// The anon key is public by design; it ships in the client. Using it here means
+// this read goes through RLS exactly as a client would, rather than around it.
 const anon = createClient(
   Deno.env.get('SUPABASE_URL')!,
   Deno.env.get('SUPABASE_ANON_KEY')!,

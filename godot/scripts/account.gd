@@ -1,7 +1,7 @@
 extends RefCounted
 class_name Account
 
-# Port of js/account.js. Accounts.
+# Port of the old js/account.js (removed with the JS client). Accounts.
 #
 # These are real accounts on a server, not device-local ones. Supabase Auth owns
 # the credentials - the password is bcrypt-hashed on their side, and reset and

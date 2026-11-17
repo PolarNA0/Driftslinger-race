@@ -20,31 +20,27 @@ See [`godot/README.md`](godot/README.md) for how to run, export and verify it.
 
 ### A note on the JavaScript build
 
-This repository began as a JavaScript/HTML5 game (`index.html`, `css/`, `js/`)
-and was later ported to Godot. **The Godot build supersedes it** and is where all
-new work goes.
+This repository began as a JavaScript/HTML5 game and was later ported to Godot.
+**The Godot build supersedes it** and is where all new work goes. The JS client
+has been removed.
 
-The JS build has not been deleted yet, for two reasons:
+One piece of JavaScript remains: `physics/`. It is kept for exactly one reason —
+**it is the leaderboard's verification engine.** The Supabase Edge Function
+replays every uploaded run through this physics (vendored by
+`tools/sync-physics.mjs`) rather than trusting a time sent by a client, and
+`godot/tools/parity.gd` checks the Godot port against the numbers it produces.
+`node tools/test.mjs` covers it.
 
-1. **It is the leaderboard's verification engine.** The Supabase Edge Function
-   replays every uploaded run through the JS physics (vendored by
-   `tools/sync-physics.mjs`) rather than trusting a time sent by a client. That
-   property depends on this code.
-2. **It is the reference the port is checked against.** `godot/tools/parity.gd`
-   compares the two builds number for number.
-
-Until those are moved into the Godot build, `js/` stays. Do not add features to
-it. See [`AGENTS.md`](AGENTS.md) for the full picture.
+See [`AGENTS.md`](AGENTS.md) for the full picture.
 
 ## Layout
 
 | Path | What it is |
 |---|---|
 | `godot/` | **The game.** GDScript, scenes, assets, export presets, verifiers. |
-| `js/`, `css/`, `index.html`, `sw.js` | Legacy JS build (verification engine + parity reference). |
+| `physics/` | The JS physics the server verifies runs with. Not a client. |
 | `supabase/` | Leaderboard schema and Edge Functions. |
-| `tools/` | Dev harnesses for the JS build (tests, ghost baking, physics sync). |
-| `android/` | Legacy WebView shell for the old JS APK. |
+| `tools/` | `test.mjs` (physics + server verifier) and `sync-physics.mjs`. |
 | `AGENTS.md` | Working notes for this repo: architecture, gotchas, rules. |
 
 ## Licensing

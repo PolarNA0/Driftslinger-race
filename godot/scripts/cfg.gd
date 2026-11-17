@@ -1,7 +1,8 @@
 extends RefCounted
 class_name Cfg
 
-# Port of js/config.js. Same numbers, so the Godot build drives like the web one.
+# Port of physics/config.js (the JS physics the server verifies runs with).
+# Same numbers, so the Godot build drives like the verified physics.
 const SPEED := 290.0
 const DRIFT_RADIUS := 62.0
 const GRAB_RANGE := 95.0

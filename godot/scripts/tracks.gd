@@ -1,7 +1,7 @@
 extends RefCounted
 class_name Tracks
 
-# Port of js/tracks.js. The time-attack tracks, each a fixed road derived from its
+# Port of the old js/tracks.js (removed with the JS client). The time-attack tracks, each a fixed road derived from its
 # number, so a track is the same road on every device. Three more tracks (26-28)
 # showcase the reattachable pillar; see REATTACH_TRACKS below.
 

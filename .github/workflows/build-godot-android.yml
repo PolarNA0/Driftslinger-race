@@ -1,10 +1,9 @@
 name: Build Godot Android APK
 
 # Builds the signed debug APK for the Godot port and publishes it to a rolling
-# `android-latest` GitHub release, so the download URL in download.html and the
-# web build's /android redirect always point at the newest build. The APK is a
-# native Godot build and carries the online layer, so it talks to the same
-# Supabase backend as the web build.
+# `android-latest` GitHub release, so the web build's /android redirect always
+# points at the newest build. The APK is a native Godot build and carries the
+# online layer, so it talks to the same Supabase backend as the web build.
 on:
   push:
     branches: [main]
@@ -103,7 +102,7 @@ jobs:
       # Publish to a rolling `android-latest` release so the APK is downloadable
       # from a stable URL (a workflow artifact expires and needs a signed-in
       # browser). The tag is moved to this commit on every build; the APK
-      # filename is kept stable so download.html's link never changes.
+      # filename is kept stable so the /android redirect's target never changes.
       - name: Publish the APK to the android-latest release
         env:
           GH_TOKEN: ${{ github.token }}

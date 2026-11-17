@@ -2,9 +2,9 @@ extends SceneTree
 
 # Headless check of the online layer's offline-testable parts.
 #
-# The board merge is compared against reference values produced by the JS build's
-# own `boardPage` (js/leaderboard.js) on the same inputs, so the port is checked
-# number for number rather than against itself. The network paths cannot be
+# The board merge is compared against reference values recorded from the old JS
+# `boardPage` on the same inputs, so the port is checked against the original
+# rather than against itself. The network paths cannot be
 # exercised headlessly without a server, so what is checked here is everything
 # that runs before a request goes out: the queue, the config, and the account
 # rules that must hold with no session.
@@ -24,7 +24,7 @@ func check_true(label: String, cond: bool) -> void:
 
 
 func _init() -> void:
-	print("== board merge (reference: js/leaderboard.js) ==")
+	print("== board merge (reference: recorded JS boardPage) ==")
 	# The same three real runs the JS reference was produced from: one faster than
 	# the head, one tying the head's last real ghost, one slower than the field.
 	var reals := [
@@ -93,7 +93,7 @@ func _init() -> void:
 	check("no-reals pages", Leaderboard.board_page(1, 1)["pages"], 1000)
 	check("no-reals player_rank", Leaderboard.board_page(1, 1)["player_rank"], 0)
 
-	print("== player rank counts the real runs (reference: js/leaderboard.js) ==")
+	print("== player rank counts the real runs (reference: recorded JS boardPage) ==")
 	# Ignoring the real runs ranks a player among the baked ghosts alone, which is a
 	# place they do not hold. Reference values come from the JS `playerRank` on the
 	# same inputs: world record 10.35, t0 = 10.351.

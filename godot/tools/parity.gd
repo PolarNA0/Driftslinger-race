@@ -11,7 +11,7 @@ extends SceneTree
 # comparison is a tolerance, not an exact match. The tolerances are tight enough
 # that a real physics change fails them and float noise does not.
 
-# Recorded from js/car.js + js/track.js, track 1, trackOpts(1), dt = 1/120.
+# Recorded from physics/car.js + physics/track.js, track 1, trackOpts(1), dt = 1/120.
 const WANT_STEPS := 334
 const WANT_TIME := 2.783333333333326
 const WANT_X := 657.803119682678

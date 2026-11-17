@@ -1,7 +1,7 @@
 extends RefCounted
 class_name Replay
 
-# Port of js/replay.js. A replay is not positions - it is the button sequence, and
+# Port of the old js/replay.js (removed with the JS client). A replay is not positions - it is the button sequence, and
 # the game re-simulates it. The physics is fixed-step and deterministic, so the
 # same steps always give the same run. One bit per step.
 

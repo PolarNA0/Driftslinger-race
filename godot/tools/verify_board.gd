@@ -1,7 +1,7 @@
 extends SceneTree
 
-# Headless check that the Godot leaderboard matches the JS build number for
-# number. Reference values come from tools/_lb.mjs in the JS repo.
+# Headless check of the Godot leaderboard paging and ranking. Reference values
+# were recorded from the old JS `boardPage` before that build was removed.
 
 func _init() -> void:
 	var ok := true

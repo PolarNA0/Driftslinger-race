@@ -1,6 +1,6 @@
 // The Discord record tracker.
 //
-// This runs on the server, not in the player's browser, and that is the whole
+// This runs on the server, not in the player's client, and that is the whole
 // point: the webhook is one URL the admin sets once, and every player's run is
 // announced through it. A client-side tracker only ever announced the admin's
 // own runs, because only the admin's device held the webhook.

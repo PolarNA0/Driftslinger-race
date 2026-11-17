@@ -1,7 +1,7 @@
 extends RefCounted
 class_name Api
 
-# Port of js/api.js. Talking to the leaderboard server.
+# Port of the old js/api.js (removed with the JS client). Talking to the leaderboard server.
 #
 # The game is offline-first, so nothing here is allowed to block play: a run is
 # always saved locally first, and the upload is best-effort. If there is no

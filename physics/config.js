@@ -17,7 +17,7 @@
 // must exceed 2*driftRadius plus minStraight. The track builder asserts this, so
 // a bad combination fails loudly instead of shipping a folded road.
 //
-// The tuning was chosen with tools/sweep.mjs and tools/window.mjs, not by feel.
+// The tuning was chosen by headless sweeps of the physics, not by feel.
 export const CFG = {
   speed: 290,          // px/s, held constant whether flying or drifting
   driftRadius: 62,     // the arc the car carves, and the radius of every corner

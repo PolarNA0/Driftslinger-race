@@ -3,23 +3,23 @@
 **This is the game.** The Godot build is the primary implementation: the web build
 served to players and the Android app both come from here. New work goes here.
 
-It began as a port of the original JavaScript build (`../index.html`, `../js/`,
-`../css/`), which is now legacy. That JS build is kept only because the Supabase
-leaderboard replays uploaded runs through its physics
-(`../tools/sync-physics.mjs`), and because `tools/parity.gd` compares the two
-builds number for number. Do not add features to the JS build.
+It began as a port of an original JavaScript build, which has since been
+removed. The only JavaScript left in the repository is `../physics/`, and only
+because the Supabase leaderboard replays uploaded runs through it
+(`../tools/sync-physics.mjs` vendors it into the Edge Function). `tools/parity.gd`
+checks the port against the numbers that physics produces.
 
 Same physics, same ten ported tracks, same top-down look, plus three
 reattach showcase tracks and sprite cars.
 
 ## Status
 
-Feature-complete with the JS build. Physics, track generation, all ten ported
-time-attack tracks, rendering, the one-button loop, the full menu shell
-(mode and track pickers, car skins, ghosts), the leaderboard with watchable
-ghosts, run history, and local accounts are all ported. The physics is
-bit-for-bit identical to the JS build and every track finishes near ten seconds
-in both.
+Feature-complete. Physics, track generation, all ten ported time-attack tracks,
+rendering, the one-button loop, the full menu shell (mode and track pickers, car
+skins, ghosts), the leaderboard with watchable ghosts, run history, accounts, and
+the online layer (Supabase upload, the shared board, and replaying another
+player's uploaded run) are all ported. The physics matches the JS the server
+verifies runs with, and every track finishes near ten seconds in both.
 
 Additions on top of the port:
 
@@ -37,19 +37,23 @@ Additions on top of the port:
   triangles rather than one filled polygon, so the hairpin/loop tracks (21-25) no
   longer flash as the car crosses its own path. See the gotcha in `../AGENTS.md`.
 
-### Not yet ported from the JS build
+### Not ported from the old JS client
 
-The JS client has online features the Godot build does not have yet. Porting them
-is the work that has to happen before the JS client can be deleted:
+The old JS client had a few player-facing bits the Godot build does not have.
+They were dropped when the client was removed; if they are wanted, they are new
+work in `godot/`:
 
-- **Online leaderboard upload.** `js/api.js` uploads runs to Supabase and reads
-  the shared board. The Godot board is local + baked (`ghostdata.gd`), so ranks
-  and ghosts are real but not shared between players.
-- **Accounts.** `js/account.js` signs in against Supabase. `account.gd` is
-  device-local only (username + salted SHA-256 on this device).
-- **Discord record webhook.** `js/discord.js` posts records from the browser.
-- **Replay of another player's uploaded run.** `js/replay.js` + the `steps`
-  field on the server; the Godot ghost path is id-based only.
+- **Player settings and the admin panel.** The JS client had a settings screen
+  (zoom, the hook colour) and an admin code (`0404`, checked in the client, so a
+  lock on a cupboard and not a safe) that revealed a Discord webhook field and
+  two editable tracker message templates. None of that is in the Godot build.
+- **The Discord record tracker.** `js/discord.js` posted a world-record message
+  straight to a Discord webhook. The Godot build does not post anywhere but
+  Supabase.
+
+The online layer itself *is* ported (see "The online layer" in `../AGENTS.md`):
+runs upload, the shared board merges real runs with the baked ghost field, and
+another player's uploaded run can be watched from its stored steps.
 
 ## Export
 
@@ -99,8 +103,9 @@ godot --headless --path . --import   # first-time import (registers class names)
 
 ## Verify the port
 
-`tools/parity.gd` runs the same scripted input as `../slingdrift/tools/_parity.mjs`
-and prints the end state, so the two builds can be compared number for number:
+`tools/parity.gd` runs a scripted input (hold and release in 0.35s phases on track
+1) and asserts the end state against the numbers the JS `Car.step` produced, frozen
+as golden values before that build was removed:
 
 ```sh
 godot --headless --path . --script res://tools/parity.gd
@@ -123,8 +128,17 @@ godot --headless --path . --script res://tools/verify_reattach.gd
 
 `tools/verify_board.gd` checks the leaderboard paging and ranking.
 
+`tools/verify_guard.gd` proves the one rule that matters: holding or mashing
+never beats the game. A clean line survives 120 corners, holding forever crashes
+within two, every mash pattern dies within three, and a release up to 15 degrees
+early still finishes.
+
+```sh
+godot --headless --path . --script res://tools/verify_guard.gd
+```
+
 `tools/verify_online.gd` checks the online layer's offline-testable parts: the
-board merge (against reference values produced by the JS `boardPage`), the run
+board merge (against reference values recorded from the JS `boardPage`), the run
 queue, the client id, the account rules that must hold with no session, and the
 net config. The network paths themselves need a server, so they are not covered
 here.
@@ -133,7 +147,14 @@ here.
 godot --headless --path . --script res://tools/verify_online.gd
 ```
 
-The physics is bit-for-bit identical to the JS build: both crash after 334 steps
+`tools/bake_ghosts.gd` regenerates `scripts/ghostdata.gd` from the Godot physics.
+It is slow (a thousand ids per track), so it is a manual step, not a verifier:
+
+```sh
+godot --headless --path . --script res://tools/bake_ghosts.gd
+```
+
+The physics matches the JS the server verifies with: both crash after 334 steps
 at `x=657.803120 y=-278.859877 angle=5.652743`, `dead=wall`, `grabbed=2` (the
 Godot numbers differ in the last digit or two, which is float32 vs float64).
 The track geometry matches too (track 1: length 3074.0, finishS 3074.0, clean 10.3s).
@@ -142,26 +163,26 @@ The track geometry matches too (track 1: length 3074.0, finishS 3074.0, clean 10
 
 | File | Ports |
 |---|---|
-| `scripts/cfg.gd` | `js/config.js` — every tuning number |
-| `scripts/util.gd` | `js/util.js` — `angDiff`, and `mulberry32` bit-exact via 32-bit `imul` |
-| `scripts/track.gd` | `js/track.js` — the road |
-| `scripts/car.gd` | `js/car.js` — the one-button car, plus the reattach pillar |
-| `scripts/tracks.gd` | `js/tracks.js` — the ten ported tracks, plus the reattach showcase tracks 26–28 |
-| `scripts/ghostrun.gd` | `js/ghostrun.js` — a ghost from an integer id |
-| `scripts/replay.gd` | `js/replay.js` — button-step replays |
-| `scripts/storage.gd` | `js/storage.js` — records, best times, replays, history, prefs |
-| `scripts/leaderboard.gd` | `js/leaderboard.js` — paging, ranking, the board |
+| `scripts/cfg.gd` | `../physics/config.js` — every tuning number |
+| `scripts/util.gd` | `../physics/util.js` — `angDiff`, and `mulberry32` bit-exact via 32-bit `imul` |
+| `scripts/track.gd` | `../physics/track.js` — the road |
+| `scripts/car.gd` | `../physics/car.js` — the one-button car, plus the reattach pillar |
+| `scripts/tracks.gd` | `../physics/tracks.js` — the ten ported tracks, plus the reattach showcase tracks 26–28 |
+| `scripts/ghostrun.gd` | the old `js/ghostrun.js` — a ghost from an integer id |
+| `scripts/replay.gd` | the old `js/replay.js` — button-step replays |
+| `scripts/storage.gd` | the old `js/storage.js` — records, best times, replays, history, prefs |
+| `scripts/leaderboard.gd` | the old `js/leaderboard.js` — paging, ranking, the board |
 | `scripts/net.gd` | new — the HTTP transport (one request at a time) |
 | `scripts/netconfig.gd` | new — the Supabase URL and anon key, and the endpoints |
-| `scripts/api.gd` | `js/api.js` — the run queue and the board client |
-| `scripts/account.gd` | `js/account.js` — Supabase Auth and the `profiles` name |
-| `scripts/render.gd` | `js/render.js` — themes, camera, road band, vector and sprite cars |
-| `scripts/game.gd` | `js/game.js` — fixed 1/120s tick, modes, records, ghosts |
-| `scripts/app.gd` | `js/app.js` — menu, the Tracks/board/history/account overlays, leaderboard, history, accounts |
+| `scripts/api.gd` | the old `js/api.js` — the run queue and the board client |
+| `scripts/account.gd` | the old `js/account.js` — Supabase Auth and the `profiles` name |
+| `scripts/render.gd` | the old `js/render.js` — themes, camera, road band, vector and sprite cars |
+| `scripts/game.gd` | the old `js/game.js` — fixed 1/120s tick, modes, records, ghosts |
+| `scripts/app.gd` | the old `js/app.js` — menu, the Tracks/board/history/account overlays, leaderboard, history, accounts |
 
 The PRNG is reproduced exactly (masking products to 32 bits, the way JS
 `Math.imul` does) so a seed is the same road in both builds — which is what a
-shared leaderboard or replay would need.
+shared leaderboard or replay needs.
 
 ## Screenshot
 

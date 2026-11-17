@@ -1,7 +1,7 @@
 extends RefCounted
 class_name Car
 
-# Port of js/car.js. One button: hold to latch onto the pole and drift around it,
+# Port of the old js/car.js (removed with the JS client). One button: hold to latch onto the pole and drift around it,
 # let go to fly straight off the tangent, then curve gently home.
 
 var track: Track

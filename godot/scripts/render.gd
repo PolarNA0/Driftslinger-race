@@ -1,7 +1,7 @@
 extends Node2D
 class_name Renderer2D
 
-# Port of js/render.js: top-down orthographic view, no horizon. The camera
+# Port of the old js/render.js (removed with the JS client): top-down orthographic view, no horizon. The camera
 # heading points up the screen, the road is a band either side of the centreline,
 # and the car is drawn rotated by its heading relative to the camera.
 

@@ -23,9 +23,10 @@ insert into public.tracker_config (id) values (1) on conflict (id) do nothing;
 
 alter table public.tracker_config enable row level security;
 
--- The admin gate is the client-side code (see js/settings.js) - a cupboard lock,
--- not a safe, exactly like the rest of the admin surface. What the database
--- enforces is the part that matters: the webhook can be written but not read.
+-- The admin gate was the old client-side code (js/settings.js, now removed) - a
+-- cupboard lock, not a safe, exactly like the rest of the admin surface. What the
+-- database enforces is the part that matters: the webhook can be written but not
+-- read.
 create policy tracker_read on public.tracker_config
   for select to authenticated using (true);
 create policy tracker_write on public.tracker_config

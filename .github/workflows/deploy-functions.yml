@@ -19,6 +19,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The functions replay runs with the physics vendored into `_shared`, and
+      # the copies are only correct if `tools/sync-physics.mjs` was re-run after
+      # the last edit to `physics/`. This fails the deploy if they have drifted,
+      # so a stale copy can never ship. Node is preinstalled on ubuntu-latest.
+      - name: Check the vendored physics is current
+        run: node tools/sync-physics.mjs --check
+
       - uses: supabase/setup-cli@v1
         with:
           version: latest
