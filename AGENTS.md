@@ -41,10 +41,14 @@ build is the only client.
   6–20 were removed, so the numbers are not a contiguous range.
 - `godot/scripts/car.gd` — the physics. `step(dt, held)` is pure and testable.
 - `godot/scripts/game.gd` — fixed 1/120s tick, modes, records, ghosts.
-- `godot/scripts/render.gd` — top-down orthographic view, road themes, and both
-  the vector cars and the sprite cars.
+- `godot/scripts/render.gd` — top-down orthographic view, road themes, the
+  car sprites, and the responsive zoom (see "Fitting every screen").
 - `godot/scripts/app.gd` — the shell: menu, overlays, leaderboard, history,
   accounts, car picker, the round restart button.
+- `godot/scripts/theme.gd` — `UiTheme`, the one `Theme` for the whole UI
+  (palette, button/toggle variations, panels, scrollbars).
+- `godot/assets/ui/boot_splash.png` — the boot splash, set in `project.godot`.
+- `godot/web/shell.html` — the web export's HTML shell (the custom loader).
 - `godot/scripts/{ghostrun,ghostdata,replay,storage,leaderboard,account}.gd` —
   the ported support modules.
 - `godot/scripts/{net,netconfig,api}.gd` — the online layer's transport, config
@@ -323,6 +327,44 @@ length and a small release error accumulates into a wall hit by the far end.
   than 420 is the bug coming back. A headless check that presses Sign in and asserts
   every menu button's `get_global_rect()` is inside the viewport is the cheapest
   guard.
+## UI look, boot splash and fitting every screen
+
+- **All UI colour comes from `godot/scripts/theme.gd` (`UiTheme`).** `App._ready`
+  applies one built `Theme` to the whole UI tree, so nothing falls back to the
+  engine's default grey. The palette is deep-navy panels with a warm-gold accent
+  (the accent does not collide with any road theme, one of which is near-white).
+  `app.gd` reaches into it for the few colours it sets per-label
+  (`UiTheme.INK_DIM`, `UiTheme.DANGER`, ...) — do not hard-code a new colour in
+  `app.gd`, add it to `UiTheme`.
+- **The boot splash is the game's, not Godot's.** `project.godot`
+  (`boot_splash/image`) points at a square `assets/ui/boot_splash.png`; a square
+  reads on both portrait and landscape. `godot/web/shell.html` is the custom web
+  shell (`html/custom_html_shell` in `export_presets.cfg`): full-viewport canvas,
+  `dvh` sizing, safe-area padding, no page scroll or pinch-zoom, and a branded
+  progress bar. Boot → loader → menu is meant to be one continuous look.
+- **The zoom is capped so a desktop window does not fill with tarmac.**
+  `render.gd` picks `_scale = min(width_frac_zoom, _h / MIN_WORLD_H)`.
+  `ROAD_W_FRAC` (0.358) and `MIN_WORLD_H` (500) are chosen to agree at the
+  420x820 design size, so the phone look is unchanged and a wide window reveals
+  more road at the same zoom instead of zooming in. Do not raise the width zoom
+  alone — that is the "only good on a phone" bug.
+- **Overlay cards track the viewport width.** `App._layout_cards` sets each
+  card's `custom_minimum_size.x` to `clampf(vw * 0.46, 320, 520)`; every overlay
+  is a `ScrollContainer` so a tall card scrolls instead of clipping. A new menu
+  row still has to fit the card — see the phone-fit gotcha above.
+- **The car is a sprite, always.** `Renderer2D.CAR_MODELS` is sprite-only
+  (`assets/cars/*.png`, nose-up, sharing the -Y nose convention); the flat vector
+  bodies were removed as placeholders. `assets/cars/CREDITS.md` lists the CC0
+  sources. `render.gd` scales a car from its own aspect ratio.
+- **The verifiers are excluded from exports** (`exclude_filter` in
+  `export_presets.cfg` lists `tools/*`), so the headless scripts do not ship in
+  the web pck or the APK. Keep them out of the player-facing builds.
+- **The menu shows the build version** (`App.VERSION`), in step with the release
+  tag, so a bug report can name the build.
+- **Headless layout check.** `--shot <path> [--shot-menu|--shot-overlay
+  <tracks|board|history|account>]` saves one frame and quits, so a card can be
+  checked at any resolution without a human driving the menu.
+
 - Themes live in `godot/scripts/render.gd` (`THEMES`, `theme_for(seed)`);
   `Game.load` calls `renderer.set_seed(seed)` so each road has its own palette.
   Keep `road` and `ground` contrasting, or the ribbon disappears.
