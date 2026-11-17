@@ -42,6 +42,8 @@ var mode_buttons := {}         # "speedrun"/"endless" -> Button
 var ghost_buttons := {}        # "off"/"wr"/"self" -> Button
 var track_buttons := []        # one per track, in order
 var car_buttons := []
+var menu_track_button: Button
+var tracks_sub: Label
 var acct_bar: VBoxContainer
 var lb_title: Label
 var lb_note: Label
@@ -100,6 +102,7 @@ func _ready() -> void:
 
 	_build_hud()
 	_build_menu()
+	_build_tracks()
 	_build_board()
 	_build_history()
 	_build_account()
@@ -160,6 +163,11 @@ func _col(sep: int = 10) -> VBoxContainer:
 
 
 # A modal overlay: dim background, a centred card, and a returned column to fill.
+#
+# The card sits in a ScrollContainer, so an overlay taller than a short screen
+# scrolls instead of running its bottom controls off the display where they cannot
+# be pressed. That was the bug with the old menu: the card wanted 851px on an
+# 820px-tall viewport and the account buttons below the fold were unreachable.
 func _new_overlay(name: String) -> VBoxContainer:
 	var root := Control.new()
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -172,18 +180,24 @@ func _new_overlay(name: String) -> VBoxContainer:
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.add_child(bg)
 
+	var scroll := ScrollContainer.new()
+	scroll.set_anchors_preset(Control.PRESET_FULL_RECT)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	root.add_child(scroll)
+
 	var centre := CenterContainer.new()
-	centre.set_anchors_preset(Control.PRESET_FULL_RECT)
-	root.add_child(centre)
+	centre.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	centre.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.add_child(centre)
 
 	var panel := PanelContainer.new()
 	centre.add_child(panel)
 	var margin := MarginContainer.new()
 	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 24)
+		margin.add_theme_constant_override("margin_" + side, 16)
 	panel.add_child(margin)
-	var col := _col(12)
-	col.custom_minimum_size = Vector2(360, 0)
+	var col := _col(10)
+	col.custom_minimum_size = Vector2(320, 0)
 	margin.add_child(col)
 	return col
 
@@ -291,8 +305,8 @@ func _anchor(b: Button, preset: int, inset: float, size: float) -> void:
 
 func _build_menu() -> void:
 	var col := _new_overlay("menu")
-	col.add_child(_label("SLINGDRIFT", 40))
-	col.add_child(_label("Hold to swing round the poles. Let go to fly.\nDon't leave the road.", 15))
+	col.add_child(_label("SLINGDRIFT", 34))
+	col.add_child(_label("Hold to swing round the poles. Let go to fly.\nDon't leave the road.", 14))
 
 	col.add_child(_section("Mode"))
 	var mode_row := _row(8)
@@ -313,20 +327,18 @@ func _build_menu() -> void:
 		func(): _set_ghost("self"))
 
 	col.add_child(_section("Your car"))
-	var car_row := _row(8)
+	var car_row := _row(6)
 	col.add_child(car_row)
 	_build_car_list(car_row)
 
-	col.add_child(_section("Pick a track"))
-	var track_scroll := ScrollContainer.new()
-	track_scroll.custom_minimum_size = Vector2(0, 190)
-	col.add_child(track_scroll)
-	var track_grid := GridContainer.new()
-	track_grid.columns = 5
-	track_grid.add_theme_constant_override("h_separation", 6)
-	track_grid.add_theme_constant_override("v_separation", 6)
-	track_scroll.add_child(track_grid)
-	_build_track_list(track_grid)
+	# Tracks live behind their own button now: a 13-cell grid made the menu taller
+	# than the screen and buried the account controls below the fold.
+	menu_track_button = _button("Tracks", _show_tracks)
+	menu_track_button.custom_minimum_size = Vector2(0, 46)
+	col.add_child(menu_track_button)
+	tracks_sub = _label("", 13)
+	tracks_sub.add_theme_color_override("font_color", Color(1, 1, 1, 0.6))
+	col.add_child(tracks_sub)
 
 	var actions := _row(8)
 	col.add_child(actions)
@@ -337,11 +349,11 @@ func _build_menu() -> void:
 	acct_bar = _col(6)
 	col.add_child(acct_bar)
 
-	col.add_child(_label("Offline \u00b7 no ads \u00b7 your scores stay on this device", 12))
+	col.add_child(_label("Offline \u00b7 no ads \u00b7 your scores stay on this device", 11))
 
 
 func _section(text: String) -> Label:
-	var l := _label(text, 18)
+	var l := _label(text, 16)
 	l.add_theme_color_override("font_color", Color(1, 1, 1, 0.6))
 	return l
 
@@ -352,6 +364,9 @@ func _mode_button(parent: Node, title: String, sub: String, cb: Callable) -> But
 	b.toggle_mode = true
 	b.custom_minimum_size = Vector2(0, 58)
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# Wrap rather than widen: three option buttons in a row are only as wide as their
+	# longest word, so the menu card stays inside a phone-width viewport.
+	b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	b.pressed.connect(cb)
 	parent.add_child(b)
 	return b
@@ -359,6 +374,13 @@ func _mode_button(parent: Node, title: String, sub: String, cb: Callable) -> But
 
 func _build_car_list(parent: Node) -> void:
 	car_buttons.clear()
+	# A grid, not one long row: thirteen swatches in a single row is wider than a
+	# phone screen and would stretch the whole menu card past the viewport.
+	var grid := GridContainer.new()
+	grid.columns = 7
+	grid.add_theme_constant_override("h_separation", 6)
+	grid.add_theme_constant_override("v_separation", 6)
+	parent.add_child(grid)
 	for i in range(Renderer2D.CAR_MODELS.size()):
 		var idx := i
 		var b := Button.new()
@@ -379,7 +401,7 @@ func _build_car_list(parent: Node) -> void:
 			game.car_skin = idx
 			game.renderer.car_index = idx
 			_refresh_car_list())
-		parent.add_child(b)
+		grid.add_child(b)
 		car_buttons.append(b)
 
 
@@ -390,10 +412,17 @@ func _refresh_car_list() -> void:
 
 func _build_track_list(parent: Node) -> void:
 	track_buttons.clear()
+	# Two columns: thirteen full-width rows is a long scroll, and a narrow grid cell
+	# clipped a best time. Two is the compromise that keeps every label readable.
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 8)
+	grid.add_theme_constant_override("v_separation", 8)
+	parent.add_child(grid)
 	for s in Tracks.MENU_TRACKS:
 		var b := Button.new()
 		b.toggle_mode = true
-		b.custom_minimum_size = Vector2(62, 54)
+		b.custom_minimum_size = Vector2(0, 52)
 		b.text = "Track %d\n--" % s
 		# The button carries its own track number: the list has gaps now, so the
 		# number is not the button's position and cannot be read back off the index.
@@ -402,8 +431,29 @@ func _build_track_list(parent: Node) -> void:
 			menu_seed = s
 			Storage.set_pref("track", s)
 			_refresh_track_list())
-		parent.add_child(b)
+		grid.add_child(b)
 		track_buttons.append(b)
+
+
+# The Tracks overlay: its own card, so the menu does not have to carry thirteen
+# buttons at once.
+func _build_tracks() -> void:
+	var col := _new_overlay("tracks")
+	col.add_child(_label("Tracks", 24))
+	var hint := _label("Pick a track, then Play.", 13)
+	hint.add_theme_color_override("font_color", Color(1, 1, 1, 0.6))
+	col.add_child(hint)
+	var list := _col(6)
+	col.add_child(list)
+	_build_track_list(list)
+	col.add_child(_button("Play this track", func():
+		_start_run(menu_seed)))
+	col.add_child(_button("Back", func(): _show_only("menu")))
+
+
+func _show_tracks() -> void:
+	_refresh_track_list()
+	_show_only("tracks")
 
 
 func _refresh_track_list() -> void:
@@ -418,6 +468,10 @@ func _refresh_track_list() -> void:
 			sub = _fmt_dist(float(rec["dist"])) if float(rec["dist"]) > 0.0 else "--"
 		b.text = "Track %d\n%s" % [s, sub]
 		b.button_pressed = (s == menu_seed)
+	if menu_track_button != null:
+		menu_track_button.text = "Tracks  \u00b7  Track %d" % menu_seed
+		var mode_word := "speedrun" if menu_mode == "speedrun" else "endless"
+		tracks_sub.text = "Selected: Track %d \u00b7 %s" % [menu_seed, mode_word]
 
 
 func _refresh_mode_list() -> void:

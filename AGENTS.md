@@ -298,11 +298,35 @@ length and a small release error accumulates into a wall hit by the far end.
   stores `snx`/`sny`). Offset along the raw world normal and the road is skewed and
   the wrong width on any non-axis-aligned stretch - it looked like a broken
   projection rather than a math bug.
+- **The Godot road band is triangles, not a filled polygon, and it has to stay
+  that way.** `Renderer2D._band` emits an explicit triangle list. It used to build
+  one outline (down the +normal edge, back along the -normal edge) and hand it to
+  `draw_colored_polygon`. On a road that crosses itself - the hairpin and loop
+  tracks 21-25 - that outline is self-intersecting, and Godot's ear-clip
+  triangulation refuses it outright with `Invalid polygon data, triangulation
+  failed`, dropping the **whole** band for that frame. The road visibly flashes as
+  the car crosses its own path, which is exactly the bug reported after the port.
+  The JS build never had it because canvas `fill()` uses nonzero winding and fills a
+  self-intersecting path happily. Emitting the quads directly skips triangulation,
+  so an overlap just overdraws. Do not "simplify" this back to a polygon.
 - **Measure the band, do not eyeball it.** The road half-width is
   `CFG.roadHalfWidth` (46px); the drawn band should be a constant
   `2*roadHalfWidth*scale` at every row. `syncSize()` re-reads the canvas rect on
   every draw because the WebView lays the page out after the module runs, so the
   zoom worked out in the constructor is wrong until the first real resize.
+- **The Godot menu must fit a phone, and the overlays must scroll.** The project
+  viewport is 420x820 with `canvas_items` stretch and `expand` aspect. The old menu
+  packed a 13-cell track grid plus a 13-swatch car row into one card, so the card
+  measured 664x851 - wider *and* taller than the viewport. Anything past the bottom
+  edge cannot be tapped, which is why players could not reach **Sign in**. Two rules
+  keep it fixed: every overlay card lives inside a `ScrollContainer`
+  (`_new_overlay`), so a tall card scrolls instead of clipping; and no menu row is
+  allowed to be as wide as its content (`_mode_button` wraps, the car swatches and
+  the track list are `GridContainer`s). Tracks moved off the menu onto their own
+  **Tracks** button. If you add a row, re-measure: a card taller than 820 or wider
+  than 420 is the bug coming back. A headless check that presses Sign in and asserts
+  every menu button's `get_global_rect()` is inside the viewport is the cheapest
+  guard.
 - **The service worker is network-first for code on purpose.** A cache-first
   shell silently pins you to the first build ever cached: you edit a file, reload,
   and keep seeing the old version. That wasted a lot of time here. Icons are

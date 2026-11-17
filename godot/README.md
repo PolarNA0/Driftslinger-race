@@ -30,6 +30,12 @@ Additions on top of the port:
   Tracks 26–28 showcase it (amber = still catchable, bronze = spent).
 - **Sprite cars.** Free CC0 top-down cars (see `assets/cars/CREDITS.md`) sit
   alongside the eight vector colours in the car picker.
+- **A menu that fits a phone.** The track list moved behind its own **Tracks**
+  button and every overlay card scrolls, so the account controls are reachable on
+  the 420x820 viewport instead of running off the bottom of the screen.
+- **A road band that survives a self-crossing.** The band is drawn as explicit
+  triangles rather than one filled polygon, so the hairpin/loop tracks (21-25) no
+  longer flash as the car crosses its own path. See the gotcha in `../AGENTS.md`.
 
 ### Not yet ported from the JS build
 
@@ -148,7 +154,7 @@ The track geometry matches too (track 1: length 3074.0, finishS 3074.0, clean 10
 | `scripts/account.gd` | `js/account.js` — Supabase Auth and the `profiles` name |
 | `scripts/render.gd` | `js/render.js` — themes, camera, road band, vector and sprite cars |
 | `scripts/game.gd` | `js/game.js` — fixed 1/120s tick, modes, records, ghosts |
-| `scripts/app.gd` | `js/app.js` — menu, overlays, leaderboard, history, accounts |
+| `scripts/app.gd` | `js/app.js` — menu, the Tracks/board/history/account overlays, leaderboard, history, accounts |
 
 The PRNG is reproduced exactly (masking products to 32 bits, the way JS
 `Math.imul` does) so a seed is the same road in both builds — which is what a

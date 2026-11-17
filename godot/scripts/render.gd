@@ -137,16 +137,38 @@ func _samples() -> Array:
 	return out
 
 
+# Fill a band of half-width `hw` either side of the centreline.
+#
+# Emitted as an explicit triangle list rather than one filled polygon. A road that
+# crosses itself (the hairpin/loop tracks 21-25) makes the single-outline band
+# self-intersecting, and Godot's ear-clip triangulation rejects that outright
+# ("Invalid polygon data, triangulation failed"), dropping the whole band for that
+# frame - the road visibly flashes as the car crosses its own path. Canvas fill()
+# in the JS build uses nonzero winding and never had the problem. Building the
+# quads ourselves skips triangulation entirely, so the overlap just overdraws.
 func _band(s: Array, hw: float, fill: Color) -> void:
 	if s.size() < 2:
 		return
 	var pts := PackedVector2Array()
-	for q in s:
-		pts.append(q["p"] + Vector2(q["snx"], q["sny"]) * hw * _scale)
-	for i in range(s.size() - 1, -1, -1):
-		var q: Dictionary = s[i]
-		pts.append(q["p"] - Vector2(q["snx"], q["sny"]) * hw * _scale)
-	draw_colored_polygon(pts, fill)
+	for i in range(s.size() - 1):
+		var q0: Dictionary = s[i]
+		var q1: Dictionary = s[i + 1]
+		var n0 := Vector2(q0["snx"], q0["sny"]) * hw * _scale
+		var n1 := Vector2(q1["snx"], q1["sny"]) * hw * _scale
+		var a: Vector2 = q0["p"] + n0
+		var b: Vector2 = q1["p"] + n1
+		var c: Vector2 = q1["p"] - n1
+		var d: Vector2 = q0["p"] - n0
+		pts.append(a)
+		pts.append(b)
+		pts.append(c)
+		pts.append(a)
+		pts.append(c)
+		pts.append(d)
+	var cols := PackedColorArray()
+	cols.resize(pts.size())
+	cols.fill(fill)
+	RenderingServer.canvas_item_add_triangle_array(get_canvas_item(), PackedInt32Array(), pts, cols)
 
 
 func _draw_road(t: Dictionary) -> void:
