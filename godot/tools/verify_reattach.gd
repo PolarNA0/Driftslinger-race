@@ -149,6 +149,39 @@ func _clean(track: Track) -> Dictionary:
 	return {"finished": car.finished, "time": car.time, "max_s": max_s, "min_s": min_s}
 
 
+# A spent reattach pillar must never read as catchable again. The renderer paints
+# a pillar bronze once it is spent (or once the car's corner has moved past it) and
+# amber while it can still be caught; that "catchable" state has to be monotonic,
+# or a spent pillar flickers back to live - which is what a single-slot spent
+# marker did, because spending a later pillar forgot the earlier one.
+func _catchable_monotonic() -> bool:
+	var n := Tracks.FIRST_REATTACH_TRACK
+	var t := Track.new(n, Tracks.track_opts(n))
+	var car := Car.new()
+	car.reset(t)
+	var ever_spent := {}
+	var ok := true
+	var i := 0
+	while car.alive and not car.finished and i < 200000:
+		i += 1
+		for k in t.fillets.size():
+			if not bool(t.fillets[k].get("reattach", false)):
+				continue
+			var catchable: bool = not car.spent_corners.has(k) and k >= car.corner
+			if ever_spent.has(k) and catchable:
+				ok = false
+			if not catchable:
+				ever_spent[k] = true
+		var held := false
+		if car.attached:
+			held = car.remaining() > 0.0
+		else:
+			var f: Dictionary = t.fillets[car.corner]
+			held = U.dist(f["c"].x, f["c"].y, car.x, car.y) <= Cfg.GRAB_RANGE
+		car.step(DT, held)
+	return ok and car.finished
+
+
 func _init() -> void:
 	var pass_all := true
 
@@ -216,6 +249,11 @@ func _init() -> void:
 			   str(bail_plain), float(bail_only["max_s"]), str(clean_plain), float(clean["max_s"]),
 			   "OK" if ok else "FAIL"])
 		pass_all = pass_all and ok
+
+	# 5) a spent reattach pillar never reads as live again
+	var mono_ok := _catchable_monotonic()
+	print("spent reattach pillar never reads as live again: %s" % ("PASS" if mono_ok else "FAIL"))
+	pass_all = pass_all and mono_ok
 
 	print("RESULT: %s" % ("PASS" if pass_all else "FAIL"))
 	quit(0 if pass_all else 1)

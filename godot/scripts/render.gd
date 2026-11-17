@@ -223,9 +223,11 @@ func _draw_poles(t: Dictionary) -> void:
 		var f: Dictionary = track.fillets[it["k"]]
 		var is_next: bool = it["k"] == car_ref.corner and not car_ref.attached
 		if f.get("reattach", false):
-			# A reattach pillar keeps its own colour until it is spent, so the
-			# player can see at a glance that it is still catchable.
-			var spent: bool = it["k"] == car_ref.spent
+			# A reattach pillar is catchable only while it is the corner the car is
+			# on. Ride its arc out, or fly past it, and it is gone for good - so it
+			# stays bronze once the car's corner has moved beyond it, and a spent
+			# one never reads as live again.
+			var spent: bool = car_ref.spent_corners.has(it["k"]) or it["k"] < car_ref.corner
 			draw_circle(it["p"], r, REATTACH_SPENT_FILL if spent else REATTACH_FILL)
 			if is_next and not spent:
 				draw_arc(it["p"], r * 1.35, 0.0, TAU, 48, Color8(255, 255, 255), 2.0, true)

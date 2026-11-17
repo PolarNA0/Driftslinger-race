@@ -185,6 +185,34 @@ func _ghost_button(text: String, cb: Callable) -> Button:
 	return b
 
 
+# The round restart button: a ghost chip at the bottom centre carrying a drawn
+# retry icon. The icon is geometry rather than a character because the theme font
+# has no rotation arrow (see retry_icon.gd), and a missing glyph reads as a box.
+func _round_icon_button(cb: Callable) -> Button:
+	var size := 52.0
+	var b := Button.new()
+	b.theme_type_variation = "GhostButton"
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = Vector2(size, size)
+	b.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	b.offset_left = -size / 2.0
+	b.offset_right = size / 2.0
+	b.offset_top = -size - 22.0
+	b.offset_bottom = -22.0
+	b.pressed.connect(cb)
+	var icon := RetryIcon.new()
+	icon.color = UiTheme.INK
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon.set_anchors_preset(Control.PRESET_FULL_RECT)
+	icon.offset_left = 13
+	icon.offset_top = 13
+	icon.offset_right = -13
+	icon.offset_bottom = -13
+	b.add_child(icon)
+	ui_root.add_child(b)
+	return b
+
+
 func _row(sep: int = 8) -> HBoxContainer:
 	var h := HBoxContainer.new()
 	h.add_theme_constant_override("separation", sep)
@@ -336,8 +364,7 @@ func _build_hud() -> void:
 
 	btn_pause = _ghost_button("II", _on_pause)
 	_anchor(btn_pause, Control.PRESET_TOP_RIGHT, 18, 64)
-	btn_restart_round = _ghost_button("\u21bb", func(): _start_run(game.seed_num))
-	_anchor(btn_restart_round, Control.PRESET_TOP_LEFT, 18, 64)
+	btn_restart_round = _round_icon_button(_on_restart_round)
 	btn_restart_round.visible = false
 
 	watch_badge = PanelContainer.new()
@@ -1223,6 +1250,12 @@ func _on_pause() -> void:
 		game.state = "paused"
 		_show_only("pause")
 		_show_round_button(false)
+
+
+func _on_restart_round() -> void:
+	if game.is_replay():
+		return
+	_start_run(game.seed_num)
 
 
 # =============================================================================

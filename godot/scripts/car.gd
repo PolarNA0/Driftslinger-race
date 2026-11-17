@@ -10,7 +10,7 @@ var corner: int
 var orbit_angle: float
 var sgn: float
 var radius: float
-var spent: int
+var spent_corners: Dictionary
 var grabbed: int
 var regrabs: int
 var released_corner: int
@@ -44,7 +44,7 @@ func reset(p_track: Track) -> void:
 	orbit_angle = 0.0
 	sgn = 1.0
 	radius = Cfg.DRIFT_RADIUS
-	spent = -1
+	spent_corners = {}
 	grabbed = 0
 	regrabs = 0
 	released_corner = -1
@@ -144,7 +144,7 @@ func step(dt: float, held: bool) -> void:
 
 func try_grab() -> bool:
 	var f := _fillet()
-	if corner == spent:
+	if spent_corners.has(corner):
 		return false
 	var c: Vector2 = f["c"]
 	var d := U.dist(c.x, c.y, x, y)
@@ -253,7 +253,7 @@ func release(dt: float) -> void:
 		speed_scale = Cfg.REATTACH_BOOST if good else Cfg.REATTACH_SLOW
 		effect_timer = Cfg.REATTACH_EFFECT_TIME
 	if carried or not f.get("reattach", false):
-		spent = corner
+		spent_corners[corner] = true
 
 
 # How far the orbit still has to turn before this corner is done.

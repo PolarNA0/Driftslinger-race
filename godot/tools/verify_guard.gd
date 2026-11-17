@@ -78,6 +78,28 @@ func _init() -> void:
                                 bad += 1
                                 print("  FAIL: seed %d %s got %d corners" % [seed, name, c.grabbed])
 
+        # The reattach flag must not open a cheese either. A live reattach pillar can
+        # be caught again on the approach, so a mash pattern racks up re-grabs - but
+        # it must never carry the car to the finish, on any showcase track.
+        print("holding or mashing cannot finish a reattach track")
+        for n in [Tracks.FIRST_REATTACH_TRACK, Tracks.FIRST_REATTACH_TRACK + 1, Tracks.FIRST_REATTACH_TRACK + 2]:
+                var policies := {
+                        "hold": func(_car, _i): return true,
+                        "mash": func(_car, i): return i % 2 == 0,
+                        "mash 5on1off": func(_car, i): return i % 6 < 5,
+                }
+                for name in policies:
+                        var t := Track.new(n, Tracks.track_opts(n))
+                        var car := Car.new()
+                        car.reset(t)
+                        var i := 0
+                        while car.alive and not car.finished and i < 600000:
+                                i += 1
+                                car.step(DT, policies[name].call(car, i))
+                        if car.finished:
+                                bad += 1
+                                print("  FAIL: track %d %s finished (grabbed=%d regrabs=%d)" % [n, name, car.grabbed, car.regrabs])
+
         print("release timing is forgiving")
         for deg in [0, 5, 10, 15]:
                 var got := []

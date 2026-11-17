@@ -267,16 +267,25 @@ length and a small release error accumulates into a wall hit by the far end.
   a straight then turns that sliver into a crash. Snapping only inside a single
   frame keeps the mechanic honest: release much later and you really do swing
   wide into the wall. This is what makes a clean line actually finishable.
-- **A reattach pillar reopens on an early release.** A normal pillar is spent the
-  instant you let go (`Car.release` sets `spent = corner`). A pillar whose fillet
-  carries `reattach: true` is spent only when you ride the arc to its end
-  (`done()`); bail out partway and it stays live, so the same pole can be caught
-  again after you fly off and come back. The re-grab unwraps the orbit onto the
-  angle you left from (`released_angle`), not the arc start, so your progress
-  round the corner is kept instead of reset. Riding every arc out - the clean
-  line - spends the pillars exactly as before, which is why ordinary play is
+- **A reattach pillar stays live only until the car is done with its corner.** A
+  normal pillar is spent the instant you let go. A pillar whose fillet carries
+  `reattach: true` is spent only when you ride the arc to its end (`done()`); bail
+  out partway and it stays live, so the pole can be caught again - the re-grab
+  unwraps the orbit onto the angle you left from (`released_angle`), not the arc
+  start, so your progress round the corner is kept instead of reset. What the flag
+  does *not* do is let you fly off and come back: every pillar on tracks 26-28 is
+  reachable only from its own fillet, the spacing rules put the next pole out of
+  `grabRange` the moment the car leaves the previous one, and a car flying its
+  tangent only ever gets *further* from the pole it left. A re-grab is therefore
+  the same corner caught again while the car is still in range, not a completed lap
+  of the road. The "catchable" state is monotonic - a pillar goes live once and
+  spent once - and the renderer reads it as `spent_corners.has(k) or k <
+  car.corner`, never a single "last spent" slot, which used to flip an earlier
+  pillar back to amber the moment a later one was spent. Riding every arc out - the
+  clean line - spends the pillars exactly as before, which is why ordinary play is
   unchanged. Tracks 26-28 (`Tracks.REATTACH_TRACKS`) showcase it; the renderer
-  paints a live reattach pillar amber and a spent one bronze.
+  paints a live reattach pillar amber and a spent one bronze. `verify_reattach.gd`
+  asserts the monotonic colouring.
 - **A reattach carried to the arc's end pays off, once per pillar.** The payoff
   lands on the *release* that ends a reattach, and only when that release is
   inside the last `CFG.REATTACH_END_FRAC` of the arc - bail out early and fly on
@@ -378,6 +387,14 @@ length and a small release error accumulates into a wall hit by the far end.
   (`assets/cars/*.png`, nose-up, sharing the -Y nose convention); the flat vector
   bodies were removed as placeholders. `assets/cars/CREDITS.md` lists the CC0
   sources. `render.gd` scales a car from its own aspect ratio.
+- **The restart button is bottom-centre and its icon is drawn, not typed.** The
+  in-run restart is a round ghost chip pinned to `PRESET_CENTER_BOTTOM`
+  (`App._round_icon_button`), carrying `scripts/retry_icon.gd` - a `Control` that
+  paints a ring plus an arrowhead. It used to be a top-left button showing the
+  character `U+21BB`, which rendered as a missing-glyph box because the theme font
+  (Open Sans SemiBold, the engine default) has no rotation arrow, and neither do
+  the neighbouring codepoints. Do not go back to a glyph without checking
+  `Font.has_char` on the actual theme font; draw the icon instead.
 - **The verifiers are excluded from exports** (`exclude_filter` in
   `export_presets.cfg` lists `tools/*`), so the headless scripts do not ship in
   the web pck or the APK. Keep them out of the player-facing builds.
