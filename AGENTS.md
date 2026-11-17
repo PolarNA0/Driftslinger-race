@@ -5,6 +5,12 @@ round a pillar, let go to fly straight to the next one. Leave the road and the
 run ends. Two modes: **speedrun** (a finite ~10s track, scored by time) and
 **endless** (an infinite road, scored by distance in metres).
 
+## Working on this repo
+
+Commit finished work and **push straight to `main`** - do not ask, do not open a
+PR, do not sit on a branch. `origin/main` is the one line of development. If a
+push is rejected, pull/rebase and push again rather than opening a PR.
+
 ## One build, and one piece of JavaScript
 
 **The Godot build (`godot/`) is the game.** The web build served to players and
