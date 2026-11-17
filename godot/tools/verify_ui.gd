@@ -69,6 +69,22 @@ func _check_size(vp: Vector2i) -> void:
 				_fail("tab '%s' page visible while '%s' is selected" % [other, name])
 		_check_page(name, page, vp)
 
+	# Endless has no track to pick, so the chooser must be hidden in that mode.
+	shell.select("play")
+	app._set_mode("speedrun")
+	await process_frame
+	if not app.track_section.visible:
+		_fail("track chooser hidden in speedrun")
+	app._set_mode("endless")
+	await process_frame
+	if app.track_section.visible:
+		_fail("track chooser still shown in endless")
+	for b in app.track_buttons:
+		if b.is_visible_in_tree() and _in_view(b, vp):
+			_fail("track button reachable in endless")
+	app._set_mode("speedrun")
+	await process_frame
+
 	# The gear opens Settings as a modal card, and it fits.
 	shell.settings_pressed.emit()
 	await process_frame

@@ -1,41 +1,101 @@
 extends SceneTree
 
-# Headless check of the Godot leaderboard paging and ranking. Reference values
-# were recorded from the old JS `boardPage` before that build was removed.
+# Headless check of the leaderboard. The board is the real runs and nothing else:
+# no baked ghost head and no generated tail. These cases pin the ranking rules -
+# competition ranks, ties, paging, and the local best that has not uploaded yet.
+
+var ok := true
+
+
+func check(label: String, got: Variant, want: Variant) -> void:
+	var good := str(got) == str(want)
+	ok = ok and good
+	print("  %-48s %s   (got %s, want %s)" % [label, "ok " if good else "FAIL", str(got), str(want)])
+
 
 func _init() -> void:
-	var ok := true
-	var wr = Leaderboard.world_record(1)
-	print("WR1 ", JSON.stringify(wr))
-	ok = ok and int(wr["ghost_id"]) == 746 and is_equal_approx(float(wr["time"]), 10.35)
+	print("== empty board ==")
+	var empty: Dictionary = Leaderboard.board_page(1)
+	check("no rows", empty["rows"].size(), 0)
+	check("total", empty["total"], 0)
+	check("pages", empty["pages"], 1)
+	check("player_rank", empty["player_rank"], 0)
+	check("world_record null", Leaderboard.world_record([]) == null, true)
 
-	var ranks := {10.0: 1, 10.35: 3, 10.5: 6869, 11.0: 21005, 12.5: 50001}
-	for t in ranks:
-		var r := Leaderboard.player_rank(1, t)
-		print("rank1 t=%s -> %d (want %d)" % [str(t), r, ranks[t]])
-		ok = ok and r == int(ranks[t])
+	print("== a small real board ==")
+	# One run per player, the shape `_reals_for` hands in.
+	var reals := [
+		{"name": "Ash", "time": 10.0, "steps": "1010", "you": false},
+		{"name": "Bolt", "time": 10.5, "steps": "1100", "you": false},
+		{"name": "Cinder", "time": 11.0, "steps": null, "you": false},
+	]
+	var wr: Dictionary = Leaderboard.world_record(reals)
+	check("world_record name", wr["name"], "Ash")
+	check("world_record time", wr["time"], 10.0)
+	check("world_record watchable", wr["watchable"], true)
+	check("world_record steps", wr["steps"], "1010")
 
-	var p := Leaderboard.board_page(1, 1, {"name": "Me", "time": 10.3})
-	print("page1 playerRank=%d pages=%d total=%d" % [p["player_rank"], p["pages"], p["total"]])
-	ok = ok and int(p["player_rank"]) == 1 and int(p["pages"]) == 1001 and int(p["total"]) == 50001
-	var names := []
-	for i in range(4):
-		names.append(p["rows"][i]["name"])
-	print("  head rows: ", ", ".join(names))
-	ok = ok and names[0] == "Me" and names[1] == "Ash-8" and names[3] == "Dash."
+	check("rank of a slower run", Leaderboard.player_rank(10.2, reals), 2)
+	check("rank tying the leader", Leaderboard.player_rank(10.0, reals), 1)
+	check("rank behind everyone", Leaderboard.player_rank(12.0, reals), 4)
 
-	var last := Leaderboard.board_page(1, 1000)
-	print("last page %d of %d rows=%d first=%s" % [last["page"], last["pages"], last["rows"].size(), JSON.stringify(last["rows"][0])])
-	ok = ok and int(last["page"]) == 1000 and last["rows"].size() == 50
-	ok = ok and int(last["rows"][0]["rank"]) == 49951 and last["rows"][0]["name"] == "DriftKing-"
-	ok = ok and abs(float(last["rows"][0]["time"]) - 12.425561312127801) < 1e-9
+	var p: Dictionary = Leaderboard.board_page(1, null, 50, reals)
+	check("board total", p["total"], 3)
+	check("board pages", p["pages"], 1)
+	var got := []
+	for r in p["rows"]:
+		got.append([int(r["rank"]), str(r["name"])])
+	check("board rows", JSON.stringify(got), JSON.stringify([[1, "Ash"], [2, "Bolt"], [3, "Cinder"]]))
+	check("no-steps row is not watchable", bool(p["rows"][2]["watchable"]), false)
+	check("steps row is watchable", bool(p["rows"][0]["watchable"]), true)
 
-	var gen2 := []
-	var plain := Leaderboard.board_page(1, 1)
-	for i in range(10, 14):
-		gen2.append(plain["rows"][i]["name"])
-	print("  gen rows 10-13: ", ", ".join(gen2))
-	ok = ok and gen2[0] == "Sable58" and gen2[1] == "Snap" and gen2[2] == "Kestrel" and gen2[3] == "Marble"
+	print("== ties share a rank ==")
+	var tied := [
+		{"name": "A", "time": 10.0, "steps": "1", "you": false},
+		{"name": "B", "time": 10.0, "steps": "1", "you": false},
+		{"name": "C", "time": 10.0, "steps": "1", "you": false},
+		{"name": "D", "time": 10.5, "steps": "1", "you": false},
+	]
+	var pt: Dictionary = Leaderboard.board_page(1, null, 50, tied)
+	var gott := []
+	for r in pt["rows"]:
+		gott.append(int(r["rank"]))
+	check("three tied at 1, next at 4", JSON.stringify(gott), JSON.stringify([1, 1, 1, 4]))
+	check("player_rank matches a tie", Leaderboard.player_rank(10.0, tied), 1)
+
+	print("== a local best that has not uploaded ==")
+	var me := {"name": "Me", "time": 10.2}
+	var pm: Dictionary = Leaderboard.board_page(1, me, 50, reals)
+	check("slotted in", pm["total"], 4)
+	check("its rank", pm["player_rank"], 2)
+	check("row 2 is Me", str(pm["rows"][1]["name"]), "Me")
+	check("Me is not watchable", bool(pm["rows"][1]["watchable"]), false)
+
+	# When the server already lists the player, they must not appear twice.
+	var listed := [
+		{"name": "Me", "time": 10.2, "steps": "11", "you": true},
+		{"name": "Ash", "time": 10.0, "steps": "10", "you": false},
+	]
+	var pl: Dictionary = Leaderboard.board_page(1, me, 50, listed)
+	check("listed player not duplicated", pl["total"], 2)
+	check("listed player rank", pl["player_rank"], 2)
+
+	print("== paging ==")
+	var many := []
+	for i in range(60):
+		many.append({"name": "P%d" % i, "time": 10.0 + float(i) * 0.01, "steps": "1", "you": false})
+	var page1: Dictionary = Leaderboard.board_page(1, null, 50, many)
+	check("page 1 size", page1["rows"].size(), 50)
+	check("page 1 pages", page1["pages"], 2)
+	check("page 1 first rank", int(page1["rows"][0]["rank"]), 1)
+	var page2: Dictionary = Leaderboard.board_page(2, null, 50, many)
+	check("page 2 size", page2["rows"].size(), 10)
+	check("page 2 first rank", int(page2["rows"][0]["rank"]), 51)
+	check("page_for_rank(51)", Leaderboard.page_for_rank(51), 2)
+	check("page_for_rank(1)", Leaderboard.page_for_rank(1), 1)
+	# A page past the end clamps to the last page rather than returning nothing.
+	var page9: Dictionary = Leaderboard.board_page(9, null, 50, many)
+	check("page past the end clamps", page9["page"], 2)
 
 	print("RESULT: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)

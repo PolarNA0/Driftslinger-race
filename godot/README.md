@@ -16,10 +16,10 @@ reattach showcase tracks and sprite cars.
 
 Feature-complete. Physics, track generation, all ten ported time-attack tracks,
 rendering, the one-button loop, the full menu shell (mode and track pickers, car
-skins, ghosts), the leaderboard with watchable ghosts, run history, accounts, and
-the online layer (Supabase upload, the shared board, and replaying another
-player's uploaded run) are all ported. The physics matches the JS the server
-verifies runs with, and every track finishes near ten seconds in both.
+skins, ghosts), the leaderboard, run history, accounts, and the online layer
+(Supabase upload, the shared board, and replaying another player's uploaded run)
+are all ported. The physics matches the JS the server verifies runs with, and
+every track finishes near ten seconds in both.
 
 Additions on top of the port:
 
@@ -28,8 +28,10 @@ Additions on top of the port:
   fly off, come back, and grab the same pole again. Riding the arc out still
   spends it, which keeps the ordinary clean line working exactly as before.
   Tracks 26–28 showcase it (amber = still catchable, bronze = spent).
-- **Sprite cars.** Free CC0 top-down cars (see `assets/cars/CREDITS.md`) sit
-  alongside the eight vector colours in the car picker.
+- **Sprite cars.** Every car in the picker is its own free CC0 top-down sprite
+  (see `assets/cars/CREDITS.md`); `tools/verify_cars.gd` fails if two share one.
+- **A restart key.** `R` restarts the run in progress. It can be rebound in
+  Settings, where the play key is rebound too.
 - **A menu that fits a phone.** The track list moved behind its own **Tracks**
   button and every overlay card scrolls, so the account controls are reachable on
   the 420x820 viewport instead of running off the bottom of the screen.
@@ -52,8 +54,9 @@ work in `godot/`:
   Supabase.
 
 The online layer itself *is* ported (see "The online layer" in `../AGENTS.md`):
-runs upload, the shared board merges real runs with the baked ghost field, and
-another player's uploaded run can be watched from its stored steps.
+runs upload, and the shared board is exactly those real runs - every row is a
+player's own verified run, watchable from its stored steps. There is no generated
+field behind it.
 
 ## Export
 
@@ -126,7 +129,12 @@ after release, that a reattach pillar can be caught again after an early bail-ou
 godot --headless --path . --script res://tools/verify_reattach.gd
 ```
 
-`tools/verify_board.gd` checks the leaderboard paging and ranking.
+`tools/verify_board.gd` checks the leaderboard: ranking, ties, paging, and that
+the board is only the real runs. There is no generated field behind it any more.
+
+```sh
+godot --headless --path . --script res://tools/verify_board.gd
+```
 
 `tools/verify_guard.gd` proves the one rule that matters: holding or mashing
 never beats the game. A clean line survives 120 corners, holding forever crashes
@@ -138,10 +146,9 @@ godot --headless --path . --script res://tools/verify_guard.gd
 ```
 
 `tools/verify_online.gd` checks the online layer's offline-testable parts: the
-board merge (against reference values recorded from the JS `boardPage`), the run
-queue, the client id, the account rules that must hold with no session, and the
-net config. The network paths themselves need a server, so they are not covered
-here.
+board merge of the server's real runs with the local best, the run queue, the
+client id, the account rules that must hold with no session, and the net config.
+The network paths themselves need a server, so they are not covered here.
 
 ```sh
 godot --headless --path . --script res://tools/verify_online.gd
@@ -166,11 +173,13 @@ placeholder or a repeat of another.
 godot --headless --path . --script res://tools/verify_cars.gd
 ```
 
-`tools/bake_ghosts.gd` regenerates `scripts/ghostdata.gd` from the Godot physics.
-It is slow (a thousand ids per track), so it is a manual step, not a verifier:
+`tools/verify_keys.gd` checks the rebindable keys: the defaults (Space to play,
+R to restart), that R restarts a run and leaves a replay alone, and that a
+rebinding takes effect, refuses to collide with the play key, and can be
+cancelled with Escape.
 
 ```sh
-godot --headless --path . --script res://tools/bake_ghosts.gd
+godot --headless --path . --script res://tools/verify_keys.gd
 ```
 
 The physics matches the JS the server verifies with: both crash after 334 steps
@@ -187,7 +196,6 @@ The track geometry matches too (track 1: length 3074.0, finishS 3074.0, clean 10
 | `scripts/track.gd` | `../physics/track.js` — the road |
 | `scripts/car.gd` | `../physics/car.js` — the one-button car, plus the reattach pillar |
 | `scripts/tracks.gd` | `../physics/tracks.js` — the ten ported tracks, plus the reattach showcase tracks 26–28 |
-| `scripts/ghostrun.gd` | the old `js/ghostrun.js` — a ghost from an integer id |
 | `scripts/replay.gd` | the old `js/replay.js` — button-step replays |
 | `scripts/storage.gd` | the old `js/storage.js` — records, best times, replays, history, prefs |
 | `scripts/leaderboard.gd` | the old `js/leaderboard.js` — paging, ranking, the board |
@@ -196,7 +204,7 @@ The track geometry matches too (track 1: length 3074.0, finishS 3074.0, clean 10
 | `scripts/api.gd` | the old `js/api.js` — the run queue and the board client |
 | `scripts/account.gd` | the old `js/account.js` — Supabase Auth and the `profiles` name |
 | `scripts/render.gd` | the old `js/render.js` — themes, camera, road band, vector and sprite cars |
-| `scripts/game.gd` | the old `js/game.js` — fixed 1/120s tick, modes, records, ghosts |
+| `scripts/game.gd` | the old `js/game.js` — fixed 1/120s tick, modes, records, the run-in-progress replay |
 | `scripts/app.gd` | the old `js/app.js` — the tabbed menu (Play/Garage/Account), the board/history/settings overlays, leaderboard, history, accounts |
 | `scripts/menu_shell.gd` | new — the full-screen app shell: top bar, content sheet, bottom tab bar |
 | `scripts/theme.gd` | new — `UiTheme`, the one `Theme` for the whole UI (palette, button variations, panels, scrollbars) |

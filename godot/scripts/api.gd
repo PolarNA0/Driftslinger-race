@@ -181,9 +181,9 @@ static func fetch_my_runs() -> Variant:
 
 # The real runs on a track, or null when offline.
 #
-# This is not a page of a board: it is every real run on the track, for the game
-# to merge into its own ghost field. The field supplies the depth, so there is
-# nothing to paginate here.
+# This is not a page of a board: it is every real run on the track, so the client
+# can rank and page them itself. A track holds one run per player, so the whole
+# list is small and there is nothing to paginate here.
 static func fetch_board(track: int) -> Variant:
 	var token: String = await Account.auth_token()
 	var res: Dictionary = await Net.shared().get_json(

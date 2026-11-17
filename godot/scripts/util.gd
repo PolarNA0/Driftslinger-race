@@ -36,8 +36,8 @@ static func mulberry32(seed_val: int) -> Callable:
 	return func() -> float:
 		var a: int = (st[0] + 0x6D2B79F5) & 0xFFFFFFFF
 		# Store the advanced state back: without this every call returns the same
-		# number, so a caller that draws more than once (the ghost policy draws a grab
-		# and a release) silently gets one value twice.
+		# number, so a caller that draws more than once (Track draws several road
+		# lengths) silently gets one value twice.
 		st[0] = a
 		var t: int = imul32(a ^ (a >> 15), 1 | a)
 		t = ((t + imul32(t ^ (t >> 7), 61 | t)) & 0xFFFFFFFF) ^ t

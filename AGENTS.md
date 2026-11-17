@@ -40,7 +40,7 @@ build is the only client.
   tracks (`PLAYABLE_TRACKS`), plus the reattach showcase tracks 26–28. Tracks
   6–20 were removed, so the numbers are not a contiguous range.
 - `godot/scripts/car.gd` — the physics. `step(dt, held)` is pure and testable.
-- `godot/scripts/game.gd` — fixed 1/120s tick, modes, records, ghosts.
+- `godot/scripts/game.gd` — fixed 1/120s tick, modes, records, replays.
 - `godot/scripts/render.gd` — top-down orthographic view, road themes, the
   car sprites, and the responsive zoom (see "Fitting every screen").
 - `godot/scripts/app.gd` — the shell: the tabbed menu, overlays, leaderboard,
@@ -54,16 +54,15 @@ build is the only client.
   geometry, because the theme font has no icon glyphs.
 - `godot/assets/ui/boot_splash.png` — the boot splash, set in `project.godot`.
 - `godot/web/shell.html` — the web export's HTML shell (the custom loader).
-- `godot/scripts/{ghostrun,ghostdata,replay,storage,leaderboard,account}.gd` —
-  the ported support modules.
+- `godot/scripts/{replay,storage,leaderboard,account}.gd` — the ported support
+  modules.
 - `godot/scripts/{net,netconfig,api}.gd` — the online layer's transport, config
   and leaderboard client (see "The online layer").
 - `godot/scenes/main.tscn`, `godot/project.godot` — scene and project settings.
 - `godot/tools/` — headless verifiers (`parity.gd`, `verify_tracks.gd`,
   `verify_reattach.gd`, `verify_board.gd`, `verify_online.gd`,
-  `verify_guard.gd`, `verify_ui.gd`, `verify_cars.gd`) and the ghost
-  baker
-  (`bake_ghosts.gd`). See `godot/README.md`.
+  `verify_guard.gd`, `verify_ui.gd`, `verify_cars.gd`, `verify_keys.gd`).
+  See `godot/README.md`.
 
 ### JavaScript (the server's physics)
 
@@ -101,7 +100,7 @@ godot --headless --path godot --script res://tools/verify_online.gd   # online l
 godot --headless --path godot --script res://tools/verify_guard.gd    # holding/mashing must lose
 godot --headless --path godot --script res://tools/verify_ui.gd       # menu fits every screen
 godot --headless --path godot --script res://tools/verify_cars.gd     # every car has its own sprite
-godot --headless --path godot --script res://tools/bake_ghosts.gd     # regenerate ghostdata.gd (slow)
+godot --headless --path godot --script res://tools/verify_keys.gd     # restart/play keybinds
 
 # Physics + server verifier (JavaScript, must stay green)
 node tools/test.mjs            # headless core tests
@@ -364,9 +363,18 @@ tab pages and populates them; the shell owns no game state.
 
 - **Three tabs, plus Settings in the top bar.** Play, Garage, Account across the
   bottom; the gear in the top-right opens Settings as a modal card (it holds the
-  key binding and the build version). The old "Tracks" button is gone - the
+  two key bindings and the build version). The old "Tracks" button is gone - the
   track chooser lives on the Play tab as a grid of numbers, with the selected
   track and its best above it.
+- **Endless hides the track chooser.** Endless is one open road, so the whole
+  track section (`track_section`) is hidden in that mode rather than shown and
+  ignored; `verify_ui.gd` asserts it is gone and unreachable. Speedrun shows it.
+- **Two rebindable keys.** Space plays and `R` restarts the run in progress; both
+  are rebound in Settings, which captures the next key press (`_begin_capture` /
+  `_bind_key`) and refuses a binding that would collide with the other key.
+  `R` only touches a live run - never a replay - and is keyboard-only, because on
+  a phone the round restart button is how a run is restarted. `verify_keys.gd`
+  covers all of that.
 - **`select(name)` is the one entry point.** It toggles the tab buttons, emits
   `tab_changed`, and `App._on_tab_changed` shows the matching page and refreshes
   it. Setting a tab's content state must happen *after* `select()`, because
@@ -454,30 +462,28 @@ tab pages and populates them; the shell owns no game state.
 
 ## Leaderboard, ghosts and accounts
 
-- The **head** of each board is real and watchable: `godot/tools/bake_ghosts.gd`
-  runs the ghost policy over many ids and writes the fastest few per track to
-  `godot/scripts/ghostdata.gd` as `[time, ghost_id, name]`.
-  `godot/scripts/ghostrun.gd` turns an id into a deterministic button policy, so a
-  ghost's replay is re-simulated on demand.
-- The **tail** of the board is generated from a monotonic curve in
-  `godot/scripts/leaderboard.gd` and is *not* watchable (`row.watchable == false`). This is
-  the deliberate trade: a watchable ghost needs a real simulation behind it, and
-  only the world record and the few runs behind it are ever actually watched. A
-  whole 50,000-run watchable field is slow to bake and large to ship.
-- The physics only allows a finishing run inside a narrow band of times (about
-  0.25s of distinct times per track, with ties beyond that), so a large field has
-  many tied times. That is why the field is baked rather than invented: a made-up
-  time would have no run behind it, and a ghost you cannot watch is not a ghost.
-- `godot/scripts/leaderboard.gd` pages over the field (`board_page`, 50
-  rows/page), slots the player in by time (`player_rank`), and exposes the fastest
-  ghost (`world_record`).
-  The real head is a sorted array; the generated tail is a monotonic curve, so
-  both rank by binary search and the whole board is sorted by construction.
-- **Ghosting**: pick Off / World record / Your best in the menu. The ghost is a
-  second `Car` stepped in lockstep inside the fixed-step loop
-  (`Game.set_ghost_replay` / `set_ghost_self`), drawn translucent by the
-  renderer. It shares the track and the clock with the player, so the two are
-  directly comparable.
+- **The board is real runs and nothing else.** Every row is a player's own run,
+  verified by the server, and every row is watchable from the `steps` it carries.
+  There is no baked ghost head and no generated tail - the old "fake bots" were
+  exactly those two (an invented 10-name field per track plus a ~50k-row curve),
+  and they were removed. `godot/scripts/leaderboard.gd` ranks and pages the real
+  runs the client fetched from the server, plus the local best that has not
+  uploaded yet.
+- `godot/scripts/leaderboard.gd` pages (`board_page`, 50 rows/page), slots the
+  player in by time (`player_rank(time, reals)`), and exposes the fastest run
+  (`world_record(reals)`). Ranks are competition ranks, so ties share a rank and
+  the next distinct time skips. The server rows arrive already ordered; the local
+  best is merged in by time, so the whole board is sorted by construction.
+- **A row is watchable only if it carries `steps`.** A real submitted run has no
+  ghost id to regenerate from, so its own button sequence is what replays it
+  (`_watch_steps` in `app.gd`, decoded and fed to `Game` as a replay). The one row
+  that can be un-watchable is the local best, which the server has not seen yet
+  (`watchable == false`).
+- **Ghosting**: pick Off / Your best in the menu. The ghost is a second `Car`
+  stepped in lockstep inside the fixed-step loop (`Game.set_ghost_self`), drawn
+  translucent by the renderer. It shares the track and the clock with the player,
+  so the two are directly comparable. The world-record ghost option is gone with
+  the baked field; a board row is watched directly instead.
 - **History**: every finish is appended to `storage.addRun`, namespaced per
   account. The History overlay lists them newest first and flags personal bests.
 - `godot/scripts/account.gd` talks to Supabase Auth; the session (tokens, expiry,
@@ -510,10 +516,11 @@ produces - the fastest line on every track. If you touch `drift`, keep the total
 at `speed`, and re-check that a wide grab is not faster than a clean one
 (`tools/test.mjs`, "grabbing wide is allowed and reels back to the road").
 
-Any change to `drift` or `fly` invalidates `godot/scripts/ghostdata.gd`: the
-baked ghosts are real runs of the real physics. Re-run
-`godot --headless --path godot --script res://tools/bake_ghosts.gd` after a
-physics change, or every ghost fails to reproduce its claimed time.
+Any change to `drift` or `fly` changes what a run is worth, so the server's
+verifier and the client must be re-checked together: run `node tools/test.mjs`
+and `godot --headless --path godot --script res://tools/parity.gd`. A board row's
+`steps` are re-simulated on the server through the same physics, so a run that no
+longer reproduces its time is dropped rather than shown.
 
 ## The shared leaderboard runs on Supabase
 
@@ -657,16 +664,14 @@ Four things are load-bearing and easy to break:
   flush. A guest's run queues too and is sent after they sign in.
 - **The client still never sends a time.** It sends the button steps and the server
   replays them through the vendored `physics/`. Do not add a time field.
-- **The board is one board, not two.** `Leaderboard.board_page` merges the server's
-  real runs into the baked ghost field by time, so a real run displaces the ghosts
-  it beats and its rank is its merged position. `verify_online.gd` checks that
-  merge against reference values recorded from the old JS `boardPage`, so the port
-  still agrees with the original.
+- **The board is the server's real runs.** `Leaderboard.board_page` merges them
+  with the local best by time, so a run's rank is its position among the real
+  runs. There is no local field to merge against any more - the board is only
+  what players actually did. `verify_online.gd` checks that merge.
 
-A real submitted run has no ghost id, so it cannot be re-simulated from an id the
-way a baked ghost can. It carries its own `steps` instead, and `Game.set_ghost_steps`
-races it. Anything that watches a board row has to dispatch on that: see
-`_watch_wr`, `_watch_steps` and the board row button in `app.gd`.
+A real submitted run carries its own `steps`, and watching it replays those
+steps. Anything that watches a board row dispatches on that: see `_watch_wr`,
+`_watch_steps` and the board row button in `app.gd`.
 
 The account UI asks for an email and a password now (Supabase Auth owns the
 credentials), not a username and a password. The username is a separate, public

@@ -5,8 +5,8 @@ extends Control
 const VERSION := "1.3"
 
 # The shell around the game: a full-screen, tabbed menu (Play / Garage / Account,
-# with Settings in the top bar), the leaderboard with watchable ghosts, run
-# history, accounts, and the overlays for pause / crash / finish / replay-done.
+# with Settings in the top bar), the leaderboard, run history, accounts, and the
+# overlays for pause / crash / finish / replay-done.
 #
 # The simulation lives in Game (a Node2D) which draws itself through Renderer2D;
 # this Control sits above it and owns only the interface. Background taps that
@@ -21,14 +21,16 @@ var tab_cols := []                   # the scroll columns inside tab pages, for 
 var mode_bar: HBoxContainer
 var play_track_label: Label
 var play_best_label: Label
+var track_section: VBoxContainer     # the track chooser, hidden in endless
 var car_preview: TextureRect
 var car_name_label: Label
 var acct_overview: VBoxContainer     # the account tab's summary, rebuilt on sign in/out
 var acct_form: VBoxContainer         # the sign-in form, shown on demand
 var settings_col: VBoxContainer
-var key_button: Button
-var key_capturing := false
+var key_buttons := {}                # "play"/"reset" -> the rebind button
+var key_capturing := ""              # which binding a key press will capture, "" for none
 var input_key := KEY_SPACE           # the bound play key on a desktop keyboard
+var reset_key := KEY_R               # restarts the current run
 
 var menu_seed := 1
 var menu_mode := "speedrun"
@@ -39,7 +41,7 @@ var board_seed := 1
 var board_page_no := 1
 var board_reals := []          # real runs on board_seed, as the server last returned
 var board_reals_seed := 0
-var watching: Variant = null   # {kind, seed, ghost_id, name, time, label, tag, sub}
+var watching: Variant = null   # {kind, seed, name, time, label, tag, sub}
 
 var acct_mode := "login"
 var overlay := ""              # the modal overlay currently shown, "" for none
@@ -59,7 +61,7 @@ var watch_label: Label
 var overlays := {}             # name -> Control (full-rect root)
 var overlay_cards := []        # the card columns, so a resize can re-widen them
 var mode_buttons := {}         # "speedrun"/"endless" -> Button
-var ghost_buttons := {}        # "off"/"wr"/"self" -> Button
+var ghost_buttons := {}        # "off"/"self" -> Button
 var track_buttons := []        # one per track, in order
 var car_buttons := []
 var lb_title: Label
@@ -98,13 +100,15 @@ func _ready() -> void:
 	if menu_mode != "endless":
 		menu_mode = "speedrun"
 	ghost_mode = str(Storage.get_pref("ghostMode", "off"))
-	if not ["off", "wr", "self"].has(ghost_mode):
+	# The baked-record ghost is gone; an old preference for it falls back to off.
+	if not ["off", "self"].has(ghost_mode):
 		ghost_mode = "off"
 	car_skin = int(Storage.get_pref("carSkin", 0))
 	if car_skin < 0 or car_skin >= Renderer2D.CAR_MODELS.size():
 		car_skin = 0
-	# The desktop play key, rebindable in Settings. Space is the default.
+	# The desktop keys, rebindable in Settings. Space to play, R to reset.
 	input_key = int(Storage.get_pref("inputKey", KEY_SPACE))
+	reset_key = int(Storage.get_pref("resetKey", KEY_R))
 
 	game = Game.new()
 	add_child(game)
@@ -503,10 +507,14 @@ func _build_play_tab() -> void:
 	mode_buttons["speedrun"] = _segment(mode_bar, "clock", "Tracks", func(): _set_mode("speedrun"))
 	mode_buttons["endless"] = _segment(mode_bar, "infinity", "Endless", func(): _set_mode("endless"))
 
-	col.add_child(_section("Track"))
+	# The track chooser only applies to a time attack: endless is one open road,
+	# so the whole section is hidden in that mode rather than shown and ignored.
+	track_section = _col(6)
+	col.add_child(track_section)
+	track_section.add_child(_section("Track"))
 	var track_card := PanelContainer.new()
 	track_card.theme_type_variation = "SubCard"
-	col.add_child(track_card)
+	track_section.add_child(track_card)
 	var tc := _col(4)
 	track_card.add_child(tc)
 	play_track_label = _label("Track 1", 20)
@@ -520,12 +528,11 @@ func _build_play_tab() -> void:
 
 	col.add_child(_primary_button("Play", func(): _start_run(menu_seed)))
 
-	# The ghost picker is small enough to live inline, so it needs no sheet of its own.
+	# The ghost picker is two chips, so it lives inline on the Play tab.
 	col.add_child(_section("Ghost"))
 	var gbar := _row(6)
 	col.add_child(gbar)
 	ghost_buttons["off"] = _segment(gbar, "ghost", "Off", func(): _set_ghost("off"))
-	ghost_buttons["wr"] = _segment(gbar, "trophy", "Record", func(): _set_ghost("wr"))
 	ghost_buttons["self"] = _segment(gbar, "clock", "Your best", func(): _set_ghost("self"))
 
 	var more := _row(8)
@@ -651,23 +658,8 @@ func _build_settings_page() -> void:
 		t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		c.add_child(t)
 	else:
-		var row := _row(10)
-		c.add_child(row)
-		var ic := UiIcon.new()
-		ic.kind = "key"
-		ic.color = UiTheme.INK_DIM
-		ic.custom_minimum_size = Vector2(26, 26)
-		row.add_child(ic)
-		var lbl := _label("Play key", 16)
-		lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		row.add_child(lbl)
-		key_button = _button(_key_name(input_key), _begin_capture)
-		key_button.custom_minimum_size = Vector2(120, 0)
-		row.add_child(key_button)
-		var hint := _label("Hold this key to swing. Click the button, then press a new key.", 12)
-		hint.add_theme_color_override("font_color", UiTheme.INK_MUTE)
-		hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		c.add_child(hint)
+		_key_row(c, "Play", "play", "Hold this key to swing.", input_key)
+		_key_row(c, "Reset", "reset", "Press this key to restart the current run.", reset_key)
 	settings_col.add_child(_button("Done", _to_menu))
 	# The build version, so a bug report can name the build.
 	var ver := _label("Sling Drift  v%s" % VERSION, 12)
@@ -680,9 +672,32 @@ func _open_settings() -> void:
 	_show_only("settings")
 
 
-func _begin_capture() -> void:
-	key_capturing = true
-	key_button.text = "Press a key..."
+# One rebindable key: a label, the current key as a button, and a one-line hint.
+# Clicking the button arms capture; the next key press becomes the binding.
+func _key_row(parent: Node, label: String, name: String, hint: String, code: int) -> void:
+	var row := _row(10)
+	parent.add_child(row)
+	var ic := UiIcon.new()
+	ic.kind = "key"
+	ic.color = UiTheme.INK_DIM
+	ic.custom_minimum_size = Vector2(26, 26)
+	row.add_child(ic)
+	var lbl := _label(label, 16)
+	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(lbl)
+	var b := _button(_key_name(code), func(): _begin_capture(name))
+	b.custom_minimum_size = Vector2(120, 0)
+	row.add_child(b)
+	key_buttons[name] = b
+	var h := _label(hint, 12)
+	h.add_theme_color_override("font_color", UiTheme.INK_MUTE)
+	h.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	parent.add_child(h)
+
+
+func _begin_capture(name: String) -> void:
+	key_capturing = name
+	key_buttons[name].text = "Press a key..."
 
 
 func _key_name(code: int) -> String:
@@ -698,15 +713,30 @@ func _key_name(code: int) -> String:
 	return OS.get_keycode_string(code) if OS.get_keycode_string(code) != "" else "Key %d" % code
 
 
+# Bind the captured key. The two bindings must not collide, so a key already in
+# use is refused rather than silently shadowing the other action.
 func _bind_key(code: int) -> void:
-	input_key = code
-	Storage.set_pref("inputKey", code)
-	key_capturing = false
-	if key_button != null:
-		key_button.text = _key_name(code)
+	if code == KEY_ESCAPE:
+		key_buttons[key_capturing].text = _key_name(input_key if key_capturing == "play" else reset_key)
+		key_capturing = ""
+		return
+	var other := reset_key if key_capturing == "play" else input_key
+	if code == other:
+		key_buttons[key_capturing].text = "Already used"
+		key_capturing = ""
+		return
+	if key_capturing == "play":
+		input_key = code
+		Storage.set_pref("inputKey", code)
+	elif key_capturing == "reset":
+		reset_key = code
+		Storage.set_pref("resetKey", code)
+	var which := key_capturing
+	key_capturing = ""
+	key_buttons[which].text = _key_name(code)
 
 
-# --- The ghost picker (a small sheet) ---------------------------------------
+# --- The ghost picker -------------------------------------------------------
 
 func _refresh_ghost_overlay() -> void:
 	for key in ghost_buttons:
@@ -854,6 +884,7 @@ func _show_tracks() -> void:
 
 
 func _refresh_track_list() -> void:
+	_refresh_track_visibility()
 	for b in track_buttons:
 		b.button_pressed = (int(b.get_meta("track")) == menu_seed)
 	if play_track_label == null:
@@ -863,8 +894,17 @@ func _refresh_track_list() -> void:
 		var best: Variant = Storage.get_best_time(menu_seed)
 		play_best_label.text = "best --" if best == null else "best %s" % _fmt_time(float(best))
 	else:
-		var rec := Storage.get_record(menu_seed)
-		play_best_label.text = "best %s" % _fmt_dist(float(rec["dist"])) if float(rec["dist"]) > 0.0 else "best --"
+		# Endless is one open road, not a per-track course, so the record is the
+		# player's best distance anywhere.
+		var best_d := Storage.best_distance()
+		play_best_label.text = "best --" if best_d <= 0.0 else "best %s" % _fmt_dist(best_d)
+
+
+# Endless has no track to pick, so the chooser is hidden rather than shown and
+# ignored. Speedrun is where a track means anything.
+func _refresh_track_visibility() -> void:
+	if track_section != null:
+		track_section.visible = (menu_mode != "endless")
 
 
 func _refresh_mode_list() -> void:
@@ -941,11 +981,13 @@ func _render_board() -> void:
 		if bool(r["you"]):
 			listed = true
 			break
-	var page := Leaderboard.board_page(seed, board_page_no, null if listed else me, Leaderboard.PER_PAGE, reals)
+	var page := Leaderboard.board_page(board_page_no, null if listed else me, Leaderboard.PER_PAGE, reals)
 	board_page_no = int(page["page"])
 
 	lb_title.text = "Track %d" % seed
-	if int(page["player_rank"]) > 0:
+	if int(page["total"]) == 0:
+		lb_note.text = "No runs yet \u00b7 be the first"
+	elif int(page["player_rank"]) > 0:
 		lb_note.text = "You are #%d of %d" % [int(page["player_rank"]), int(page["total"])]
 	else:
 		lb_note.text = "%d racers \u00b7 set a time to join" % int(page["total"])
@@ -953,19 +995,14 @@ func _render_board() -> void:
 	for c in lb_rows.get_children():
 		c.queue_free()
 	for r in page["rows"]:
-		var can_watch: bool = bool(r["you"]) or bool(r["watchable"])
 		var text := "%d   %s   %s" % [int(r["rank"]), str(r["name"]), _fmt_time(float(r["time"]))]
-		if can_watch:
-			var action := "Replay" if bool(r["you"]) else "Watch"
+		var steps: Variant = r.get("steps")
+		if steps != null and str(steps) != "":
+			# Every real run carries its own steps, so every row can be watched.
 			var row: Dictionary = r
+			var action := "Replay" if bool(row["you"]) else "Watch"
 			var b := _button(text + "   " + action, func():
-				if bool(row["you"]):
-					_watch_own_replay(seed)
-				elif str(row.get("steps", "")) != "":
-					# A real submitted run: no ghost id, it replays from its own steps.
-					_watch_steps(seed, str(row["steps"]), str(row["name"]), float(row["time"]))
-				else:
-					_watch_ghost(seed, int(row["ghost_id"]), str(row["name"]), float(row["time"])))
+				_watch_steps(seed, str(row["steps"]), str(row["name"]), float(row["time"])))
 			lb_rows.add_child(b)
 		else:
 			lb_rows.add_child(_label(text, 14))
@@ -982,7 +1019,7 @@ func _show_leaderboard(seed: int) -> void:
 	# the board corrects it once they are in.
 	var best: Variant = Storage.get_best_time(seed)
 	var reals := _reals_for(seed)
-	board_page_no = 1 if best == null else Leaderboard.page_for_rank(Leaderboard.player_rank(seed, float(best), reals))
+	board_page_no = 1 if best == null else Leaderboard.page_for_rank(Leaderboard.player_rank(float(best), reals))
 	_render_board()
 	_show_only("board")
 	# Then fetch the real runs and re-render with them merged in. The local board is
@@ -1255,8 +1292,8 @@ func _build_finish() -> void:
 	col.add_child(row)
 	btn_watch = _button("Watch my replay", func(): _watch_own_replay(game.seed_num))
 	row.add_child(btn_watch)
-	btn_finish_wr = _button("Watch world record", func():
-		var wr = Leaderboard.world_record(game.seed_num, _reals_for(game.seed_num))
+	btn_finish_wr = _button("Watch record", func():
+		var wr = Leaderboard.world_record(_reals_for(game.seed_num))
 		if wr != null:
 			_watch_wr(game.seed_num, wr))
 	row.add_child(btn_finish_wr)
@@ -1277,11 +1314,8 @@ func _build_replay_done() -> void:
 		var seed := int(watching["seed"])
 		if watching["kind"] == "self":
 			_watch_own_replay(seed)
-		elif watching["kind"] == "steps":
-			_watch_steps(seed, str(watching["steps"]), str(watching["name"]), float(watching["time"]))
 		else:
-			_watch_ghost(seed, int(watching["ghost_id"]),
-				str(watching["name"]), float(watching["time"]))))
+			_watch_steps(seed, str(watching["steps"]), str(watching["name"]), float(watching["time"]))))
 	col.add_child(_button("Leaderboard", func(): _show_leaderboard(game.seed_num)))
 	col.add_child(_button("Main menu", _to_menu))
 
@@ -1324,20 +1358,11 @@ func _start_run(seed: int) -> void:
 
 
 func _apply_ghost(seed: int) -> void:
-	if menu_mode != "speedrun" or ghost_mode == "off":
+	# The only ghost is your own best run: it is a replay you own, so it needs no
+	# server and no invented racer.
+	if menu_mode != "speedrun" or ghost_mode != "self":
 		return
-	if ghost_mode == "self":
-		game.set_ghost_self(seed)
-		return
-	var wr = Leaderboard.world_record(seed, _reals_for(seed))
-	if wr == null:
-		return
-	# A real record has no ghost id; it replays from its stored steps instead.
-	var steps: Variant = wr.get("steps")
-	if steps != null and str(steps) != "":
-		game.set_ghost_steps(seed, Replay.decode_steps(str(steps)), str(wr["name"]), float(wr["time"]))
-	else:
-		game.set_ghost_replay(seed, int(wr["ghost_id"]), str(wr["name"]), float(wr["time"]))
+	game.set_ghost_self(seed)
 
 
 func _watch_own_replay(seed: int) -> void:
@@ -1345,7 +1370,7 @@ func _watch_own_replay(seed: int) -> void:
 		return
 	var best: Variant = Storage.get_best_time(seed)
 	watching = {
-		"kind": "self", "seed": seed, "ghost_id": null, "name": null, "time": float(best),
+		"kind": "self", "seed": seed, "name": null, "time": float(best),
 		"label": "%s's best" % _player_name(), "tag": "Your best run",
 		"sub": "Track %d \u00b7 %s" % [seed, _fmt_time(float(best))],
 	}
@@ -1360,40 +1385,19 @@ func _watch_own_replay(seed: int) -> void:
 	game.start()
 
 
-func _watch_ghost(seed: int, ghost_id: int, name: String, time: float) -> void:
-	watching = {
-		"kind": "ghost", "seed": seed, "ghost_id": ghost_id, "name": name, "time": time,
-		"label": "%s's ghost" % name, "tag": "Ghost run",
-		"sub": "%s \u00b7 Track %d \u00b7 %s" % [name, seed, _fmt_time(time)],
-	}
-	_hide_overlays()
-	if not game.load_ghost_replay(seed, ghost_id):
-		_end_watching()
-		_to_menu()
-		return
-	_hud_reset()
-	hint_label.visible = false
-	_show_round_button(false)
-	_show_watch_badge("Watching %s \u00b7 %s" % [name, _fmt_time(time)])
-	game.start()
-
-
-# Watch the world record, whichever kind it is: a baked ghost regenerates from its
-# id, a real one replays from the steps that travelled with it.
+# Watch the world record: a real run replays from the steps that travelled with it.
 func _watch_wr(seed: int, wr: Dictionary) -> void:
 	var steps: Variant = wr.get("steps")
 	if steps != null and str(steps) != "":
 		_watch_steps(seed, str(steps), str(wr["name"]), float(wr["time"]))
-	else:
-		_watch_ghost(seed, int(wr["ghost_id"]), str(wr["name"]), float(wr["time"]))
 
 
 # Watch a run given as raw button steps.
 func _watch_steps(seed: int, steps: String, name: String, time: float) -> void:
 	watching = {
-		"kind": "steps", "seed": seed, "ghost_id": null, "name": name, "time": time,
+		"kind": "steps", "seed": seed, "name": name, "time": time,
 		"steps": steps,
-		"label": "%s's ghost" % name, "tag": "Ghost run",
+                "label": "%s's run" % name, "tag": "Replay",
 		"sub": "%s \u00b7 Track %d \u00b7 %s" % [name, seed, _fmt_time(time)],
 	}
 	_hide_overlays()
@@ -1453,10 +1457,10 @@ func _on_game_change(extra: Dictionary) -> void:
 		finish_time.text = _fmt_time(game.run_time())
 		var best2 := game.run_time() if prev2 == null else minf(float(prev2), game.run_time())
 		finish_sub.text = "best %s" % _fmt_time(best2)
-		var rank := Leaderboard.player_rank(game.seed_num, best2, _reals_for(game.seed_num))
+		var rank := Leaderboard.player_rank(best2, _reals_for(game.seed_num))
 		finish_rank.text = "#%d on Track %d" % [rank, game.seed_num] if rank > 0 else ""
 		btn_watch.visible = Storage.get_replay(game.seed_num) != null
-		btn_finish_wr.visible = Leaderboard.world_record(game.seed_num, _reals_for(game.seed_num)) != null
+		btn_finish_wr.visible = Leaderboard.world_record(_reals_for(game.seed_num)) != null
 		_show_only("finish")
 		hint_label.visible = false
 		_show_round_button(false)
@@ -1484,10 +1488,10 @@ func _submit_queued(seed: int) -> void:
 			listed = true
 			break
 	var me: Variant = null if listed else {"name": _player_name(), "time": float(best)}
-	var page := Leaderboard.board_page(seed, 1, me, Leaderboard.PER_PAGE, reals)
+	var page := Leaderboard.board_page(1, me, Leaderboard.PER_PAGE, reals)
 	var rank := int(page["player_rank"])
 	finish_rank.text = "#%d on Track %d" % [rank, seed] if rank > 0 else ""
-	btn_finish_wr.visible = Leaderboard.world_record(seed, reals) != null
+	btn_finish_wr.visible = Leaderboard.world_record(reals) != null
 
 
 func _on_tick() -> void:
@@ -1539,9 +1543,17 @@ func _on_restart_round() -> void:
 # =============================================================================
 
 func _unhandled_input(event: InputEvent) -> void:
-	# A key press while rebinding becomes the new play key, and is swallowed.
-	if key_capturing and event is InputEventKey and event.pressed and not event.echo:
+	# A key press while rebinding becomes the new binding, and is swallowed.
+	if key_capturing != "" and event is InputEventKey and event.pressed and not event.echo:
 		_bind_key(event.keycode)
+		get_viewport().set_input_as_handled()
+		return
+	# The reset key restarts the run in progress. It only fires with no overlay up and
+	# not on a replay, so a crash/finish card (which has its own button) is not
+	# yanked away. Keyboard-only: on a phone the round restart button does this.
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == reset_key:
+		if overlay == "" and game.state == "running" and not game.is_replay():
+			_start_run(game.seed_num)
 		get_viewport().set_input_as_handled()
 		return
 	var down := false

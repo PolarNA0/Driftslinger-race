@@ -1,16 +1,15 @@
-// The real runs on a track, for the game to merge into its ghost field.
+// The real runs on a track. The board is exactly these runs and nothing else.
 //
 // Public: no token needed, because the board is public data. Reading it with the
 // anon key is enough, and RLS on `runs` and `profiles` already allows that read.
 //
-// This returns the real runs rather than a rendered board. The board a player
-// sees is one board: the game holds a 50,000-entry ghost field locally and slots
-// these runs into it by time. Paginating here would fight that, because the game
-// needs every real run to place them all, and the ghost field is what supplies
-// the depth.
+// This returns the real runs rather than a rendered board, so the client ranks and
+// pages them itself. The whole track is returned in one response because a track
+// holds one run per player, so there is no unbounded field behind it to paginate
+// around.
 //
-// `steps` travels with each row so a real run can be watched. A baked ghost is
-// regenerated from its id, but a real run has no id to regenerate from.
+// `steps` travels with each row so a run can be watched: a real run has no ghost
+// id to regenerate from, so its own button sequence is what replays it.
 //
 // `steps` lives on `runs`, not on the `leaderboard` view - the view carries the
 // rank, the seconds and the name, and nothing else. So this reads both: the view
@@ -22,7 +21,7 @@ import { json, preflight, bearer } from '../_shared/http.ts';
 import { isPlayableTrack } from '../_shared/physics/tracks.js';
 
 // A track is not expected to hold more real runs than this. The cap bounds the
-// response; the ghost field behind it is unbounded and never travels.
+// response so a runaway client cannot pull an unbounded list.
 const MAX_ROWS = 1000;
 
 // The anon key is public by design; it ships in the client. Using it here means

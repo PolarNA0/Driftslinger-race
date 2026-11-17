@@ -42,8 +42,6 @@ var replay_index := 0
 var ghost_car: Car = null
 var ghost_steps: Variant = null
 var ghost_index := 0
-var ghost_name := ""
-var ghost_time := 0.0
 
 
 func _ready() -> void:
@@ -86,43 +84,6 @@ func load_replay(p_seed: int) -> bool:
 	return true
 
 
-# Race a ghost alongside the player (the world record or your own best), stepped
-# in lockstep with the player so its position is directly comparable.
-func set_ghost_replay(p_seed: int, ghost_id: int, name: String, time: float) -> bool:
-	var run = GhostRun.simulate_ghost(p_seed, ghost_id)
-	if run == null:
-		return false
-	var gt := Track.new(p_seed, Tracks.track_opts(p_seed))
-	var gc := Car.new()
-	gc.reset(gt)
-	ghost_car = gc
-	ghost_steps = Replay.decode_steps(run["replay"]["steps"])
-	ghost_index = 0
-	ghost_name = name
-	ghost_time = time
-	renderer.ghost_car = gc
-	renderer.ghost_visible = true
-	return true
-
-
-# Race a ghost whose steps came from the server: a real submitted run, which has
-# no ghost id to regenerate from, so its own button sequence travels with it.
-func set_ghost_steps(p_seed: int, steps: Array, name: String, time: float) -> bool:
-	if steps.is_empty():
-		return false
-	var gt := Track.new(p_seed, Tracks.track_opts(p_seed))
-	var gc := Car.new()
-	gc.reset(gt)
-	ghost_car = gc
-	ghost_steps = steps
-	ghost_index = 0
-	ghost_name = name
-	ghost_time = time
-	renderer.ghost_car = gc
-	renderer.ghost_visible = true
-	return true
-
-
 func set_ghost_self(p_seed: int) -> bool:
 	var rep = Storage.get_replay(p_seed)
 	if rep == null:
@@ -133,22 +94,8 @@ func set_ghost_self(p_seed: int) -> bool:
 	ghost_car = gc
 	ghost_steps = Replay.decode_steps(rep["steps"])
 	ghost_index = 0
-	ghost_name = "Your best"
-	ghost_time = float(rep["time"])
 	renderer.ghost_car = gc
 	renderer.ghost_visible = true
-	return true
-
-
-# Watch a leaderboard ghost: its replay is re-simulated from its id, so the field
-# data stays tiny.
-func load_ghost_replay(p_seed: int, ghost_id: int) -> bool:
-	var run = GhostRun.simulate_ghost(p_seed, ghost_id)
-	if run == null:
-		return false
-	replay_steps = Replay.decode_steps(run["replay"]["steps"])
-	replay_index = 0
-	load_track(p_seed, "replay")
 	return true
 
 
@@ -156,8 +103,6 @@ func clear_ghost() -> void:
 	ghost_car = null
 	ghost_steps = null
 	ghost_index = 0
-	ghost_name = ""
-	ghost_time = 0.0
 	if renderer != null:
 		renderer.ghost_car = null
 		renderer.ghost_visible = false
