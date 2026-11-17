@@ -1,5 +1,9 @@
 extends Control
 
+# Shown in the menu footer so a player can tell which build they are running
+# (and a bug report can name it). Keep in step with the release tag.
+const VERSION := "1.3"
+
 # Port of the old js/app.js (removed with the JS client): the shell around the game. Menu, mode and track pickers,
 # car skins, the leaderboard with watchable ghosts, run history, accounts, and
 # the overlays for pause / crash / finish / replay-done.
@@ -418,6 +422,9 @@ func _build_menu() -> void:
 	var foot := _label("Offline \u00b7 no ads \u00b7 your scores stay on this device", 11)
 	foot.add_theme_color_override("font_color", UiTheme.INK_MUTE)
 	col.add_child(foot)
+	var ver := _label("v%s" % VERSION, 11)
+	ver.add_theme_color_override("font_color", UiTheme.INK_MUTE)
+	col.add_child(ver)
 
 
 func _section(text: String) -> Label:
