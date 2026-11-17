@@ -112,6 +112,7 @@ func _ready() -> void:
 	_build_pause()
 
 	_to_menu()
+	_boot_account()
 
 	# A screenshot hook for headless visual checks: `--shot <path> [--shot-menu]`
 	# saves one frame and quits. Default shows a run in progress; `--shot-menu`
@@ -752,6 +753,24 @@ func _after_sign_in() -> void:
 	await _flush_queue()
 
 
+# Heal the account at boot, then pull its runs down.
+#
+# A session can come back without its username (a token refresh drops it, or the
+# install predates the id -> name map). Records are keyed by that name, so without
+# it the player would be shown the guest bucket and their best times would look
+# gone, and a run set on another device would have no replay to watch. Resolve the
+# name in the background and hydrate, exactly as the JS build does at boot. Boot
+# never waits on the network and never throws.
+func _boot_account() -> void:
+	if not Account.signed_in():
+		return
+	var name := await Account.resolve_account()
+	if name == "" and not Account.signed_in():
+		return
+	_refresh_account_bar()
+	await _sync_my_runs()
+
+
 # Pull the signed-in player's best times back from the server.
 #
 # The account is the source of truth, not the device: on a fresh install the local
@@ -765,12 +784,16 @@ func _sync_my_runs() -> void:
 		var row: Dictionary = r
 		var seed := int(row["track"])
 		var time := float(row["time"])
-		Storage.save_best_time(seed, time)
+		var prev: Variant = Storage.get_best_time(seed)
+		if prev == null or time < float(prev):
+			Storage.save_best_time(seed, time)
 		var steps: Variant = row.get("steps")
 		if steps == null or str(steps) == "":
 			continue
-		var now: Variant = Storage.get_best_time(seed)
-		if now != null and absf(float(now) - time) < 1e-9:
+		# Store the replay whenever this device has none, not only when the server
+		# time is the current best. A run set on another device has no local replay,
+		# and without one the board cannot play it back.
+		if Storage.get_replay(seed) == null:
 			Storage.save_replay(seed, Replay.make_replay(seed, Replay.decode_steps(str(steps)), time))
 	_refresh_track_list()
 

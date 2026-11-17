@@ -301,9 +301,9 @@ func _draw_car_body(cx: float, cy: float, cang: float, alpha: float, _is_ghost: 
 	draw_colored_polygon(glass_pts, glass)
 
 
-# Draw a sprite car. The art is stored nose-up, so it needs one extra quarter
-# turn to line up with the vector cars (which are built along -Y and rotated by
-# heading). A ghost is drawn translucent and tinted, matching the vector ghost.
+# Draw a sprite car. The art is stored nose-up, which is the same frame the
+# vector cars use (they are built along -Y and rotated by heading), so both take
+# the identical rotation. A ghost is drawn translucent and tinted.
 func _draw_car_sprite(cx: float, cy: float, cang: float, alpha: float, skin: Dictionary) -> void:
 	var tex: Texture2D = _sprite(str(skin["tex"]))
 	if tex == null:
@@ -312,8 +312,11 @@ func _draw_car_sprite(cx: float, cy: float, cang: float, alpha: float, skin: Dic
 	var aspect := float(tex.get_height()) / float(tex.get_width())
 	var size := Vector2(target_len / aspect, target_len)
 	var p := _to_screen(cx, cy)
-	# +PI/2 turns the nose-up art to match the vector cars' heading frame.
-	var rot := cang - cam_angle + PI / 2.0
+	# The art is already nose-up, so it shares the vector cars' frame exactly: the
+	# same `cang - cam_angle` that turns a vector car's -Y nose to the heading.
+	# Adding a quarter turn here (as an earlier version did) left every sprite car
+	# broadside to its direction of travel.
+	var rot := cang - cam_angle
 	# A ghost is washed toward its body colour so it reads as a translucent echo.
 	var tint := Color(1, 1, 1, alpha)
 	if alpha < 1.0:
