@@ -25,6 +25,11 @@ var target_time: float
 var seg_index: int = 0
 var ops: Variant = null
 
+# Endless is the only infinite road, so it is the only one that ramps. `endless`
+# is true for a plain Track.new(seed) and false for any track with opts (every
+# speedrun track), so nothing about the fixed tracks changes.
+var endless := false
+
 var finish_s: float = INF
 var finish: Variant = null
 
@@ -63,6 +68,7 @@ func _init(p_seed: int = 1, opts: Dictionary = {}) -> void:
 	# ever emits a fixed 90 degrees. Both builders share every primitive below, so
 	# a road built either way is the same kind of object.
 	ops = opts.get("ops", null)
+	endless = ops == null and not finite
 	if ops != null:
 		build_ops()
 	else:
@@ -149,6 +155,44 @@ func build_finish(heading_override: Variant = null) -> void:
 	finish = {"a": a, "b": b, "heading": h}
 
 
+# --- the endless ramp --------------------------------------------------------
+# Endless gets harder with distance. `p` runs 0 -> 1 over ENDLESS_RAMP_LEN of
+# road, so every ramp below is a pure function of how far the run has got. That
+# is what keeps it deterministic: a replay re-drives the same road with the same
+# radii, the same straights and the same speeds.
+func _ramp() -> float:
+	if not endless:
+		return 0.0
+	return clampf(length / Cfg.ENDLESS_RAMP_LEN, 0.0, 1.0)
+
+
+# Corners tighten as the ramp rises: wide open at the start, tight later.
+func current_radius() -> float:
+	if not endless:
+		return radius
+	return lerpf(radius, Cfg.ENDLESS_RADIUS_MIN, _ramp())
+
+
+# The straight between corners shortens too, so the corners crowd together.
+func current_seg_len() -> float:
+	if not endless:
+		return Cfg.SEG_LEN
+	return lerpf(Cfg.SEG_LEN, Cfg.ENDLESS_SEG_MIN, _ramp())
+
+
+# How much the car's speed is scaled at road position `s`. Only endless ramps.
+func speed_scale_at(s: float) -> float:
+	if not endless:
+		return 1.0
+	return lerpf(1.0, Cfg.ENDLESS_SPEED_MAX, clampf(s / Cfg.ENDLESS_RAMP_LEN, 0.0, 1.0))
+
+
+# Reattach pillars only appear once the road has warmed up, and then every Nth
+# corner, so the opening is ordinary play and they read as a change of pace.
+func _is_reattach_corner(i: int) -> bool:
+	return endless and length >= Cfg.ENDLESS_REATTACH_AFTER and i % Cfg.ENDLESS_REATTACH_EVERY == 0
+
+
 func step_heading() -> void:
 	heading += float(turn_sign) * Cfg.TURN
 	turn_sign = -turn_sign
@@ -157,7 +201,7 @@ func step_heading() -> void:
 func add_vertex() -> void:
 	var last_v: Vector2 = v[v.size() - 1]
 	step_heading()
-	var len := lead_in if v.size() == 1 else Cfg.SEG_LEN
+	var len := lead_in if v.size() == 1 else current_seg_len()
 	if seg_lens.size() > 0 and v.size() > 1:
 		len = float(seg_lens[seg_index % seg_lens.size()])
 		seg_index += 1
@@ -169,7 +213,7 @@ func add_vertex() -> void:
 
 
 func finalize_corner(k: int) -> void:
-	var r := radius
+	var r := current_radius()
 	var d_in: float = dir[k - 1]
 	var d_out: float = dir[k]
 	var phi := U.ang_diff(d_in, d_out)
@@ -192,7 +236,7 @@ func finalize_corner(k: int) -> void:
 	var fil := {
 		"k": k, "c": c, "r": r, "sign": sgn, "a1": a1, "a2": a2, "phi": phi,
 		"t1": t1, "t2": t2, "s0": length, "s1": length + r * abs(phi),
-		"reattach": false,
+		"reattach": _is_reattach_corner(fillets.size()),
 	}
 	fillets.append(fil)
 	push_arc(fil)

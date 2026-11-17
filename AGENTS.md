@@ -66,7 +66,7 @@ build is the only client.
   and leaderboard client (see "The online layer").
 - `godot/scenes/main.tscn`, `godot/project.godot` — scene and project settings.
 - `godot/tools/` — headless verifiers (`parity.gd`, `verify_tracks.gd`,
-  `verify_reattach.gd`, `verify_board.gd`, `verify_online.gd`,
+  `verify_reattach.gd`, `verify_endless.gd`, `verify_board.gd`, `verify_online.gd`,
   `verify_guard.gd`, `verify_ui.gd`, `verify_cars.gd`, `verify_keys.gd`).
   See `godot/README.md`.
 
@@ -101,6 +101,7 @@ godot --headless --path godot --import                    # first-time import
 godot --headless --path godot --script res://tools/parity.gd          # physics vs golden JS numbers
 godot --headless --path godot --script res://tools/verify_tracks.gd   # all tracks finish
 godot --headless --path godot --script res://tools/verify_reattach.gd # reattach pillar
+godot --headless --path godot --script res://tools/verify_endless.gd  # endless ramp + reattach
 godot --headless --path godot --script res://tools/verify_board.gd    # board paging
 godot --headless --path godot --script res://tools/verify_online.gd   # online layer (offline paths)
 godot --headless --path godot --script res://tools/verify_guard.gd    # holding/mashing must lose
@@ -280,37 +281,84 @@ length and a small release error accumulates into a wall hit by the far end.
   a straight then turns that sliver into a crash. Snapping only inside a single
   frame keeps the mechanic honest: release much later and you really do swing
   wide into the wall. This is what makes a clean line actually finishable.
-- **A reattach pillar stays live only until the car is done with its corner.** A
+- **A reattach pillar stays live until the car is done with its corner.** A
   normal pillar is spent the instant you let go. A pillar whose fillet carries
-  `reattach: true` is spent only when you ride the arc to its end (`done()`); bail
-  out partway and it stays live, so the pole can be caught again - the re-grab
-  unwraps the orbit onto the angle you left from (`released_angle`), not the arc
-  start, so your progress round the corner is kept instead of reset. What the flag
-  does *not* do is let you fly off and come back: every pillar on tracks 26-28 is
-  reachable only from its own fillet, the spacing rules put the next pole out of
-  `grabRange` the moment the car leaves the previous one, and a car flying its
-  tangent only ever gets *further* from the pole it left. A re-grab is therefore
-  the same corner caught again while the car is still in range, not a completed lap
-  of the road. The "catchable" state is monotonic - a pillar goes live once and
-  spent once - and the renderer reads it as `spent_corners.has(k) or k <
-  car.corner`, never a single "last spent" slot, which used to flip an earlier
-  pillar back to amber the moment a later one was spent. Riding every arc out - the
-  clean line - spends the pillars exactly as before, which is why ordinary play is
-  unchanged. Tracks 26-28 (`Tracks.REATTACH_TRACKS`) showcase it; the renderer
-  paints a live reattach pillar amber and a spent one bronze. `verify_reattach.gd`
-  asserts the monotonic colouring.
-- **A reattach carried to the arc's end pays off, once per pillar.** The payoff
-  lands on the *release* that ends a reattach, and only when that release is
-  inside the last `CFG.REATTACH_END_FRAC` of the arc - bail out early and fly on
-  and nothing happens, which keeps the "only near the end of a sling" rule. The
-  first reattach on a pillar sets `CFG.REATTACH_BOOST` (a brief speed-up) for
-  `CFG.REATTACH_EFFECT_TIME`; a second reattach on the *same* pillar sets
-  `CFG.REATTACH_SLOW` instead, so spamming it costs. The multiplier rides in
-  `Car.speed_scale`, which `drift` and `fly` fold into one step's travel, so the
-  speed change is real but short-lived. It exists only in the Godot physics
-  (`car.gd`); the verified JS `physics/` has no reattach at all, so 26-28 stay
-  local-only and the parity goldens are untouched. `verify_reattach.gd` proves
-  boost / slow / no-boost-on-a-plain-bail / clean-line-untouched.
+  `reattach: true` is spent only when you ride the arc to its end (`done()`), or
+  when a re-catch pays the slingshot; bail out partway and it stays live, so the
+  pole can be caught again - the re-grab unwraps the orbit onto the angle you left
+  from (`released_angle`), not the arc start, so your progress round the corner is
+  kept instead of reset. A re-catch reaches further than a fresh grab
+  (`CFG.REATTACH_GRAB_MULT`), which is what gives the car room to fly a detour and
+  still come back - see the slingshot bullet below. The "catchable" state is
+  monotonic - a pillar goes live once and spent once - and the renderer reads it as
+  `spent_corners.has(k) or k < car.corner`, never a single "last spent" slot,
+  which used to flip an earlier pillar back to amber the moment a later one was
+  spent. Riding every arc out - the clean line - spends the pillars exactly as
+  before, which is why ordinary play is unchanged. Tracks 26-28
+  (`Tracks.REATTACH_TRACKS`) showcase it - and endless grows its own past
+  `CFG.ENDLESS_REATTACH_AFTER`. The renderer paints a live reattach pillar amber
+  and a spent one bronze. `verify_reattach.gd` asserts the monotonic colouring.
+- **A reattach pays a slingshot, scaled by the detour.** Bail out of a live
+  reattach pillar, fly off, catch the same pole again and carry the arc out, and
+  the re-catch lands a burst of speed. The size is set by how far the car actually
+  flew between the bail and the re-catch (`Car.detour_px`), from nothing at
+  `CFG.REATTACH_MIN_DETOUR` to the full `CFG.REATTACH_BOOST_MAX` at
+  `CFG.REATTACH_REF_DETOUR`. A quick release-and-recatch - the spam line - flies
+  almost nowhere and earns nothing; a long, committed detour earns the most; a
+  detour past the pillar's reach means the re-catch never happens and the run is
+  lost. That is the whole mechanic: a real risk/reward curve, not a flat per-pillar
+  bonus.
+  - **A reattach pillar reaches further than a normal one.** `try_grab` widens the
+    range for a re-catch of a live reattach pillar by `CFG.REATTACH_GRAB_MULT`.
+    Without it a pole radius (~86px) leaves only a sliver of flight before the car
+    is past `grabRange` (95px), so there would be no room to detour at all - the
+    old numbers produced a flat ~0.017s for every bail point.
+  - **At most one payoff per pillar.** A paying re-catch spends the pillar
+    (`spent_corners[corner] = true`), so grinding one pole cannot stack the boost.
+    A paying release also stops counting as a reattach, so the plain clean-line
+    release that ends every arc stays exactly as it was.
+  - The multiplier rides in `Car.speed_scale`, folded into one step's travel by
+    `drift` and `fly` (and into the release snap), so the speed change is real but
+    short-lived (`CFG.REATTACH_EFFECT_TIME`). It lives only in the Godot physics
+    (`car.gd`); the verified JS `physics/` has no reattach, so 26-28 stay
+    local-only and the parity goldens are untouched. `verify_reattach.gd` proves
+    spam earns nothing, a longer detour earns more, over-committing loses the run,
+    and the clean line is untouched.
+
+## Endless mode ramps
+
+Endless is one road that gets harder the further you get. Three things rise with
+distance, all driven by road position so they stay a pure function of how far the
+run has got - which is what keeps a replay reproducible:
+
+- **The car speeds up.** `CFG.ENDLESS_SPEED_MAX` (1.35x) at the top, folded in by
+  `Car._speed()` alongside the reattach slingshot.
+- **The corners tighten.** `CFG.ENDLESS_RADIUS_MIN` (46px) at the top, via
+  `Track.current_radius()`.
+- **The straights shorten.** `CFG.ENDLESS_SEG_MIN` (178px) at the top, via
+  `Track.current_seg_len()`, so the corners crowd together.
+
+Everything ramps over `CFG.ENDLESS_RAMP_LEN` (9000px) of road. The ramp is
+gentle enough that a clean line still survives a long run - `verify_endless.gd`
+drives 200 corners on several seeds and `verify_guard.gd` re-proves that holding
+and mashing still lose on the ramped road.
+
+**Reattach pillars appear on their own.** Past `CFG.ENDLESS_REATTACH_AFTER`
+(2400px), every `CFG.ENDLESS_REATTACH_EVERY`th corner (every 3rd) is a reattach
+pillar, so the opening stretch is ordinary play and the pillars read as a change
+of pace later. They use exactly the same slingshot as tracks 26-28.
+
+**Only endless ramps.** `Track.endless` is true for a plain `Track.new(seed)` and
+false for any track built from `opts` (every speedrun track), so the fixed tracks
+are bit-identical to before - the parity goldens are untouched.
+
+**The road is a pure function of distance, not of the line driven.** The
+staircase is grown incrementally as the car advances (`extend_ahead`), but each
+corner's radius and straight length depend only on the road position at the time
+it is added, never on the car's inputs. Two different lines over the same seed
+therefore build the same corners, which is what a replay and a ghost need.
+`verify_endless.gd` proves this by building the same seed along two different
+lines and comparing every fillet.
 
 ## Gotchas
 
@@ -709,15 +757,17 @@ endless board needs its own key, its own ranking and its own submit path. This i
 the work, in the order it should be done; it is **not implemented** - the owner
 will add it. Nothing here changes the rule that a client never sends a score.
 
-**Endless distance is just the step count.** The car moves at `CFG.speed`
-always, so distance is `speed * time` and `time` is `ticks / 120`. A replay that
-survives `N` steps travelled `N/120 * 290` px, i.e. `N/120 * 290 / 50` metres
-(`CFG.pxPerMetre`). The button pattern does not change this - holding wide,
-reeling in and cutting a corner all move the car the same distance per step - so
-the server can rank an endless run from the very steps it already verifies, with
-no new physics. `_shared/physics/verify.js` already returns `ticks`; an endless
-replay only needs to run until the car dies rather than stopping at a finish
-line (`car.finished` is never set when `finishS` is `Infinity`).
+**The endless score is distance travelled, and it now depends on the line.**
+This used to be "distance = ticks x speed", a pure function of the step count,
+because the car moved at exactly `CFG.SPEED` always. The endless ramp and the
+reattach slingshot both broke that: the car is faster the further it gets and a
+slingshot is faster still, so `Car.distance()` (the endless score) counts what was
+actually travelled, not `time x base speed`. Anything that wants to verify an
+endless run server-side must therefore **port the ramp and the slingshot** into
+`physics/`, not just replay button steps at a fixed speed - `_shared/physics/
+verify.js` replaying at `CFG.SPEED` would under-report every run. The ramp is
+deterministic (a pure function of road position), so this is a porting job, not a
+redesign, and the "Endless mode ramps" section above describes it.
 
 **Endless must run on one shared seed before it can have a shared board.** Today
 endless builds `Track.new(menu_seed)` with no `opts` (`game.gd:load_track`), and

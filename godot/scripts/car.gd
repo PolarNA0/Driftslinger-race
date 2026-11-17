@@ -17,6 +17,8 @@ var released_corner: int
 var released_angle: float
 var grabbed_corners: Dictionary
 var reattach_attempt: bool
+var detour_px: float
+var travelled: float
 var speed_scale: float
 var effect_timer: float
 var alive: bool
@@ -51,6 +53,8 @@ func reset(p_track: Track) -> void:
 	released_angle = 0.0
 	grabbed_corners = {}
 	reattach_attempt = false
+	detour_px = 0.0
+	travelled = 0.0
 	speed_scale = 1.0
 	effect_timer = 0.0
 	alive = true
@@ -124,6 +128,10 @@ func step(dt: float, held: bool) -> void:
 		s = p["s"]
 	if off > max_off:
 		max_off = off
+	# While a reattach is armed and we are off the pole, accumulate how far we have
+	# flown. That detour is what the slingshot is scaled by.
+	if reattach_attempt and not attached:
+		detour_px += _speed() * dt
 	# Crossing the finish line ends the run cleanly, even mid-swing. Checked
 	# before the wall so a win on the line is not a crash.
 	if s >= track.finish_s:
@@ -148,7 +156,14 @@ func try_grab() -> bool:
 		return false
 	var c: Vector2 = f["c"]
 	var d := U.dist(c.x, c.y, x, y)
-	if d > Cfg.GRAB_RANGE:
+	# Catching the same pole again after a bail reaches further than a fresh grab:
+	# a committed detour takes the car away from the pole, and without the extra
+	# reach there would be no room to fly and still come back.
+	var is_regrab := corner == released_corner and grabbed_corners.has(corner)
+	var reach := Cfg.GRAB_RANGE
+	if is_regrab and f.get("reattach", false):
+		reach = Cfg.GRAB_RANGE * Cfg.REATTACH_GRAB_MULT
+	if d > reach:
 		return false
 	attached = true
 	sgn = f["sign"]
@@ -167,12 +182,22 @@ func try_grab() -> bool:
 	# there would drop the car back to the start and throw away its progress.
 	var ref := released_angle if corner == released_corner else float(f["a1"])
 	orbit_angle = raw + TAU * round((ref - raw) / TAU)
-	var is_regrab := corner == released_corner and grabbed_corners.has(corner)
 	if is_regrab:
 		regrabs += 1
-		# A reattach in progress: this pillar was bailed out of and is now caught
-		# again, so a later release may pay off.
-		reattach_attempt = true
+		# Catching a pole we bailed out of: the detour since the bail is the
+		# slingshot. A quick release-and-recatch flew almost nowhere, so it earns
+		# nothing; a long, committed detour earns the most. A pillar pays at most
+		# once - a paying catch spends it - so grinding one pole cannot stack.
+		if reattach_attempt and f.get("reattach", false):
+			var t := clampf(
+				(detour_px - Cfg.REATTACH_MIN_DETOUR)
+					/ (Cfg.REATTACH_REF_DETOUR - Cfg.REATTACH_MIN_DETOUR),
+				0.0, 1.0)
+			if t > 0.0:
+				speed_scale = lerpf(1.0, Cfg.REATTACH_BOOST_MAX, t)
+				effect_timer = Cfg.REATTACH_EFFECT_TIME
+				spent_corners[corner] = true
+		reattach_attempt = false
 	# Count the grabs per pillar: one reattach pays, a second on the same pillar does
 	# not, and each pillar is counted on its own.
 	grabbed_corners[corner] = int(grabbed_corners.get(corner, 0)) + 1
@@ -188,6 +213,14 @@ func place() -> void:
 	angle = orbit_angle + sgn * PI / 2.0
 
 
+# The car's speed right now: the base speed, the reattach slingshot if one is
+# running, and the endless ramp (which only bites on an endless road). Kept in
+# one place so drift, fly and the release snap can never disagree.
+func _speed() -> float:
+	var ramp := track.speed_scale_at(s) if track != null else 1.0
+	return Cfg.SPEED * speed_scale * ramp
+
+
 func drift(dt: float) -> void:
 	var f := _fillet()
 	var fr: float = f["r"]
@@ -201,17 +234,20 @@ func drift(dt: float) -> void:
 	# One step's travel split between the tangential and radial directions, so the
 	# total speed stays at SPEED while the radius reels in. Adding the two motions
 	# instead would inject free tangential speed and make a wide grab fastest.
-	var total := Cfg.SPEED * speed_scale * dt
+	var total := _speed() * dt
 	var tangential := sqrt(maxf(0.0, total * total - dr * dr))
 	orbit_angle += sgn * tangential / radius
 	radius += dr
+	travelled += total
 	place()
 
 
 func fly(dt: float) -> void:
 	centre(dt)
-	x += cos(angle) * Cfg.SPEED * speed_scale * dt
-	y += sin(angle) * Cfg.SPEED * speed_scale * dt
+	var d := _speed() * dt
+	x += cos(angle) * d
+	y += sin(angle) * d
+	travelled += d
 
 
 # Steer gently back toward the centreline while flying (pure pursuit).
@@ -228,7 +264,7 @@ func centre(dt: float) -> void:
 # the exit point, so a perfectly timed release does not leave on a sliver of angle.
 func release(dt: float) -> void:
 	var f := _fillet()
-	var st := Cfg.SPEED / radius * dt
+	var st := _speed() / radius * dt
 	var carried := done()
 	if carried and sgn * (orbit_angle - float(f["a2"])) <= st:
 		orbit_angle = f["a2"]
@@ -241,17 +277,12 @@ func release(dt: float) -> void:
 	# spent only by riding the arc to its end: bail out early and it stays open,
 	# so the same pole can be caught again. An ordinary clean line rides every
 	# arc out, so its behaviour is unchanged.
-	# A reattach that is carried to the end of the arc pays off: the first one on a
-	# pillar is a brief boost, and a second one on the same pillar is a slow-down
-	# instead, so spamming it costs. It only counts as a reattach if this release is
-	# near the end of the arc - bailing out early and flying on is just a bail, and
-	# leaves the pillar open for the catch that does pay.
-	var arc := absf(float(f["a2"]) - float(f["a1"]))
-	if reattach_attempt and f.get("reattach", false) and remaining() <= Cfg.REATTACH_END_FRAC * arc:
-		reattach_attempt = false
-		var good := int(grabbed_corners.get(corner, 1)) <= 2
-		speed_scale = Cfg.REATTACH_BOOST if good else Cfg.REATTACH_SLOW
-		effect_timer = Cfg.REATTACH_EFFECT_TIME
+	# Bailing out of a live reattach pillar arms the slingshot: the detour from here
+	# to the re-catch is what a later catch pays out on. Riding the arc out does not
+	# arm it, and spends the pillar as before.
+	if not carried and f.get("reattach", false):
+		reattach_attempt = true
+		detour_px = 0.0
 	if carried or not f.get("reattach", false):
 		spent_corners[corner] = true
 
@@ -273,5 +304,8 @@ func done() -> bool:
 	return sgn * (orbit_angle - float(f["a2"])) >= 0.0
 
 
+# Distance covered, in pixels. This is what was actually travelled, not time x
+# base speed: on an endless road the speed ramps and a reattach slingshot is
+# faster than the base, so the two would diverge. The endless score is this.
 func distance() -> float:
-	return time * Cfg.SPEED
+	return travelled

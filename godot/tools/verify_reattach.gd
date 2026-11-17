@@ -85,16 +85,17 @@ func _plain_spent() -> bool:
 
 
 # A scripted reattach on the first reattach pillar, then a clean ride of the
-# rest. `bails` is how many times to bail out and catch the pole again before the
-# final ride to the arc's end; `final_frac` releases the last pass early (before
-# the end window) instead of carrying it, which is a plain bail.
-func _scripted(track: Track, bails: int, final_frac: float = 1.0) -> Dictionary:
+# rest. On that pillar: bail at `bail` of the arc, fly for `wait` steps, then
+# hold again and carry the arc out. `wait` is the detour - the longer it is, the
+# further the car flies before it re-catches, which is what the slingshot pays on.
+func _slingshot(track: Track, wait: int, bail: float = 0.4) -> Dictionary:
 	var car := Car.new()
 	car.reset(track)
 	var corner := -1
-	var bailed := 0
+	var bailed := false
+	var waited := 0
 	var max_s := 1.0
-	var min_s := 1.0
+	var max_det := 0.0
 	var i := 0
 	while car.alive and not car.finished and i < 200000:
 		i += 1
@@ -103,27 +104,29 @@ func _scripted(track: Track, bails: int, final_frac: float = 1.0) -> Dictionary:
 			var f: Dictionary = track.fillets[car.corner]
 			if corner < 0 and f.get("reattach", false):
 				corner = car.corner
-			if car.corner == corner and corner >= 0:
+			if car.corner == corner and corner >= 0 and not bailed:
 				var arc := absf(float(f["a2"]) - float(f["a1"]))
 				var frac := 1.0 - car.remaining() / arc
-				if bailed < bails and frac >= 0.4 + 0.25 * bailed:
+				if frac >= bail:
 					held = false
-					bailed += 1
+					bailed = true
 				else:
-					# The payoff release: ride to the end, or release early on purpose.
-					held = car.remaining() > 0.0 and frac < final_frac
+					held = car.remaining() > 0.0
 			else:
 				held = car.remaining() > 0.0
 		else:
-			var f2: Dictionary = track.fillets[car.corner]
-			var c: Vector2 = f2["c"]
-			held = U.dist(c.x, c.y, car.x, car.y) <= Cfg.GRAB_RANGE
+			if bailed and car.corner == corner and waited < wait:
+				waited += 1
+				held = false
+			else:
+				var f2: Dictionary = track.fillets[car.corner]
+				held = U.dist(f2["c"].x, f2["c"].y, car.x, car.y) <= Cfg.GRAB_RANGE * Cfg.REATTACH_GRAB_MULT
 		car.step(DT, held)
 		max_s = maxf(max_s, car.speed_scale)
-		min_s = minf(min_s, car.speed_scale)
+		max_det = maxf(max_det, car.detour_px)
 	return {
 		"finished": car.finished, "time": car.time, "regrabs": car.regrabs,
-		"max_s": max_s, "min_s": min_s,
+		"max_s": max_s, "max_det": max_det, "dead": car.dead,
 	}
 
 
@@ -227,28 +230,33 @@ func _init() -> void:
 
 	print("total re-grabs observed across showcase tracks: %d" % total_regrabs)
 
-	# 4) the reattach pays off: one reattach boosts, a second slows down, a bail
-	#    that is not caught again never boosts, and the clean line is untouched.
-	print("== reattach speed effect ==")
+	# 4) the slingshot pays off, and pays more for a longer detour, while a quick
+	#    release-and-recatch (spam) earns nothing and the clean line is untouched.
+	print("== reattach slingshot ==")
 	for n in [Tracks.FIRST_REATTACH_TRACK, Tracks.FIRST_REATTACH_TRACK + 1, Tracks.FIRST_REATTACH_TRACK + 2]:
 		var t := Track.new(n, Tracks.track_opts(n))
 		var clean := _clean(t)
-		var once := _scripted(t, 1)
-		var twice := _scripted(t, 2)
-		# A reattach whose final release is early (before the end window) is just a
-		# bail: it must never boost, however it ends.
-		var bail_only := _scripted(t, 1, 0.5)
-		var boosted: bool = once["finished"] and once["regrabs"] == 1 and once["max_s"] > 1.0
-		var slowed: bool = twice["finished"] and twice["regrabs"] == 2 and twice["min_s"] < 1.0
-		var bail_plain: bool = bail_only["max_s"] == 1.0
+		var spam := _slingshot(t, 0)
+		var short := _slingshot(t, 8)
+		var long := _slingshot(t, 24)
+		var spam_plain: bool = spam["finished"] and spam["max_s"] == 1.0
+		var short_boost: bool = short["finished"] and short["max_s"] > 1.0
+		var long_boost: bool = long["finished"] and long["max_s"] > short["max_s"]
+		var long_faster: bool = float(long["time"]) < float(clean["time"]) - 0.05
 		var clean_plain: bool = clean["finished"] and clean["max_s"] == 1.0 and clean["min_s"] == 1.0
-		var ok: bool = boosted and slowed and bail_plain and clean_plain
-		print("track %2d: boost=%s(regrabs=%d maxS=%.3f) slow=%s(regrabs=%d minS=%.3f) bail=%s(maxS=%.3f) clean=%s(maxS=%.3f) %s"
-			% [n, str(boosted), int(once["regrabs"]), float(once["max_s"]),
-			   str(slowed), int(twice["regrabs"]), float(twice["min_s"]),
-			   str(bail_plain), float(bail_only["max_s"]), str(clean_plain), float(clean["max_s"]),
+		var ok: bool = spam_plain and short_boost and long_boost and long_faster and clean_plain
+		print("track %2d: spam maxS=%.3f(%s) short maxS=%.3f long maxS=%.3f(longer=%s) cleanT=%.3f longT=%.3f(%s) %s"
+			% [n, float(spam["max_s"]), str(spam_plain), float(short["max_s"]), float(long["max_s"]),
+			   str(long_boost), float(clean["time"]), float(long["time"]), str(long_faster),
 			   "OK" if ok else "FAIL"])
 		pass_all = pass_all and ok
+
+	# A detour past the pillar's reach must be punished: over-committing loses the
+	# pole and the run. This is the risk half of the risk/reward curve.
+	var over := _slingshot(Track.new(Tracks.FIRST_REATTACH_TRACK, Tracks.track_opts(Tracks.FIRST_REATTACH_TRACK)), 60)
+	var over_ok: bool = not over["finished"]
+	print("over-committing a reattach loses the run: finished=%s %s" % [str(over["finished"]), "OK" if over_ok else "FAIL"])
+	pass_all = pass_all and over_ok
 
 	# 5) a spent reattach pillar never reads as live again
 	var mono_ok := _catchable_monotonic()

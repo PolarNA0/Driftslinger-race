@@ -135,6 +135,7 @@ after release, that a reattach pillar can be caught again after an early bail-ou
 
 ```sh
 godot --headless --path . --script res://tools/verify_reattach.gd
+godot --headless --path . --script res://tools/verify_endless.gd
 ```
 
 `tools/verify_board.gd` checks the leaderboard: ranking, ties, paging, and that

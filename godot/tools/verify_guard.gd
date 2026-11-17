@@ -109,5 +109,42 @@ func _init() -> void:
                         bad += 1
                         print("  FAIL: releasing %ddeg early only managed %d corners" % [deg, _median(got)])
 
+        # The endless ramp must not open a cheese: a ramped, faster, tighter road is
+        # still beaten only by a timed line, never by holding or mashing.
+        print("the endless ramp does not break the guard")
+        var endless_policies := {
+                "hold": func(_car, _i): return true,
+                "mash": func(_car, i): return i % 2 == 0,
+                "mash 5on1off": func(_car, i): return i % 6 < 5,
+        }
+        for seed in [1, 7]:
+                var t := Track.new(seed)
+                for name in endless_policies:
+                        var car := Car.new()
+                        car.reset(t)
+                        var i := 0
+                        while car.alive and car.grabbed < 40 and i < 600000:
+                                i += 1
+                                car.step(DT, endless_policies[name].call(car, i))
+                        if car.grabbed > 3:
+                                bad += 1
+                                print("  FAIL: endless seed %d %s got %d corners" % [seed, name, car.grabbed])
+                # And the clean line still survives the ramp on the same road.
+                var good := Car.new()
+                good.reset(t)
+                var j := 0
+                while good.alive and good.grabbed < RUN and j < 2000000:
+                        j += 1
+                        var held := false
+                        if good.attached:
+                                held = good.remaining() > 0.0
+                        else:
+                                var f: Dictionary = t.fillets[good.corner]
+                                held = U.dist(f["c"].x, f["c"].y, good.x, good.y) <= Cfg.GRAB_RANGE
+                        good.step(DT, held)
+                if not (good.alive and good.grabbed >= RUN):
+                        bad += 1
+                        print("  FAIL: endless seed %d clean line managed only %d corners" % [seed, good.grabbed])
+
         print("GUARD %s" % ("PASS" if bad == 0 else "FAIL (%d)" % bad))
         quit(1 if bad > 0 else 0)
