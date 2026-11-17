@@ -32,6 +32,8 @@ Additions on top of the port:
   (see `assets/cars/CREDITS.md`); `tools/verify_cars.gd` fails if two share one.
 - **A restart key.** `R` restarts the run in progress. It can be rebound in
   Settings, where the play key is rebound too.
+- **A pause key.** `Esc` pauses and resumes the run in progress. It is rebound in
+  Settings alongside the play and restart keys.
 - **A menu that fits a phone.** The track list moved behind its own **Tracks**
   button and every overlay card scrolls, so the account controls are reachable on
   the 420x820 viewport instead of running off the bottom of the screen.
@@ -57,6 +59,12 @@ The online layer itself *is* ported (see "The online layer" in `../AGENTS.md`):
 runs upload, and the shared board is exactly those real runs - every row is a
 player's own verified run, watchable from its stored steps. There is no generated
 field behind it.
+
+**Endless leaderboards should be added soon.** Endless mode is scored by distance
+and has no online board yet; the speedrun board is time-based and ranks the other
+way. Adding one needs a `mode` column, an `endless_leaderboard` view and a
+matching `run`/`board` change, so it is server work for the owner. The full plan
+is in `../AGENTS.md` ("Endless leaderboards should be added soon").
 
 ## Export
 
@@ -174,9 +182,11 @@ godot --headless --path . --script res://tools/verify_cars.gd
 ```
 
 `tools/verify_keys.gd` checks the rebindable keys: the defaults (Space to play,
-R to restart), that R restarts a run and leaves a replay alone, and that a
-rebinding takes effect, refuses to collide with the play key, and can be
-cancelled with Escape.
+R to restart, Esc to pause), that R restarts a run and leaves a replay alone,
+that Esc toggles pause on a live run only, and that a rebinding takes effect,
+refuses to collide with another key, and can be cancelled with Escape. It also
+checks the Settings "Controls" block always builds its rebind rows, so a device
+that reports a touchscreen (an iPad with a keyboard) still gets them.
 
 ```sh
 godot --headless --path . --script res://tools/verify_keys.gd

@@ -93,6 +93,13 @@ func _check_size(vp: Vector2i) -> void:
 		_fail("settings overlay did not open")
 	else:
 		_check_page("settings", settings, vp)
+		# The rebind rows must be present even where a touchscreen is reported
+		# (an iPad with a keyboard attached) - that is exactly what hid them.
+		for name in ["play", "reset", "pause"]:
+			if not app.key_buttons.has(name):
+				_fail("settings: no %s key row" % name)
+			elif not _in_view(app.key_buttons[name], vp):
+				_fail("settings: %s key row out of view" % name)
 	app._to_menu()
 	await process_frame
 	if settings.visible:

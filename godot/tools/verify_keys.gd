@@ -39,6 +39,7 @@ func _initialize() -> void:
 
 	_check("default play key is Space", app.input_key == KEY_SPACE)
 	_check("default reset key is R", app.reset_key == KEY_R)
+	_check("default pause key is Esc", app.pause_key == KEY_ESCAPE)
 
 	# Start a run, advance it, then press R: the run must be back at the start.
 	app._start_run(1)
@@ -61,6 +62,19 @@ func _initialize() -> void:
 	_check("R does not touch a replay", app.game.car.time == before)
 	app.game.mode = "speedrun"
 
+	# Esc toggles pause: pauses a running run, resumes a paused one.
+	app._start_run(1)
+	await process_frame
+	app._unhandled_input(_key(KEY_ESCAPE, true))
+	_check("Esc pauses the run", app.game.state == "paused" and app.overlay == "pause")
+	app._unhandled_input(_key(KEY_ESCAPE, true))
+	_check("Esc resumes the run", app.game.state == "running" and app.overlay == "")
+	# It must not touch a run that is already over.
+	app.game.state = "dead"
+	app._unhandled_input(_key(KEY_ESCAPE, true))
+	_check("Esc inert when the run is over", app.game.state == "dead")
+	app.game.state = "running"
+
 	# Rebinding: capture a new reset key, then check it works and R does not.
 	app._begin_capture("reset")
 	app._bind_key(KEY_Q)
@@ -74,18 +88,48 @@ func _initialize() -> void:
 	app._unhandled_input(_key(KEY_Q, true))
 	_check("new key resets", app.game.car.time == 0.0)
 
+	# Rebinding the pause key works the same way.
+	app._begin_capture("pause")
+	app._bind_key(KEY_P)
+	_check("pause key rebound to P", app.pause_key == KEY_P)
+	app._start_run(1)
+	await process_frame
+	app._unhandled_input(_key(KEY_ESCAPE, true))
+	_check("old pause key no longer pauses", app.game.state == "running")
+	app._unhandled_input(_key(KEY_P, true))
+	_check("new pause key pauses", app.game.state == "paused")
+	app._unhandled_input(_key(KEY_P, true))
+
 	# The two bindings must not collide.
 	app._begin_capture("reset")
 	app._bind_key(KEY_SPACE)
 	_check("collision with play key refused", app.reset_key == KEY_Q)
-	app._begin_capture("reset")
+	app._begin_capture("pause")
+	app._bind_key(KEY_Q)
+	_check("collision with reset key refused", app.pause_key == KEY_P)
+	app._begin_capture("pause")
 	app._bind_key(KEY_ESCAPE)
-	_check("escape cancels the capture", app.reset_key == KEY_Q)
+	_check("escape cancels the capture", app.pause_key == KEY_P)
 
 	# Put the defaults back so a headless run does not change the local prefs.
 	app._begin_capture("reset")
 	app._bind_key(KEY_R)
 	_check("restored reset key is R", app.reset_key == KEY_R)
+	# Esc cancels a capture, so the default is restored through the setter.
+	app._set_binding("pause", KEY_ESCAPE)
+	_check("restored pause key is Esc", app.pause_key == KEY_ESCAPE)
+
+	# The Settings "Controls" block must always offer the rebind rows. Gating them
+	# on a touchscreen hid them on an iPad with a keyboard attached, which left the
+	# page saying nothing but "Controls". Checked last, because it replaces the
+	# button map the checks above drive.
+	app.key_buttons.clear()
+	var box := VBoxContainer.new()
+	app._settings_controls(box)
+	_check("settings offers a Play key row", app.key_buttons.has("play"))
+	_check("settings offers a Reset key row", app.key_buttons.has("reset"))
+	_check("settings offers a Pause key row", app.key_buttons.has("pause"))
+	box.free()
 
 	sub.queue_free()
 	await process_frame

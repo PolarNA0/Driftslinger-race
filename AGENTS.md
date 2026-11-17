@@ -375,12 +375,21 @@ tab pages and populates them; the shell owns no game state.
 - **Endless hides the track chooser.** Endless is one open road, so the whole
   track section (`track_section`) is hidden in that mode rather than shown and
   ignored; `verify_ui.gd` asserts it is gone and unreachable. Speedrun shows it.
-- **Two rebindable keys.** Space plays and `R` restarts the run in progress; both
-  are rebound in Settings, which captures the next key press (`_begin_capture` /
-  `_bind_key`) and refuses a binding that would collide with the other key.
-  `R` only touches a live run - never a replay - and is keyboard-only, because on
-  a phone the round restart button is how a run is restarted. `verify_keys.gd`
-  covers all of that.
+- **Three rebindable keys.** Space plays, `R` restarts the run in progress and
+  `Esc` pauses and resumes it; all three are rebound in Settings, which captures
+  the next key press (`_begin_capture` / `_bind_key`) and refuses a binding that
+  would collide with another key. `R` and `Esc` only touch a live run - never a
+  replay - and are keyboard-only, because on a phone the round restart button and
+  the pause button are how a run is restarted and paused. `verify_keys.gd` covers
+  all of that.
+- **The Settings key rows are built on every device, touchscreen or not.** They
+  used to be gated behind `DisplayServer.is_touchscreen_available()` (a tap hint
+  on a touchscreen, the rebind rows otherwise). An iPad with a keyboard attached
+  reports a touchscreen, so Settings showed the "Controls" heading with nothing
+  under it and the keys could not be rebound. The rows are always built
+  (`_settings_controls`); the tap hint is added *alongside* them. `verify_keys.gd`
+  drives `_settings_controls` directly and asserts the rows exist, which the
+  headless UI check cannot do because it has no touchscreen to trip the old gate.
 - **`select(name)` is the one entry point.** It toggles the tab buttons, emits
   `tab_changed`, and `App._on_tab_changed` shows the matching page and refreshes
   it. Setting a tab's content state must happen *after* `select()`, because
@@ -690,3 +699,65 @@ while the Godot build has 28 tracks, and the reattach physics exists only in
 `godot/scripts/car.gd`. A reattach run is therefore rejected with a 422 and dropped
 from the queue. Teaching the server the reattach physics is the work that unblocks
 it; until then those three tracks are local-only.
+
+### Endless leaderboards should be added soon
+
+Endless mode has no online board yet. The speedrun board cannot be reused: a
+time board ranks lowest-first and a distance board ranks highest-first, and the
+`runs` row is keyed by `track` with a `ticks` value that only ever lowers. An
+endless board needs its own key, its own ranking and its own submit path. This is
+the work, in the order it should be done; it is **not implemented** - the owner
+will add it. Nothing here changes the rule that a client never sends a score.
+
+**Endless distance is just the step count.** The car moves at `CFG.speed`
+always, so distance is `speed * time` and `time` is `ticks / 120`. A replay that
+survives `N` steps travelled `N/120 * 290` px, i.e. `N/120 * 290 / 50` metres
+(`CFG.pxPerMetre`). The button pattern does not change this - holding wide,
+reeling in and cutting a corner all move the car the same distance per step - so
+the server can rank an endless run from the very steps it already verifies, with
+no new physics. `_shared/physics/verify.js` already returns `ticks`; an endless
+replay only needs to run until the car dies rather than stopping at a finish
+line (`car.finished` is never set when `finishS` is `Infinity`).
+
+**Endless must run on one shared seed before it can have a shared board.** Today
+endless builds `Track.new(menu_seed)` with no `opts` (`game.gd:load_track`), and
+`menu_seed` is the persisted `track` preference - so two players on two devices
+can be racing different roads. A shared board is meaningless unless everyone
+drives the same road, so pin endless to a single seed (or a small fixed set) and
+send that seed with the run. The seed is the only thing the server needs to
+rebuild the exact road, and the JS and Godot endless builders already agree
+(verified against each other for seed 7: same `turnSign`, same first fillet, same
+road samples).
+
+The concrete steps:
+
+1. **Schema (`supabase/migrations/0004_endless.sql`).** Add `mode text not null
+   default 'speedrun' check (mode in ('speedrun', 'endless'))` to `runs`, drop
+   the `(user_id, track)` unique index and recreate it as `(user_id, mode, track)`
+   so one player holds a best per mode per seed. Keep `ticks` as the stored
+   value: metres are derived (`ticks / 120.0 * speed / pxPerMetre`), so the
+   ranking stays integer-exact the way the time board does. Add an
+   `endless_leaderboard` view that ranks `mode = 'endless'` rows by `ticks`
+   **descending** (`rank() over (partition by track order by ticks desc,
+   created_at asc)`), and leave `leaderboard` filtering `mode = 'speedrun'`.
+2. **`submit_run`.** Add `p_mode` and store it; for endless, keep the higher
+   `ticks` instead of the lower (the `elsif p_ticks < v_prev` becomes `>` for
+   endless). Revoke/grant as before - only the service role may call it.
+3. **`run` Edge Function.** Accept `mode` (default `speedrun`) and, for endless,
+   replay until the car dies and require it to have travelled (a run that dies on
+   step 1 is not a score). The steps cap stays. Still no score in the request.
+4. **`board` Edge Function.** Take `?mode=` (default `speedrun`), pick the view,
+   and order the endless board by metres descending. The `steps` join is
+   unchanged (`runs` still holds one row per player per mode per seed).
+5. **Client (`api.gd`, `app.gd`).** Send `mode` and the endless seed with an
+   endless upload; fetch and render the endless board with a distance column
+   (`_fmt_dist`) instead of a time column, and rank by distance. `Game` already
+   records `steps` for every run, so an endless run is watchable for free.
+6. **Verifiers.** `tools/test.mjs` should assert an endless replay's score equals
+   `ticks/120*speed/pxPerMetre` and that the score is independent of the button
+   pattern at a fixed step count; `verify_online.gd` should cover the endless
+   merge the same way it covers the speedrun one.
+
+The one thing not to do: send a distance. The whole point of the board is that
+the number is derived from the steps, so a client cannot post a score it did not
+earn - exactly as with a time.

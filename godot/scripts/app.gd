@@ -27,10 +27,11 @@ var car_name_label: Label
 var acct_overview: VBoxContainer     # the account tab's summary, rebuilt on sign in/out
 var acct_form: VBoxContainer         # the sign-in form, shown on demand
 var settings_col: VBoxContainer
-var key_buttons := {}                # "play"/"reset" -> the rebind button
+var key_buttons := {}                # "play"/"reset"/"pause" -> the rebind button
 var key_capturing := ""              # which binding a key press will capture, "" for none
 var input_key := KEY_SPACE           # the bound play key on a desktop keyboard
 var reset_key := KEY_R               # restarts the current run
+var pause_key := KEY_ESCAPE          # pauses and resumes the current run
 
 var menu_seed := 1
 var menu_mode := "speedrun"
@@ -106,9 +107,11 @@ func _ready() -> void:
 	car_skin = int(Storage.get_pref("carSkin", 0))
 	if car_skin < 0 or car_skin >= Renderer2D.CAR_MODELS.size():
 		car_skin = 0
-	# The desktop keys, rebindable in Settings. Space to play, R to reset.
+	# The desktop keys, rebindable in Settings. Space to play, R to reset, Esc to
+	# pause. The defaults live here so a fresh install has them without a pref write.
 	input_key = int(Storage.get_pref("inputKey", KEY_SPACE))
 	reset_key = int(Storage.get_pref("resetKey", KEY_R))
+	pause_key = int(Storage.get_pref("pauseKey", KEY_ESCAPE))
 
 	game = Game.new()
 	add_child(game)
@@ -651,21 +654,30 @@ func _build_settings_page() -> void:
 	settings_col.add_child(card)
 	var c := _col(8)
 	card.add_child(c)
-	c.add_child(_section("Controls"))
-	if DisplayServer.is_touchscreen_available():
-		var t := _label("Tap and hold anywhere to swing.", 14)
-		t.add_theme_color_override("font_color", UiTheme.INK_DIM)
-		t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		c.add_child(t)
-	else:
-		_key_row(c, "Play", "play", "Hold this key to swing.", input_key)
-		_key_row(c, "Reset", "reset", "Press this key to restart the current run.", reset_key)
+	_settings_controls(c)
 	settings_col.add_child(_button("Done", _to_menu))
 	# The build version, so a bug report can name the build.
 	var ver := _label("Sling Drift  v%s" % VERSION, 12)
 	ver.add_theme_color_override("font_color", UiTheme.INK_MUTE)
 	ver.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	settings_col.add_child(ver)
+
+
+# The Settings "Controls" block. The key bindings are always built, touchscreen
+# or not: a tablet with a keyboard attached still reports a touchscreen, and
+# gating the rows on `is_touchscreen_available` left Settings showing the
+# "Controls" heading with nothing under it to change. The tap hint sits alongside
+# the bindings when a touchscreen is present, not instead of them.
+func _settings_controls(c: VBoxContainer) -> void:
+	c.add_child(_section("Controls"))
+	if DisplayServer.is_touchscreen_available():
+		var t := _label("Tap and hold anywhere to swing. A keyboard works too - rebind its keys below.", 14)
+		t.add_theme_color_override("font_color", UiTheme.INK_DIM)
+		t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		c.add_child(t)
+	_key_row(c, "Play", "play", "Hold this key to swing.", input_key)
+	_key_row(c, "Reset", "reset", "Press this key to restart the current run.", reset_key)
+	_key_row(c, "Pause", "pause", "Press this key to pause and resume.", pause_key)
 
 
 func _open_settings() -> void:
@@ -702,6 +714,7 @@ func _begin_capture(name: String) -> void:
 
 func _key_name(code: int) -> String:
 	match code:
+		KEY_ESCAPE: return "Esc"
 		KEY_SPACE: return "Space"
 		KEY_ENTER: return "Enter"
 		KEY_SHIFT: return "Shift"
@@ -713,26 +726,43 @@ func _key_name(code: int) -> String:
 	return OS.get_keycode_string(code) if OS.get_keycode_string(code) != "" else "Key %d" % code
 
 
-# Bind the captured key. The two bindings must not collide, so a key already in
-# use is refused rather than silently shadowing the other action.
+# The three rebindable keys, by name. One place so `_bind_key` and the collision
+# check cannot disagree about which key is which.
+func _binding(name: String) -> int:
+	match name:
+		"play": return input_key
+		"reset": return reset_key
+		"pause": return pause_key
+	return 0
+
+
+func _set_binding(name: String, code: int) -> void:
+	match name:
+		"play":
+			input_key = code
+			Storage.set_pref("inputKey", code)
+		"reset":
+			reset_key = code
+			Storage.set_pref("resetKey", code)
+		"pause":
+			pause_key = code
+			Storage.set_pref("pauseKey", code)
+
+
+# Bind the captured key. No two bindings may collide, so a key already in use is
+# refused rather than silently shadowing the other action. Esc always cancels a
+# capture, so it is never offered as a binding itself.
 func _bind_key(code: int) -> void:
-	if code == KEY_ESCAPE:
-		key_buttons[key_capturing].text = _key_name(input_key if key_capturing == "play" else reset_key)
-		key_capturing = ""
-		return
-	var other := reset_key if key_capturing == "play" else input_key
-	if code == other:
-		key_buttons[key_capturing].text = "Already used"
-		key_capturing = ""
-		return
-	if key_capturing == "play":
-		input_key = code
-		Storage.set_pref("inputKey", code)
-	elif key_capturing == "reset":
-		reset_key = code
-		Storage.set_pref("resetKey", code)
 	var which := key_capturing
 	key_capturing = ""
+	if code == KEY_ESCAPE:
+		key_buttons[which].text = _key_name(_binding(which))
+		return
+	for name in key_buttons:
+		if name != which and _binding(name) == code:
+			key_buttons[which].text = "Already used"
+			return
+	_set_binding(which, code)
 	key_buttons[which].text = _key_name(code)
 
 
@@ -1532,6 +1562,16 @@ func _on_pause() -> void:
 		_show_round_button(false)
 
 
+# The pause key is a toggle: pause a running run, resume a paused one.
+func _toggle_pause() -> void:
+	if overlay == "" and game.state == "running":
+		_on_pause()
+	elif overlay == "pause":
+		_hide_overlays()
+		game.state = "running"
+		_show_round_button(not game.is_replay())
+
+
 func _on_restart_round() -> void:
 	if game.is_replay():
 		return
@@ -1554,6 +1594,13 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == reset_key:
 		if overlay == "" and game.state == "running" and not game.is_replay():
 			_start_run(game.seed_num)
+		get_viewport().set_input_as_handled()
+		return
+	# The pause key toggles the pause card: it pauses a run in progress, and resumes
+	# one that is paused. It is inert everywhere else, so it cannot yank away a
+	# crash/finish card.
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == pause_key:
+		_toggle_pause()
 		get_viewport().set_input_as_handled()
 		return
 	var down := false
