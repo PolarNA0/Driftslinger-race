@@ -25,6 +25,16 @@ const DISABLED_BG := Color("171b2c")
 const DISABLED_EDGE := Color("262c47")
 const DANGER := Color("ff7b7b")
 
+# The full-screen app shell. The whole window is the app now, not a card floating
+# over the road, so these carry the chrome: BG is the page, BAR is the top and
+# bottom rails, SURFACE is the content sheet between them.
+const BG := Color("0a0e1c")
+const BAR := Color("101531")
+const BAR_EDGE := Color("232b52")
+const SURFACE := Color("141a30")
+const SURFACE_EDGE := Color("2b3462")
+const TAB_IDLE := Color("8f98c8")
+
 
 static func _flat(bg: Color, edge: Color, radius: int, border: int, pad_h: int, pad_v: int) -> StyleBoxFlat:
         var s := StyleBoxFlat.new()
@@ -90,6 +100,58 @@ static func build() -> Theme:
 
         var flat_panel := _flat(PANEL, PANEL_EDGE, 16, 2, 14, 10)
         t.set_stylebox("panel", "Panel", flat_panel)
+
+        # --- The app shell: page background, top/bottom rails, content sheet ---
+        var shell := _flat(BG, BG, 0, 0, 0, 0)
+        t.set_type_variation("ShellBg", "Panel")
+        t.set_stylebox("panel", "ShellBg", shell)
+
+        # A rail is a flat bar with a single hairline on the inner edge, so the top
+        # and bottom bars read as chrome rather than as two more cards.
+        var top_bar := _flat(BAR, BAR, 0, 0, 0, 0)
+        top_bar.border_width_bottom = 1
+        top_bar.border_color = BAR_EDGE
+        t.set_type_variation("TopBar", "Panel")
+        t.set_stylebox("panel", "TopBar", top_bar)
+
+        var bottom_bar := _flat(BAR, BAR, 0, 0, 0, 0)
+        bottom_bar.border_width_top = 1
+        bottom_bar.border_color = BAR_EDGE
+        t.set_type_variation("BottomBar", "Panel")
+        t.set_stylebox("panel", "BottomBar", bottom_bar)
+
+        # The content sheet: the surface the tabs' controls sit on. A soft edge, no
+        # heavy shadow - it fills the space between the rails, it does not float.
+        t.set_type_variation("Surface", "PanelContainer")
+        t.set_stylebox("panel", "Surface", _flat(SURFACE, SURFACE_EDGE, 18, 2, 16, 14))
+
+        # A quiet surface for grouping a few rows inside the sheet.
+        t.set_type_variation("SubCard", "PanelContainer")
+        t.set_stylebox("panel", "SubCard", _flat(Color("1a2140"), SURFACE_EDGE.darkened(0.18), 14, 1, 14, 12))
+
+        # --- Tab buttons: icon over label, the active one accent-lit ---
+        t.set_type_variation("TabButton", "Button")
+        var tab_off := _flat(Color(0, 0, 0, 0), Color(0, 0, 0, 0), 12, 0, 6, 8)
+        var tab_on := _flat(Color(ACCENT.r, ACCENT.g, ACCENT.b, 0.16), Color(0, 0, 0, 0), 12, 0, 6, 8)
+        t.set_stylebox("normal", "TabButton", tab_off)
+        t.set_stylebox("hover", "TabButton", _flat(Color(1, 1, 1, 0.05), Color(0, 0, 0, 0), 12, 0, 6, 8))
+        t.set_stylebox("pressed", "TabButton", tab_on)
+        t.set_stylebox("hover_pressed", "TabButton", tab_on)
+        t.set_stylebox("focus", "TabButton", _flat(Color(0, 0, 0, 0), Color(0, 0, 0, 0), 12, 0, 6, 8))
+        t.set_stylebox("disabled", "TabButton", tab_off)
+        t.set_color("font_color", "TabButton", TAB_IDLE)
+        t.set_color("font_hover_color", "TabButton", INK)
+        t.set_color("font_pressed_color", "TabButton", ACCENT)
+        t.set_color("font_hover_pressed_color", "TabButton", ACCENT)
+        t.set_color("font_disabled_color", "TabButton", INK_MUTE)
+        t.set_font_size("font_size", "TabButton", 13)
+
+        # --- A round icon chip for the top bar (settings, back, close) ---
+        t.set_type_variation("IconButton", "Button")
+        _button_styles(t, "IconButton", Color(0, 0, 0, 0), Color(0, 0, 0, 0), INK_DIM, 10)
+        t.set_stylebox("hover", "IconButton", _flat(Color(1, 1, 1, 0.07), Color(0, 0, 0, 0), 10, 0, 0, 0))
+        t.set_stylebox("pressed", "IconButton", _flat(Color(1, 1, 1, 0.12), Color(0, 0, 0, 0), 10, 0, 0, 0))
+        t.set_stylebox("hover_pressed", "IconButton", _flat(Color(1, 1, 1, 0.12), Color(0, 0, 0, 0), 10, 0, 0, 0))
 
         # --- Labels ---
         t.set_color("font_color", "Label", INK)

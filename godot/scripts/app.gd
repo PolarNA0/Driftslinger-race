@@ -1,12 +1,12 @@
 extends Control
 
-# Shown in the menu footer so a player can tell which build they are running
+# Shown on the Settings screen so a player can tell which build they are running
 # (and a bug report can name it). Keep in step with the release tag.
 const VERSION := "1.3"
 
-# Port of the old js/app.js (removed with the JS client): the shell around the game. Menu, mode and track pickers,
-# car skins, the leaderboard with watchable ghosts, run history, accounts, and
-# the overlays for pause / crash / finish / replay-done.
+# The shell around the game: a full-screen, tabbed menu (Play / Garage / Account,
+# with Settings in the top bar), the leaderboard with watchable ghosts, run
+# history, accounts, and the overlays for pause / crash / finish / replay-done.
 #
 # The simulation lives in Game (a Node2D) which draws itself through Renderer2D;
 # this Control sits above it and owns only the interface. Background taps that
@@ -14,6 +14,21 @@ const VERSION := "1.3"
 # buttons never accidentally swing the car.
 
 var game: Game
+
+var shell: MenuShell                 # the full-screen frame (top bar, tabs, content)
+var tab_pages := {}                  # tab name -> Control
+var tab_cols := []                   # the scroll columns inside tab pages, for resize
+var mode_bar: HBoxContainer
+var play_track_label: Label
+var play_best_label: Label
+var car_preview: TextureRect
+var car_name_label: Label
+var acct_overview: VBoxContainer     # the account tab's summary, rebuilt on sign in/out
+var acct_form: VBoxContainer         # the sign-in form, shown on demand
+var settings_col: VBoxContainer
+var key_button: Button
+var key_capturing := false
+var input_key := KEY_SPACE           # the bound play key on a desktop keyboard
 
 var menu_seed := 1
 var menu_mode := "speedrun"
@@ -47,9 +62,6 @@ var mode_buttons := {}         # "speedrun"/"endless" -> Button
 var ghost_buttons := {}        # "off"/"wr"/"self" -> Button
 var track_buttons := []        # one per track, in order
 var car_buttons := []
-var menu_track_button: Button
-var tracks_sub: Label
-var acct_bar: VBoxContainer
 var lb_title: Label
 var lb_note: Label
 var lb_rows: VBoxContainer
@@ -91,6 +103,8 @@ func _ready() -> void:
 	car_skin = int(Storage.get_pref("carSkin", 0))
 	if car_skin < 0 or car_skin >= Renderer2D.CAR_MODELS.size():
 		car_skin = 0
+	# The desktop play key, rebindable in Settings. Space is the default.
+	input_key = int(Storage.get_pref("inputKey", KEY_SPACE))
 
 	game = Game.new()
 	add_child(game)
@@ -107,11 +121,9 @@ func _ready() -> void:
 	layer.add_child(ui_root)
 
 	_build_hud()
-	_build_menu()
-	_build_tracks()
+	_build_shell()
 	_build_board()
 	_build_history()
-	_build_account()
 	_build_dead()
 	_build_finish()
 	_build_replay_done()
@@ -122,7 +134,7 @@ func _ready() -> void:
 
 	# A screenshot hook for headless visual checks: `--shot <path> [--shot-menu]`
 	# saves one frame and quits. Default shows a run in progress; `--shot-menu`
-	# shows the menu instead.
+	# shows the menu instead. `--shot-tab <garage|play|account|settings>` opens a tab.
 	get_viewport().size_changed.connect(_layout_cards)
 	_layout_cards()
 
@@ -132,15 +144,23 @@ func _ready() -> void:
 
 func _capture_after(secs: float) -> void:
 	var args := OS.get_cmdline_user_args()
-	# `--shot-overlay <name>` opens one of the menu overlays for a headless layout
-	# check; without it the shot is a run in progress (or the menu with --shot-menu).
-	if args.has("--shot-overlay"):
+	if args.has("--shot-tab"):
+		var which: String = args[args.find("--shot-tab") + 1]
+		match which:
+			"garage", "play", "account":
+				_to_menu()
+				shell.select(which)
+			"settings":
+				_to_menu()
+				_open_settings()
+			_: _to_menu()
+	elif args.has("--shot-overlay"):
 		var which: String = args[args.find("--shot-overlay") + 1]
 		match which:
 			"tracks": _show_tracks()
 			"board": _show_leaderboard(menu_seed)
 			"history": _show_history()
-			"account": _open_account("register")
+			"account": _to_menu(); shell.select("account")
 			_: _to_menu()
 	elif not args.has("--shot-menu"):
 		_start_run(menu_seed)
@@ -274,9 +294,15 @@ func _new_overlay(name: String, title: String = "") -> VBoxContainer:
 # ceiling (never a full-width slab on an ultrawide monitor).
 func _layout_cards() -> void:
 	var vw := get_viewport_rect().size.x
+	# Modal cards keep a phone-ish width so a dialog reads as a dialog.
 	var w := clampf(vw * 0.46, 320.0, 520.0)
 	for c in overlay_cards:
 		c.custom_minimum_size = Vector2(w, 0)
+	# Tab content is a full-width column on a phone and a capped centred column on a
+	# desktop, so a wide window does not stretch controls edge to edge.
+	var tw := clampf(vw - 28.0, 320.0, 720.0)
+	for c in tab_cols:
+		c.custom_minimum_size = Vector2(tw, 0)
 
 
 # The heading of an overlay card: accent, a touch larger, and separated from the
@@ -296,12 +322,18 @@ func _style_title(l: Label) -> Label:
 func _show_only(name: String) -> void:
 	for key in overlays:
 		overlays[key].visible = (key == name)
+	# "menu" is not a card any more: it is the full-screen shell, shown whenever no
+	# modal overlay is up.
+	if shell != null:
+		shell.visible = (name == "menu")
 	overlay = name
 
 
 func _hide_overlays() -> void:
 	for key in overlays:
 		overlays[key].visible = false
+	if shell != null:
+		shell.visible = false
 	overlay = ""
 
 
@@ -400,89 +432,348 @@ func _anchor(b: Button, preset: int, inset: float, size: float) -> void:
 
 
 # =============================================================================
-# Menu
+# Menu: the full-screen tabbed shell
 # =============================================================================
 
-func _build_menu() -> void:
-	var col := _new_overlay("menu", "SLINGDRIFT")
-	var blurb := _label("Hold to swing round the poles. Let go to fly.\nDon't leave the road.", 14)
-	blurb.add_theme_color_override("font_color", UiTheme.INK_DIM)
-	col.add_child(blurb)
+func _build_shell() -> void:
+	shell = MenuShell.new()
+	ui_root.add_child(shell)
+	shell.tab_changed.connect(_on_tab)
+	shell.settings_pressed.connect(_open_settings)
+	shell.visible = false
+	# add_child runs MenuShell._ready synchronously, so content exists here.
+	_build_play_tab()
+	_build_garage_tab()
+	_build_account_tab()
+	_build_settings_page()
+	shell.select("play")
 
-	col.add_child(_section("Mode"))
-	var mode_row := _row(8)
-	col.add_child(mode_row)
-	mode_buttons["speedrun"] = _mode_button(mode_row, "Speedrun", "~10s track, beat the clock",
-		func(): _set_mode("speedrun"))
-	mode_buttons["endless"] = _mode_button(mode_row, "Endless", "survive as long as you can",
-		func(): _set_mode("endless"))
 
+# A tab page: a full-rect scroll area with a centred, width-capped column, so the
+# content reads as a phone app on a phone and as a centred column on a desktop
+# instead of controls stretched edge to edge.
+func _new_tab(name: String) -> VBoxContainer:
+	var page := Control.new()
+	page.set_anchors_preset(Control.PRESET_FULL_RECT)
+	page.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	shell.content.add_child(page)
+	tab_pages[name] = page
+
+	var scroll := ScrollContainer.new()
+	scroll.set_anchors_preset(Control.PRESET_FULL_RECT)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	page.add_child(scroll)
+
+	# A centred band whose single column is capped at a phone-ish width: content
+	# reads from the top of the sheet and stays a column on a wide desktop rather
+	# than stretching edge to edge.
+	var band := HBoxContainer.new()
+	band.alignment = BoxContainer.ALIGNMENT_CENTER
+	band.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(band)
+	var col := _col(12)
+	col.custom_minimum_size = Vector2(320, 0)
+	col.size_flags_horizontal = Control.SIZE_FILL
+	band.add_child(col)
+	tab_cols.append(col)
+	return col
+
+
+func _on_tab(name: String) -> void:
+	for key in tab_pages:
+		tab_pages[key].visible = (key == name)
+	match name:
+		"play":
+			shell.set_title("Play", "Pick a track and go")
+		"garage":
+			shell.set_title("Garage", "Choose your car")
+		"account":
+			shell.set_title("Account", "Your name, your times")
+			_refresh_account_page()
+
+
+# --- Play tab ---------------------------------------------------------------
+
+func _build_play_tab() -> void:
+	var col := _new_tab("play")
+
+	# Mode lives at the very top: endless is a different game from a track run.
+	mode_bar = _row(8)
+	col.add_child(mode_bar)
+	mode_buttons["speedrun"] = _segment(mode_bar, "clock", "Tracks", func(): _set_mode("speedrun"))
+	mode_buttons["endless"] = _segment(mode_bar, "infinity", "Endless", func(): _set_mode("endless"))
+
+	col.add_child(_section("Track"))
+	var track_card := PanelContainer.new()
+	track_card.theme_type_variation = "SubCard"
+	col.add_child(track_card)
+	var tc := _col(4)
+	track_card.add_child(tc)
+	play_track_label = _label("Track 1", 20)
+	tc.add_child(play_track_label)
+	play_best_label = _label("best --", 13)
+	play_best_label.add_theme_color_override("font_color", UiTheme.INK_DIM)
+	tc.add_child(play_best_label)
+	var tgrid := _col(4)
+	tc.add_child(tgrid)
+	_build_track_list(tgrid)
+
+	col.add_child(_primary_button("Play", func(): _start_run(menu_seed)))
+
+	# The ghost picker is small enough to live inline, so it needs no sheet of its own.
 	col.add_child(_section("Ghost"))
-	var ghost_row := _row(8)
-	col.add_child(ghost_row)
-	ghost_buttons["off"] = _mode_button(ghost_row, "Off", "just you and the clock",
-		func(): _set_ghost("off"))
-	ghost_buttons["wr"] = _mode_button(ghost_row, "World record", "race the fastest ghost",
-		func(): _set_ghost("wr"))
-	ghost_buttons["self"] = _mode_button(ghost_row, "Your best", "race your own ghost",
-		func(): _set_ghost("self"))
+	var gbar := _row(6)
+	col.add_child(gbar)
+	ghost_buttons["off"] = _segment(gbar, "ghost", "Off", func(): _set_ghost("off"))
+	ghost_buttons["wr"] = _segment(gbar, "trophy", "Record", func(): _set_ghost("wr"))
+	ghost_buttons["self"] = _segment(gbar, "clock", "Your best", func(): _set_ghost("self"))
 
-	col.add_child(_section("Your car"))
+	var more := _row(8)
+	col.add_child(more)
+	more.add_child(_action_button("trophy", "Leaderboard", func(): _show_leaderboard(menu_seed)))
+	more.add_child(_action_button("clock", "Replays", _show_history))
+
+
+
+# --- Garage tab -------------------------------------------------------------
+
+func _build_garage_tab() -> void:
+	var col := _new_tab("garage")
+	var preview := PanelContainer.new()
+	preview.theme_type_variation = "SubCard"
+	col.add_child(preview)
+	var pc := _col(8)
+	preview.add_child(pc)
+	car_preview = TextureRect.new()
+	car_preview.custom_minimum_size = Vector2(0, 130)
+	car_preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	car_preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	pc.add_child(car_preview)
+	car_name_label = _label("", 20)
+	car_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	pc.add_child(car_name_label)
+	var note := _label("Every car drives the same - pick the one you like.", 12)
+	note.add_theme_color_override("font_color", UiTheme.INK_MUTE)
+	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	pc.add_child(note)
+
+	col.add_child(_section("Your cars"))
 	var car_row := _row(6)
 	col.add_child(car_row)
 	_build_car_list(car_row)
+	_refresh_car_preview()
 
-	# Tracks live behind their own button now: a 13-cell grid made the menu taller
-	# than the screen and buried the account controls below the fold.
-	menu_track_button = _button("Tracks", _show_tracks)
-	menu_track_button.custom_minimum_size = Vector2(0, 46)
-	col.add_child(menu_track_button)
-	tracks_sub = _label("", 13)
-	tracks_sub.add_theme_color_override("font_color", UiTheme.INK_DIM)
-	col.add_child(tracks_sub)
 
-	var actions := _row(8)
-	col.add_child(actions)
-	actions.add_child(_primary_button("Play", func(): _start_run(menu_seed)))
-	actions.add_child(_button("Leaderboard", func(): _show_leaderboard(menu_seed)))
-	actions.add_child(_button("History", _show_history))
+# --- Account tab ------------------------------------------------------------
 
-	acct_bar = _col(6)
-	col.add_child(acct_bar)
+func _build_account_tab() -> void:
+	var col := _new_tab("account")
+	acct_overview = _col(10)
+	col.add_child(acct_overview)
+	acct_form = _col(10)
+	acct_form.visible = false
+	col.add_child(acct_form)
+	_build_account()
 
-	var foot := _label("Offline \u00b7 no ads \u00b7 your scores stay on this device", 11)
-	foot.add_theme_color_override("font_color", UiTheme.INK_MUTE)
-	col.add_child(foot)
-	var ver := _label("v%s" % VERSION, 11)
+
+# The account tab, rebuilt from the session each time it is opened: signed out it
+# offers create/sign in, signed in it shows who you are and how to leave.
+func _refresh_account_page() -> void:
+	if acct_overview == null:
+		return
+	for c in acct_overview.get_children():
+		c.queue_free()
+	acct_overview.visible = true
+	acct_form.visible = false
+	var who := Account.current_account()
+	var card := PanelContainer.new()
+	card.theme_type_variation = "SubCard"
+	acct_overview.add_child(card)
+	var c2 := _col(8)
+	card.add_child(c2)
+	if who != "":
+		var row := _row(10)
+		c2.add_child(row)
+		var ic := UiIcon.new()
+		ic.kind = "account"
+		ic.color = UiTheme.ACCENT
+		ic.custom_minimum_size = Vector2(34, 34)
+		row.add_child(ic)
+		var names := _col(0)
+		row.add_child(names)
+		var t := _label(who, 20)
+		names.add_child(t)
+		var s := _label("Signed in", 12)
+		s.add_theme_color_override("font_color", UiTheme.INK_MUTE)
+		names.add_child(s)
+		c2.add_child(_button("Sign out", func():
+			Account.logout()
+			_refresh_account_page()
+			_refresh_track_list()))
+	else:
+		var t := _label("You are playing as a guest.", 16)
+		c2.add_child(t)
+		var s := _label("Sign in to put your times on the board.", 13)
+		s.add_theme_color_override("font_color", UiTheme.INK_DIM)
+		s.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		c2.add_child(s)
+		c2.add_child(_primary_button("Sign in", func(): _open_account("login")))
+		c2.add_child(_button("Create an account", func(): _open_account("register")))
+
+	var hist := PanelContainer.new()
+	hist.theme_type_variation = "SubCard"
+	acct_overview.add_child(hist)
+	var hc := _col(6)
+	hist.add_child(hc)
+	hc.add_child(_section("Your runs"))
+	var runs := Storage.all_runs()
+	if runs.size() == 0:
+		hc.add_child(_label("No finished runs yet.", 14))
+	else:
+		hc.add_child(_label("%d finished runs" % runs.size(), 14))
+		hc.add_child(_button("Open history", _show_history))
+
+
+# --- Settings ---------------------------------------------------------------
+
+func _build_settings_page() -> void:
+	settings_col = _new_overlay("settings", "Settings")
+	var card := PanelContainer.new()
+	card.theme_type_variation = "SubCard"
+	settings_col.add_child(card)
+	var c := _col(8)
+	card.add_child(c)
+	c.add_child(_section("Controls"))
+	if DisplayServer.is_touchscreen_available():
+		var t := _label("Tap and hold anywhere to swing.", 14)
+		t.add_theme_color_override("font_color", UiTheme.INK_DIM)
+		t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		c.add_child(t)
+	else:
+		var row := _row(10)
+		c.add_child(row)
+		var ic := UiIcon.new()
+		ic.kind = "key"
+		ic.color = UiTheme.INK_DIM
+		ic.custom_minimum_size = Vector2(26, 26)
+		row.add_child(ic)
+		var lbl := _label("Play key", 16)
+		lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(lbl)
+		key_button = _button(_key_name(input_key), _begin_capture)
+		key_button.custom_minimum_size = Vector2(120, 0)
+		row.add_child(key_button)
+		var hint := _label("Hold this key to swing. Click the button, then press a new key.", 12)
+		hint.add_theme_color_override("font_color", UiTheme.INK_MUTE)
+		hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		c.add_child(hint)
+	settings_col.add_child(_button("Done", _to_menu))
+	# The build version, so a bug report can name the build.
+	var ver := _label("Sling Drift  v%s" % VERSION, 12)
 	ver.add_theme_color_override("font_color", UiTheme.INK_MUTE)
-	col.add_child(ver)
+	ver.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	settings_col.add_child(ver)
 
 
-func _section(text: String) -> Label:
-	var l := _label(text.to_upper(), 14)
-	l.add_theme_color_override("font_color", UiTheme.ACCENT)
-	return l
+func _open_settings() -> void:
+	_show_only("settings")
 
 
-func _mode_button(parent: Node, title: String, sub: String, cb: Callable) -> Button:
+func _begin_capture() -> void:
+	key_capturing = true
+	key_button.text = "Press a key..."
+
+
+func _key_name(code: int) -> String:
+	match code:
+		KEY_SPACE: return "Space"
+		KEY_ENTER: return "Enter"
+		KEY_SHIFT: return "Shift"
+		KEY_CTRL: return "Ctrl"
+		KEY_UP: return "Up"
+		KEY_DOWN: return "Down"
+		KEY_LEFT: return "Left"
+		KEY_RIGHT: return "Right"
+	return OS.get_keycode_string(code) if OS.get_keycode_string(code) != "" else "Key %d" % code
+
+
+func _bind_key(code: int) -> void:
+	input_key = code
+	Storage.set_pref("inputKey", code)
+	key_capturing = false
+	if key_button != null:
+		key_button.text = _key_name(code)
+
+
+# --- The ghost picker (a small sheet) ---------------------------------------
+
+func _refresh_ghost_overlay() -> void:
+	for key in ghost_buttons:
+		ghost_buttons[key].button_pressed = (key == ghost_mode)
+
+
+func _segment(parent: Node, icon_kind: String, text: String, cb: Callable) -> Button:
 	var b := Button.new()
-	b.text = title + "\n" + sub
 	b.toggle_mode = true
 	b.theme_type_variation = "ToggleButton"
-	b.custom_minimum_size = Vector2(0, 58)
+	b.clip_text = true
+	b.custom_minimum_size = Vector2(0, 48)
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	# Wrap rather than widen: three option buttons in a row are only as wide as their
-	# longest word, so the menu card stays inside a phone-width viewport.
-	b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	b.pressed.connect(cb)
+	var box := HBoxContainer.new()
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_theme_constant_override("separation", 6)
+	box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(box)
+	var ic := UiIcon.new()
+	ic.kind = icon_kind
+	ic.color = UiTheme.INK
+	ic.thickness = 2.0
+	ic.custom_minimum_size = Vector2(20, 20)
+	ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(ic)
+	var l := _label(text, 15)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(l)
 	parent.add_child(b)
 	return b
 
 
+func _action_button(icon_kind: String, text: String, cb: Callable) -> Button:
+	var b := Button.new()
+	b.clip_text = true
+	b.custom_minimum_size = Vector2(0, 50)
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b.pressed.connect(cb)
+	var box := HBoxContainer.new()
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_theme_constant_override("separation", 8)
+	box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(box)
+	var ic := UiIcon.new()
+	ic.kind = icon_kind
+	ic.color = UiTheme.INK_DIM
+	ic.thickness = 2.0
+	ic.custom_minimum_size = Vector2(20, 20)
+	ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(ic)
+	var l := _label(text, 15)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(l)
+	return b
+
+
+func _section(text: String) -> Label:
+	var l := _label(text.to_upper(), 13)
+	l.add_theme_color_override("font_color", UiTheme.ACCENT)
+	return l
+
+
 func _build_car_list(parent: Node) -> void:
 	car_buttons.clear()
-	# A grid, not one long row: the picker stays inside a phone-width card. Each
-	# cell shows the actual car sprite, so the choice is what you see, not a swatch.
 	var grid := GridContainer.new()
 	grid.columns = Renderer2D.CAR_MODELS.size()
 	grid.add_theme_constant_override("h_separation", 6)
@@ -512,7 +803,8 @@ func _build_car_list(parent: Node) -> void:
 			Storage.set_pref("carSkin", idx)
 			game.car_skin = idx
 			game.renderer.car_index = idx
-			_refresh_car_list())
+			_refresh_car_list()
+			_refresh_car_preview())
 		grid.add_child(b)
 		car_buttons.append(b)
 
@@ -522,22 +814,32 @@ func _refresh_car_list() -> void:
 		car_buttons[i].button_pressed = (i == car_skin)
 
 
+func _refresh_car_preview() -> void:
+	if car_preview == null:
+		return
+	var model: Dictionary = Renderer2D.CAR_MODELS[car_skin]
+	car_preview.texture = load(str(model["tex"]))
+	car_name_label.text = str(model["name"])
+
+
+# A grid of track numbers rather than full-width rows: thirteen tracks fit in two
+# rows, so the Play button stays on screen without scrolling on a phone.
 func _build_track_list(parent: Node) -> void:
 	track_buttons.clear()
-	# Two columns: thirteen full-width rows is a long scroll, and a narrow grid cell
-	# clipped a best time. Two is the compromise that keeps every label readable.
 	var grid := GridContainer.new()
-	grid.columns = 2
-	grid.add_theme_constant_override("h_separation", 8)
-	grid.add_theme_constant_override("v_separation", 8)
+	grid.columns = 7
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	grid.add_theme_constant_override("h_separation", 6)
+	grid.add_theme_constant_override("v_separation", 6)
 	parent.add_child(grid)
 	for s in Tracks.MENU_TRACKS:
 		var b := Button.new()
 		b.toggle_mode = true
-		b.custom_minimum_size = Vector2(0, 52)
-		b.text = "Track %d\n--" % s
-		# The button carries its own track number: the list has gaps now, so the
-		# number is not the button's position and cannot be read back off the index.
+		b.theme_type_variation = "ToggleButton"
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.clip_text = true
+		b.custom_minimum_size = Vector2(0, 44)
+		b.text = str(s)
 		b.set_meta("track", s)
 		b.pressed.connect(func():
 			menu_seed = s
@@ -547,49 +849,28 @@ func _build_track_list(parent: Node) -> void:
 		track_buttons.append(b)
 
 
-# The Tracks overlay: its own card, so the menu does not have to carry thirteen
-# buttons at once.
-func _build_tracks() -> void:
-	var col := _new_overlay("tracks", "Tracks")
-	var hint := _label("Pick a track, then Play.", 13)
-	hint.add_theme_color_override("font_color", UiTheme.INK_DIM)
-	col.add_child(hint)
-	var list := _col(6)
-	col.add_child(list)
-	_build_track_list(list)
-	col.add_child(_button("Play this track", func():
-		_start_run(menu_seed)))
-	col.add_child(_button("Back", func(): _show_only("menu")))
-
-
 func _show_tracks() -> void:
-	_refresh_track_list()
-	_show_only("tracks")
+	shell.select("play")
 
 
 func _refresh_track_list() -> void:
 	for b in track_buttons:
-		var s: int = b.get_meta("track")
-		var best: Variant = Storage.get_best_time(s) if menu_mode == "speedrun" else null
-		var rec := Storage.get_record(s)
-		var sub := "--"
-		if menu_mode == "speedrun":
-			sub = "--" if best == null else _fmt_time(float(best))
-		else:
-			sub = _fmt_dist(float(rec["dist"])) if float(rec["dist"]) > 0.0 else "--"
-		b.text = "Track %d\n%s" % [s, sub]
-		b.button_pressed = (s == menu_seed)
-	if menu_track_button != null:
-		menu_track_button.text = "Tracks  \u00b7  Track %d" % menu_seed
-		var mode_word := "speedrun" if menu_mode == "speedrun" else "endless"
-		tracks_sub.text = "Selected: Track %d \u00b7 %s" % [menu_seed, mode_word]
+		b.button_pressed = (int(b.get_meta("track")) == menu_seed)
+	if play_track_label == null:
+		return
+	play_track_label.text = "Track %d" % menu_seed
+	if menu_mode == "speedrun":
+		var best: Variant = Storage.get_best_time(menu_seed)
+		play_best_label.text = "best --" if best == null else "best %s" % _fmt_time(float(best))
+	else:
+		var rec := Storage.get_record(menu_seed)
+		play_best_label.text = "best %s" % _fmt_dist(float(rec["dist"])) if float(rec["dist"]) > 0.0 else "best --"
 
 
 func _refresh_mode_list() -> void:
 	for key in mode_buttons:
 		mode_buttons[key].button_pressed = (key == menu_mode)
-	for key in ghost_buttons:
-		ghost_buttons[key].button_pressed = (key == ghost_mode)
+	_refresh_ghost_overlay()
 	_refresh_car_list()
 
 
@@ -603,25 +884,10 @@ func _set_mode(m: String) -> void:
 func _set_ghost(g: String) -> void:
 	ghost_mode = g
 	Storage.set_pref("ghostMode", g)
-	_refresh_mode_list()
+	_refresh_ghost_overlay()
 
 
-func _refresh_account_bar() -> void:
-	for c in acct_bar.get_children():
-		c.queue_free()
-	var who := Account.current_account()
-	var label := _label("Signed in as %s" % who if who != "" else "Playing as guest", 15)
-	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	acct_bar.add_child(label)
-	var row := _row(6)
-	acct_bar.add_child(row)
-	row.add_child(_button("Switch" if who != "" else "Sign in",
-		func(): _open_account("switch" if who != "" else "login")))
-	if who != "":
-		row.add_child(_button("Sign out", func():
-			Account.logout()
-			_refresh_account_bar()
-			_refresh_track_list()))
+
 
 
 # =============================================================================
@@ -657,7 +923,7 @@ func _build_board() -> void:
 		_render_board())
 	pager.add_child(lb_next)
 
-	col.add_child(_button("Back", func(): _show_only("menu")))
+	col.add_child(_button("Back", func(): _to_menu()))
 
 
 func _render_board() -> void:
@@ -738,7 +1004,7 @@ func _build_history() -> void:
 	hist_rows = _col(2)
 	hist_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(hist_rows)
-	col.add_child(_button("Back", func(): _show_only("menu")))
+	col.add_child(_button("Back", func(): _to_menu()))
 
 
 func _show_history() -> void:
@@ -766,8 +1032,12 @@ func _show_history() -> void:
 # =============================================================================
 
 func _build_account() -> void:
-	var col := _new_overlay("account")
-	acct_title = _style_title(_label("Sign in", 26))
+	var card := PanelContainer.new()
+	card.theme_type_variation = "SubCard"
+	acct_form.add_child(card)
+	var col := _col(8)
+	card.add_child(col)
+	acct_title = _style_title(_label("Sign in", 22))
 	col.add_child(acct_title)
 	acct_user = LineEdit.new()
 	acct_user.placeholder_text = "Username"
@@ -781,6 +1051,7 @@ func _build_account() -> void:
 	col.add_child(acct_pass)
 	acct_error = _label("", 14)
 	acct_error.add_theme_color_override("font_color", UiTheme.DANGER)
+	acct_error.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	col.add_child(acct_error)
 	acct_submit = _button("Sign in", func():
 		if acct_mode == "name":
@@ -791,7 +1062,7 @@ func _build_account() -> void:
 	acct_toggle = _button("Create an account", func():
 		_open_account("login" if acct_mode == "register" else "register"))
 	col.add_child(acct_toggle)
-	col.add_child(_button("Back", func(): _show_only("menu")))
+	col.add_child(_button("Back", _refresh_account_page))
 
 
 func _open_account(mode: String) -> void:
@@ -807,7 +1078,10 @@ func _open_account(mode: String) -> void:
 	acct_email.visible = true
 	var known := Account.list_accounts()
 	acct_user.placeholder_text = "e.g. %s" % known[0] if known.size() > 0 else "Username"
-	_show_only("account")
+	# select() refreshes the tab, which resets to the overview; show the form after it.
+	shell.select("account")
+	acct_overview.visible = false
+	acct_form.visible = true
 
 
 func _submit_account() -> void:
@@ -835,7 +1109,9 @@ func _submit_account() -> void:
 		acct_toggle.visible = false
 		return
 	await _after_sign_in()
-	_show_only("menu")
+	_to_menu()
+	shell.select("account")
+	shell.select("account")
 
 
 # Pick the public name for an account that signed in without one.
@@ -849,13 +1125,13 @@ func _submit_name() -> void:
 		return
 	acct_toggle.visible = true
 	await _after_sign_in()
-	_show_only("menu")
+	_to_menu()
 
 
 # Everything that has to happen once a player is signed in: the bar and the track
 # list change, their times come back from the server, and the guest queue can go.
 func _after_sign_in() -> void:
-	_refresh_account_bar()
+	_refresh_account_page()
 	_refresh_track_list()
 	await _sync_my_runs()
 	await _flush_queue()
@@ -875,7 +1151,7 @@ func _boot_account() -> void:
 	var name := await Account.resolve_account()
 	if name == "" and not Account.signed_in():
 		return
-	_refresh_account_bar()
+	_refresh_account_page()
 	await _sync_my_runs()
 
 
@@ -1029,7 +1305,7 @@ func _to_menu() -> void:
 	game.set_physics_process(false)
 	game.load_track(menu_seed, menu_mode)
 	_refresh_mode_list()
-	_refresh_account_bar()
+	_refresh_account_page()
 	_refresh_track_list()
 	_show_round_button(false)
 	hint_label.visible = false
@@ -1263,6 +1539,11 @@ func _on_restart_round() -> void:
 # =============================================================================
 
 func _unhandled_input(event: InputEvent) -> void:
+	# A key press while rebinding becomes the new play key, and is swallowed.
+	if key_capturing and event is InputEventKey and event.pressed and not event.echo:
+		_bind_key(event.keycode)
+		get_viewport().set_input_as_handled()
+		return
 	var down := false
 	var up := false
 	if event is InputEventScreenTouch:
@@ -1271,7 +1552,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		down = event.pressed
 		up = not event.pressed
-	elif event is InputEventKey and (event.keycode == KEY_SPACE or event.keycode == KEY_UP):
+	elif event is InputEventKey and (event.keycode == input_key or event.keycode == KEY_UP):
 		down = event.pressed
 		up = not event.pressed
 	if not down and not up:

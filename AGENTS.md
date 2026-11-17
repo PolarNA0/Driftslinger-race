@@ -43,10 +43,15 @@ build is the only client.
 - `godot/scripts/game.gd` — fixed 1/120s tick, modes, records, ghosts.
 - `godot/scripts/render.gd` — top-down orthographic view, road themes, the
   car sprites, and the responsive zoom (see "Fitting every screen").
-- `godot/scripts/app.gd` — the shell: menu, overlays, leaderboard, history,
-  accounts, car picker, the round restart button.
+- `godot/scripts/app.gd` — the shell: the tabbed menu, overlays, leaderboard,
+  history, accounts, car picker, the round restart button.
+- `godot/scripts/menu_shell.gd` — `MenuShell`, the full-screen menu frame:
+  top bar, content sheet, bottom tab bar (see "The menu is a tabbed app
+  shell").
 - `godot/scripts/theme.gd` — `UiTheme`, the one `Theme` for the whole UI
   (palette, button/toggle variations, panels, scrollbars).
+- `godot/scripts/ui_icon.gd` — `UiIcon`, the tab and action icons drawn as
+  geometry, because the theme font has no icon glyphs.
 - `godot/assets/ui/boot_splash.png` — the boot splash, set in `project.godot`.
 - `godot/web/shell.html` — the web export's HTML shell (the custom loader).
 - `godot/scripts/{ghostrun,ghostdata,replay,storage,leaderboard,account}.gd` —
@@ -56,8 +61,8 @@ build is the only client.
 - `godot/scenes/main.tscn`, `godot/project.godot` — scene and project settings.
 - `godot/tools/` — headless verifiers (`parity.gd`, `verify_tracks.gd`,
   `verify_reattach.gd`, `verify_board.gd`, `verify_online.gd`,
-  `verify_guard.gd`) and the ghost baker (`bake_ghosts.gd`). See
-  `godot/README.md`.
+  `verify_guard.gd`, `verify_ui.gd`) and the ghost baker
+  (`bake_ghosts.gd`). See `godot/README.md`.
 
 ### JavaScript (the server's physics)
 
@@ -93,6 +98,7 @@ godot --headless --path godot --script res://tools/verify_reattach.gd # reattach
 godot --headless --path godot --script res://tools/verify_board.gd    # board paging
 godot --headless --path godot --script res://tools/verify_online.gd   # online layer (offline paths)
 godot --headless --path godot --script res://tools/verify_guard.gd    # holding/mashing must lose
+godot --headless --path godot --script res://tools/verify_ui.gd       # menu fits every screen
 godot --headless --path godot --script res://tools/bake_ghosts.gd     # regenerate ghostdata.gd (slow)
 
 # Physics + server verifier (JavaScript, must stay green)
@@ -335,19 +341,52 @@ length and a small release error accumulates into a wall hit by the far end.
   `2*roadHalfWidth*scale` at every row. `syncSize()` re-reads the canvas rect on
   every draw because the WebView lays the page out after the module runs, so the
   zoom worked out in the constructor is wrong until the first real resize.
-- **The Godot menu must fit a phone, and the overlays must scroll.** The project
-  viewport is 420x820 with `canvas_items` stretch and `expand` aspect. The old menu
-  packed a 13-cell track grid plus a 13-swatch car row into one card, so the card
-  measured 664x851 - wider *and* taller than the viewport. Anything past the bottom
-  edge cannot be tapped, which is why players could not reach **Sign in**. Two rules
-  keep it fixed: every overlay card lives inside a `ScrollContainer`
-  (`_new_overlay`), so a tall card scrolls instead of clipping; and no menu row is
-  allowed to be as wide as its content (`_mode_button` wraps, the car swatches and
-  the track list are `GridContainer`s). Tracks moved off the menu onto their own
-  **Tracks** button. If you add a row, re-measure: a card taller than 820 or wider
-  than 420 is the bug coming back. A headless check that presses Sign in and asserts
-  every menu button's `get_global_rect()` is inside the viewport is the cheapest
-  guard.
+- **The Godot menu must fit every screen, and the overlays must scroll.** The
+  project viewport is 420x820 with `canvas_items` stretch and `expand` aspect.
+  The old menu packed everything into one card that measured 664x851 - wider
+  *and* taller than the viewport, so the buttons past the bottom edge could not
+  be tapped (players could not reach **Sign in**). The menu is now a full-screen
+  shell with a scrolling content sheet (see "The menu is a tabbed app shell"),
+  and every modal overlay is a `ScrollContainer` (`_new_overlay`) so a tall card
+  scrolls instead of clipping. A row must never be as wide as its content: grid
+  and segment buttons set `clip_text` and `SIZE_EXPAND_FILL` so they shrink
+  instead of pushing the column past the viewport. `tools/verify_ui.gd` builds
+  the real menu at phone and desktop sizes and fails if any control's
+  `get_global_rect()` leaves the viewport - run it after any menu change.
+## The menu is a tabbed app shell
+
+The menu is not a card floating over the road. `godot/scripts/menu_shell.gd`
+(`MenuShell`) builds the frame a phone app has - a top bar, a content sheet, and
+a bottom tab bar - and fills the whole window at every size. `app.gd` owns the
+tab pages and populates them; the shell owns no game state.
+
+- **Three tabs, plus Settings in the top bar.** Play, Garage, Account across the
+  bottom; the gear in the top-right opens Settings as a modal card (it holds the
+  key binding and the build version). The old "Tracks" button is gone - the
+  track chooser lives on the Play tab as a grid of numbers, with the selected
+  track and its best above it.
+- **`select(name)` is the one entry point.** It toggles the tab buttons, emits
+  `tab_changed`, and `App._on_tab_changed` shows the matching page and refreshes
+  it. Setting a tab's content state must happen *after* `select()`, because
+  `select()` re-runs the refresh (the account form is shown after the refresh,
+  or the refresh would reset it to the overview).
+- **Content is a centred column that reads from the top.** Each page is a
+  `ScrollContainer` holding an `HBoxContainer` with `ALIGNMENT_CENTER` and a
+  single width-capped column, so a tall page scrolls and a wide window keeps a
+  readable column instead of stretching edge to edge. Do not reintroduce a
+  `CenterContainer` - it centres vertically, which floats a short page into the
+  middle of the screen.
+- **The shell's background absorbs input.** The `ShellBg` panel is
+  `MOUSE_FILTER_STOP`, not `IGNORE`: it is opaque, so a click in an empty spot
+  must not fall through to the HUD controls (the pause button) underneath it.
+- **Icons are geometry, not glyphs.** `ui_icon.gd` (`UiIcon`) draws each icon on
+  a 24x24 grid. The theme font has no icon glyphs, so a character like `⚙` or
+  `▶` renders as an empty box - the same trap the restart button hit with U+21BB.
+- **Buttons that carry a label must be able to shrink.** Grid and segment
+  buttons set `clip_text` and `SIZE_EXPAND_FILL`; without it a button reserves
+  its full text width as a minimum and pushes the column past the viewport.
+- **The version line is on Settings**, not under the Play button.
+
 ## UI look, boot splash and fitting every screen
 
 - **All UI colour comes from `godot/scripts/theme.gd` (`UiTheme`).** `App._ready`

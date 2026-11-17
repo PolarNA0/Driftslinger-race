@@ -147,6 +147,17 @@ here.
 godot --headless --path . --script res://tools/verify_online.gd
 ```
 
+`tools/verify_ui.gd` checks the menu layout at phone and desktop sizes. It builds
+the real scene in a `SubViewport` of each size (headless cannot resize the OS
+window), presses the real tabs, and fails if any control lands outside the
+viewport or if a tab's page does not come up. This is the guard for the bug the
+old card menu had: a control taller than the screen, so its buttons could not be
+pressed.
+
+```sh
+godot --headless --path . --script res://tools/verify_ui.gd
+```
+
 `tools/bake_ghosts.gd` regenerates `scripts/ghostdata.gd` from the Godot physics.
 It is slow (a thousand ids per track), so it is a manual step, not a verifier:
 
@@ -178,7 +189,10 @@ The track geometry matches too (track 1: length 3074.0, finishS 3074.0, clean 10
 | `scripts/account.gd` | the old `js/account.js` — Supabase Auth and the `profiles` name |
 | `scripts/render.gd` | the old `js/render.js` — themes, camera, road band, vector and sprite cars |
 | `scripts/game.gd` | the old `js/game.js` — fixed 1/120s tick, modes, records, ghosts |
-| `scripts/app.gd` | the old `js/app.js` — menu, the Tracks/board/history/account overlays, leaderboard, history, accounts |
+| `scripts/app.gd` | the old `js/app.js` — the tabbed menu (Play/Garage/Account), the board/history/settings overlays, leaderboard, history, accounts |
+| `scripts/menu_shell.gd` | new — the full-screen app shell: top bar, content sheet, bottom tab bar |
+| `scripts/theme.gd` | new — `UiTheme`, the one `Theme` for the whole UI (palette, button variations, panels, scrollbars) |
+| `scripts/ui_icon.gd` | new — `UiIcon`, the tab and action icons drawn as geometry (the theme font has no glyphs) |
 
 The PRNG is reproduced exactly (masking products to 32 bits, the way JS
 `Math.imul` does) so a seed is the same road in both builds — which is what a
@@ -191,3 +205,6 @@ shared leaderboard or replay needs.
 ```sh
 xvfb-run -a godot --path . -- --shot /tmp/shot.png
 ```
+
+Add `--shot-tab <play|garage|account>` to capture a menu tab, or `--shot-menu`
+for the menu as it opens.
