@@ -128,7 +128,17 @@ func _ready() -> void:
 
 func _capture_after(secs: float) -> void:
 	var args := OS.get_cmdline_user_args()
-	if not args.has("--shot-menu"):
+	# `--shot-overlay <name>` opens one of the menu overlays for a headless layout
+	# check; without it the shot is a run in progress (or the menu with --shot-menu).
+	if args.has("--shot-overlay"):
+		var which: String = args[args.find("--shot-overlay") + 1]
+		match which:
+			"tracks": _show_tracks()
+			"board": _show_leaderboard(menu_seed)
+			"history": _show_history()
+			"account": _open_account("register")
+			_: _to_menu()
+	elif not args.has("--shot-menu"):
 		_start_run(menu_seed)
 	await get_tree().create_timer(secs).timeout
 	var img := get_viewport().get_texture().get_image()
