@@ -203,6 +203,31 @@ only until that client is removed; the Godot build supersedes all of it.
   `android/build.sh`, copy the result over `slingdrift.apk`, and bump
   `versionCode`/`versionName` so devices update instead of ignoring the install.
 
+## The on-screen keyboard (signing in on a phone)
+
+Sign-in needs a keyboard, and on a phone that keyboard is the OS one. Two
+different platforms, two different traps:
+
+- **Web build: the export preset must turn it on.**
+  `html/experimental_virtual_keyboard` is `false` by default in Godot, and the
+  web shell gates the whole thing on it: `library_godot_display.js` returns
+  `GodotConfig.virtual_keyboard && 'ontouchstart' in window` from its
+  `virtualKeyboard.available()` check. With the flag off there is no text input
+  element to focus, so tapping a `LineEdit` on a phone does nothing and the
+  account form cannot be filled in. It is `true` in `export_presets.cfg` now. If
+  sign-in ever "does nothing" on a phone again, check this first - it is one
+  boolean, and desktop is unaffected because those users have a real keyboard,
+  which is why the report is "some people".
+- **Android build: `screen/immersive_mode=true` is a second suspect.** Immersive
+  mode keeps the app fullscreen and can stop the soft keyboard from showing for a
+  focused `LineEdit` on some devices and Android versions. Godot 4.5 should force
+  the keyboard for a focused line edit regardless, but if the APK still refuses to
+  raise it, turn immersive mode off (accepting the status/nav bars) and retest
+  before digging deeper.
+
+`LineEdit` is the right node either way - `Input.virtual_keyboard_show` and
+`virtual_keyboard_enabled` only matter for custom `Control`s.
+
 ## The one rule that matters
 
 Holding or mashing the button must never trivialise the game. An earlier build

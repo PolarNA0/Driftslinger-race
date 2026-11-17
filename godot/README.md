@@ -53,7 +53,10 @@ is the work that has to happen before the JS client can be deleted:
 
 ## Export
 
-Both presets ship in `export_presets.cfg`: **Web** and **Android**.
+Both presets ship in `export_presets.cfg`: **Web** and **Android**. The Web
+preset sets `html/experimental_virtual_keyboard=true`, which is what raises the
+on-screen keyboard when a player taps an account field on a phone - leave it on,
+or sign-in is impossible on mobile browsers (see `../AGENTS.md`).
 
 ```sh
 # Web (static site in build/web)
