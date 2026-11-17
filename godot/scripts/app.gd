@@ -393,7 +393,7 @@ func _build_menu() -> void:
 	menu_track_button.custom_minimum_size = Vector2(0, 46)
 	col.add_child(menu_track_button)
 	tracks_sub = _label("", 13)
-	tracks_sub.add_theme_color_override("font_color", Color(1, 1, 1, 0.6))
+	tracks_sub.add_theme_color_override("font_color", UiTheme.INK_DIM)
 	col.add_child(tracks_sub)
 
 	var actions := _row(8)
@@ -504,7 +504,7 @@ func _build_track_list(parent: Node) -> void:
 func _build_tracks() -> void:
 	var col := _new_overlay("tracks", "Tracks")
 	var hint := _label("Pick a track, then Play.", 13)
-	hint.add_theme_color_override("font_color", Color(1, 1, 1, 0.6))
+	hint.add_theme_color_override("font_color", UiTheme.INK_DIM)
 	col.add_child(hint)
 	var list := _col(6)
 	col.add_child(list)
@@ -732,7 +732,7 @@ func _build_account() -> void:
 	acct_pass.secret = true
 	col.add_child(acct_pass)
 	acct_error = _label("", 14)
-	acct_error.add_theme_color_override("font_color", Color(1, 0.4, 0.4))
+	acct_error.add_theme_color_override("font_color", UiTheme.DANGER)
 	col.add_child(acct_error)
 	acct_submit = _button("Sign in", func():
 		if acct_mode == "name":
