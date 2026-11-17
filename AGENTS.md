@@ -342,6 +342,16 @@ length and a small release error accumulates into a wall hit by the far end.
   shell (`html/custom_html_shell` in `export_presets.cfg`): full-viewport canvas,
   `dvh` sizing, safe-area padding, no page scroll or pinch-zoom, and a branded
   progress bar. Boot → loader → menu is meant to be one continuous look.
+- **Comment `project.godot` with `;`, never `#`.** Godot's `ConfigFile` parser
+  treats only `;` as a comment. A `#` line is not a comment: it is glued onto the
+  next key, so `# ...` before `boot_splash/image=...` renames that key to
+  `application/#...boot_splash/image` and the real setting parses as **empty**.
+  Godot then silently falls back to the engine's built-in Godot-logo splash, and
+  the web loader's `index.png` ships that robot instead of the game's mark - the
+  game itself boots fine, so it looks like a web-only splash bug. `#` comments in
+  `project.godot` are the trap; `;` is correct (Godot's own `; Engine
+  configuration file` first line uses it). Same rule for any `.cfg`/`.import`
+  parsed by ConfigFile.
 - **The zoom is capped so a desktop window does not fill with tarmac.**
   `render.gd` picks `_scale = min(width_frac_zoom, _h / MIN_WORLD_H)`.
   `ROAD_W_FRAC` (0.358) and `MIN_WORLD_H` (500) are chosen to agree at the
