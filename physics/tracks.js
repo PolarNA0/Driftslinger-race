@@ -85,27 +85,6 @@ function def(n) {
 }
 
 /**
- * The tracks the game ships, in menu order.
- *
- * Tracks 6-20 were removed: they were the same staircase with the radius and
- * rhythm cycled, so they added menu length without adding a shape. The remaining
- * numbers are kept exactly as they were - 21-25 are still the advanced tracks -
- * so a leaderboard entry or a replay for track 1 is still track 1. That leaves
- * gaps, which is deliberate: replacement tracks will be dropped into the empty
- * numbers later, and they will be new roads rather than another cycling of these.
- *
- * A track number outside this list is not playable, and the verifier refuses it,
- * so no run can be posted to a road the game does not show.
- */
-export const PLAYABLE_TRACKS = [1, 2, 3, 4, 5, 21, 22, 23, 24, 25];
-
-/** How many tracks ship. Prefer this to a literal in loops and menus. */
-export const TRACK_COUNT = PLAYABLE_TRACKS.length;
-
-/** Is `n` a track the game plays? Guards the verifier and the board alike. */
-export const isPlayableTrack = (n) => Number.isInteger(n) && PLAYABLE_TRACKS.includes(n);
-
-/**
  * The advanced tracks (21-25).
  *
  * These are not staircases. Each is built from an explicit op list, which lets a
@@ -176,10 +155,81 @@ function advancedOps(spec, radius) {
   for (const d of defs) {
     const g = (d.gap ?? 0) + (d.scale ?? 1) * per;
     if (g > 1) ops.push({ t: 'L', len: g });
-    ops.push({ t: 'A', deg: d.deg, r: d.r ?? radius });
+    ops.push({ t: 'A', deg: d.deg, r: d.r ?? radius, reattach: !!d.reattach });
   }
   return ops;
 }
+
+/**
+ * The three reattach showcase tracks (26-28).
+ *
+ * Same op-list builder as the advanced tracks, but their corners carry
+ * `reattach: true`, so letting go before an arc is finished leaves that pillar
+ * live and it can be caught again - for a slingshot scaled by how far you flew
+ * (see Car.release and Car.tryGrab). Each opens with a long, wide corner so there
+ * is room to bail out, fly, and come back round.
+ */
+const REATTACH = {
+  26: {
+    leadIn: 640, targetTime: 10.4,
+    defs: [
+      { deg: 90, r: 86, reattach: true, gap: 150 },
+      { deg: -90, r: 74, reattach: true, gap: 150 },
+      { deg: 90, r: 86, reattach: true, gap: 150 },
+      { deg: -90, r: 74 },
+      { deg: 90, r: 62 },
+    ],
+  },
+  27: {
+    leadIn: 660, targetTime: 10.5,
+    defs: [
+      { deg: 180, r: 88, reattach: true, gap: 170 },
+      { deg: -90, r: 74, reattach: true, gap: 150 },
+      { deg: 90, r: 74, reattach: true, gap: 150 },
+      { deg: -90, r: 62 },
+    ],
+  },
+  28: {
+    leadIn: 640, targetTime: 10.6,
+    defs: [
+      { deg: 90, r: 88, reattach: true, gap: 160 },
+      { deg: 90, r: 78, reattach: true, gap: 160 },
+      { deg: -90, r: 70, reattach: true, gap: 150 },
+      { deg: -90, r: 62 },
+      { deg: 90, r: 62 },
+    ],
+  },
+};
+
+/**
+ * The tracks the game ships, in menu order.
+ *
+ * Tracks 6-20 were removed: they were the same staircase with the radius and
+ * rhythm cycled, so they added menu length without adding a shape. The remaining
+ * numbers are kept exactly as they were - 21-25 are still the advanced tracks -
+ * so a leaderboard entry or a replay for track 1 is still track 1. That leaves
+ * gaps, which is deliberate: replacement tracks will be dropped into the empty
+ * numbers later, and they will be new roads rather than another cycling of these.
+ *
+ * The set is *derived*, not written out by hand. The staircase tracks are a fixed
+ * base, and the op-list tracks declare themselves in ADVANCED and REATTACH.
+ * Adding a track is therefore one entry in one of those tables and nothing else:
+ * the server, the board and the verifier all read this list, so a new track
+ * cannot be forgotten in one of them and shipped as "cannot be uploaded". A
+ * number outside the list is not playable, and the verifier refuses it, so no run
+ * can be posted to a road the game does not show.
+ */
+export const PLAYABLE_TRACKS = [
+  ...[1, 2, 3, 4, 5],                   // the staircase tracks
+  ...Object.keys(ADVANCED).map(Number),  // the hairpin/loop tracks (21-25)
+  ...Object.keys(REATTACH).map(Number),  // the reattach showcase tracks (26-28)
+].sort((a, b) => a - b);
+
+/** How many tracks ship. Prefer this to a literal in loops and menus. */
+export const TRACK_COUNT = PLAYABLE_TRACKS.length;
+
+/** Is `n` a track the game plays? Guards the verifier and the board alike. */
+export const isPlayableTrack = (n) => Number.isInteger(n) && PLAYABLE_TRACKS.includes(n);
 
 /**
  * The definition (geometry, not the road itself) for track number `n`.
@@ -192,6 +242,18 @@ export const trackDef = (n) => def(n);
 
 /** The options object a Track wants for track number `n`. */
 export function trackOpts(n) {
+  const re = REATTACH[n];
+  if (re) {
+    const radius = 70;
+    return {
+      corners: re.defs.length,
+      radius,
+      leadIn: re.leadIn,
+      finishLen: 460,
+      targetTime: re.targetTime,
+      ops: advancedOps(re, radius),
+    };
+  }
   const adv = ADVANCED[n];
   if (adv) {
     const radius = 62;

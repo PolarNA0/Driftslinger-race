@@ -123,6 +123,8 @@ export class Track {
           k: this.fillets.length, c, r, sign: s, a1, a2, phi: th,
           t1: this.cur, t2: { x: c.x + Math.cos(a2) * r, y: c.y + Math.sin(a2) * r },
           s0: this.length, s1: this.length + r * Math.abs(th),
+          // A pillar you can re-grab after letting go early (see Car.release).
+          reattach: !!op.reattach,
         };
         this.fillets.push(fil);
         this.pushArc(fil);

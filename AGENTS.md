@@ -44,7 +44,9 @@ build is the only client.
   (arc-length per point).
 - `godot/scripts/tracks.gd` — the menu tracks: the ten ported time-attack
   tracks (`PLAYABLE_TRACKS`), plus the reattach showcase tracks 26–28. Tracks
-  6–20 were removed, so the numbers are not a contiguous range.
+  6–20 were removed, so the numbers are not a contiguous range. `PLAYABLE_TRACKS`
+  and `MENU_TRACKS` are *derived* from the `ADVANCED`/`REATTACH_TRACKS` tables, so
+  a new track is one entry and it joins the menu at once.
 - `godot/scripts/car.gd` — the physics. `step(dt, held)` is pure and testable.
 - `godot/scripts/game.gd` — fixed 1/120s tick, modes, records, replays.
 - `godot/scripts/render.gd` — top-down orthographic view, road themes, the
@@ -79,13 +81,19 @@ build is the only client.
   (arc-length per point). Takes `opts` (`corners`, `radius`, `leadIn`,
   `finishLen`, `segLens`, `targetTime`) so a finite track can have its own shape;
   endless play passes none and gets the uniform `CFG` lengths.
-- `physics/tracks.js` — the ten playable time-attack tracks (`PLAYABLE_TRACKS`:
-  1–5 and 21–25; 6–20 were removed). `trackDef(n)` is a pure
+- `physics/tracks.js` — the playable time-attack tracks (1–5 and 21–25; 6–20
+  were removed) plus the reattach showcase tracks 26–28. `PLAYABLE_TRACKS` is
+  *derived* from the track tables (the staircase base plus the `ADVANCED` and
+  `REATTACH` op-list tables), so adding a track is one entry in one table and it
+  joins the menu, the server verifier and the upload path at once. `trackDef(n)`
+  is a pure
   function of the track number: radius, corner count, lead-in and the straight
   rhythm all come out of `n`, so a track is identical on every device (which the
   leaderboard and replays rely on). `targetTime` makes `Track.buildFinish` size
   the closing straight to land the clock on ~10s.
-- `physics/car.js` — the physics. `step(dt, held)` is pure and testable.
+- `physics/car.js` — the physics. `step(dt, held)` is pure and testable. Carries
+  the reattach pillar (a live pillar reopens on an early release; a paying re-catch
+  is a slingshot), so the server can verify a run on tracks 26–28.
 - `physics/util.js` — `angDiff`, `mulberry32` (bit-exact with the Godot port).
 - `tools/test.mjs` — headless tests for the physics and the server's run
   verifier. Must stay green.
@@ -319,11 +327,14 @@ length and a small release error accumulates into a wall hit by the far end.
     release that ends every arc stays exactly as it was.
   - The multiplier rides in `Car.speed_scale`, folded into one step's travel by
     `drift` and `fly` (and into the release snap), so the speed change is real but
-    short-lived (`CFG.REATTACH_EFFECT_TIME`). It lives only in the Godot physics
-    (`car.gd`); the verified JS `physics/` has no reattach, so 26-28 stay
-    local-only and the parity goldens are untouched. `verify_reattach.gd` proves
+    short-lived (`CFG.REATTACH_EFFECT_TIME`). It lives in both physics: the Godot
+    build (`car.gd`) and the verified JS `physics/` (`car.js`, the `reattach*`
+    numbers in `config.js`). The JS port is what lets the server verify a run on
+    tracks 26-28, so a change here has to be made on both sides and re-vendored with
+    `tools/sync-physics.mjs`. `verify_reattach.gd` proves
     spam earns nothing, a longer detour earns more, over-committing loses the run,
-    and the clean line is untouched.
+    and the clean line is untouched; `tools/test.mjs` proves the same on the JS
+    physics, plus that a reattach run round-trips through the server verifier.
 
 ## Endless mode ramps
 
@@ -741,12 +752,25 @@ credentials), not a username and a password. The username is a separate, public
 `profiles` row: register collects it, and a sign-in that lands on an account with
 no profile yet asks for one.
 
-**Tracks 26-28 cannot be uploaded yet.** The server validates `1..25`
-(`supabase/functions/board/index.ts`, and `TRACK_COUNT` in the vendored physics),
-while the Godot build has 28 tracks, and the reattach physics exists only in
-`godot/scripts/car.gd`. A reattach run is therefore rejected with a 422 and dropped
-from the queue. Teaching the server the reattach physics is the work that unblocks
-it; until then those three tracks are local-only.
+**Tracks 26-28 upload, and a new track joins the tracker for free.** The server
+validates a run against the game's own track set: `PLAYABLE_TRACKS` in the vendored
+physics (`supabase/functions/_shared/physics/tracks.js`), which is derived from the
+track tables, and `isPlayableTrack` guards both the `run` and `board` functions. A
+reattach run verifies because the reattach pillar is now in the verified JS physics
+(`physics/car.js`), not only in `godot/scripts/car.gd`.
+
+Adding a track is therefore one entry in one track table (`physics/tracks.js` for
+the server, `godot/scripts/tracks.gd` for the game) and nothing else: both sides
+*derive* their playable set from those tables, the tracker announces any accepted
+run with no list of its own, and `runs.track` no longer carries a hard-coded set
+(`0004` relaxes it to `track > 0`, leaving the function as the authority). Do not
+reintroduce a hand-written track list in `PLAYABLE_TRACKS`, the DB constraint, or
+the `board`/`run` functions - that is exactly what left 26-28 unuploadable.
+
+The one place the two physics must stay in step is the reattach numbers: change
+`physics/car.js` + `physics/config.js` and `godot/scripts/car.gd` + `cfg.gd`
+together, then `node tools/sync-physics.mjs`. `tools/test.mjs` and
+`verify_reattach.gd` assert the same claims on each side.
 
 ### Endless leaderboards should be added soon
 

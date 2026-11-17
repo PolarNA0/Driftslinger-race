@@ -121,6 +121,98 @@ console.log('a spent pole cannot be re-grabbed');
   ok(c2.grabbed === 0, 'releasing immediately should never grab anything');
 }
 
+console.log('a reattach pillar can be re-grabbed, and pays by the detour');
+{
+  // The server verifies these runs now, so the JS physics must carry the same
+  // reattach behaviour the Godot build has. The claims mirror verify_reattach.gd.
+  const DT2 = FIXED_DT;
+
+  // 1) A plain pillar is spent the moment it is released: bail early on track 1's
+  //    first corner and it can never be caught again.
+  {
+    const t = new Track(1, trackOpts(1));
+    const c = new Car(); c.reset(t);
+    let released = false, i = 0;
+    while (c.alive && !c.finished && i++ < 200000) {
+      let held = true;
+      if (c.attached && c.corner === 0 && c.remaining > 0 && !released) {
+        held = false; released = true;
+      }
+      c.step(DT2, held);
+    }
+    ok(released && c.regrabs === 0, 'a plain pillar must stay spent after release');
+  }
+
+  // Drive a reattach track. `wait` is how many steps the car flies off the first
+  // reattach pillar before holding again; `bail` is how far round the arc it lets
+  // go. A clean line rides every arc out and never re-grabs.
+  const slingshot = (n, wait, bail = 0.4) => {
+    const t = new Track(n, trackOpts(n));
+    const c = new Car(); c.reset(t);
+    let corner = -1, bailed = false, waited = 0, maxS = 1, i = 0;
+    while (c.alive && !c.finished && i++ < 200000) {
+      let held = false;
+      if (c.attached) {
+        const f = t.fillets[c.corner];
+        if (corner < 0 && f.reattach) corner = c.corner;
+        if (c.corner === corner && corner >= 0 && !bailed) {
+          const arc = Math.abs(f.a2 - f.a1);
+          const frac = 1 - c.remaining / arc;
+          if (frac >= bail) { held = false; bailed = true; } else { held = c.remaining > 0; }
+        } else {
+          held = c.remaining > 0;
+        }
+      } else if (bailed && c.corner === corner && waited < wait) {
+        waited++; held = false;
+      } else {
+        const f2 = t.fillets[c.corner];
+        held = Math.hypot(f2.c.x - c.x, f2.c.y - c.y) <= CFG.grabRange * CFG.reattachGrabMult;
+      }
+      c.step(DT2, held);
+      maxS = Math.max(maxS, c.speedScale);
+    }
+    return { c, maxS };
+  };
+
+  const clean = (n) => {
+    const t = new Track(n, trackOpts(n));
+    const c = new Car(); c.reset(t);
+    let maxS = 1, minS = 1, i = 0;
+    while (c.alive && !c.finished && i++ < 200000) {
+      let held = false;
+      if (c.attached) held = c.remaining > 0;
+      else {
+        const f = t.fillets[c.corner];
+        held = Math.hypot(f.c.x - c.x, f.c.y - c.y) <= CFG.grabRange;
+      }
+      c.step(DT2, held);
+      maxS = Math.max(maxS, c.speedScale);
+      minS = Math.min(minS, c.speedScale);
+    }
+    return { c, maxS, minS };
+  };
+
+  for (const n of [26, 27, 28]) {
+    const cl = clean(n);
+    ok(cl.c.finished && cl.maxS === 1 && cl.minS === 1,
+      `track ${n}: the clean line should be untouched by the slingshot`);
+    ok(cl.c.regrabs === 0, `track ${n}: the clean line should never re-grab`);
+    ok(cl.c.maxOff < CFG.roadHalfWidth, `track ${n}: the clean line should stay on the road`);
+
+    const spam = slingshot(n, 0);
+    const short = slingshot(n, 8);
+    const long = slingshot(n, 24);
+    ok(spam.c.finished && spam.maxS === 1, `track ${n}: a quick re-catch should earn nothing`);
+    ok(short.c.finished && short.maxS > 1, `track ${n}: a real detour should boost`);
+    ok(long.maxS > short.maxS, `track ${n}: a longer detour should boost more`);
+    ok(long.c.time < cl.c.time - 0.05, `track ${n}: a long slingshot should beat the clean line`);
+
+    // Over-committing: fly too far and the pole is out of reach, so the run dies.
+    const over = slingshot(n, 60);
+    ok(!over.c.finished, `track ${n}: over-committing a reattach should lose the run`);
+  }
+}
+
 console.log('release timing is forgiving');
 {
   // Releasing up to ~20 degrees early should still complete a run.
@@ -309,8 +401,15 @@ console.log('the playable tracks are distinct and all finish near ten seconds');
     ok(!isPlayableTrack(gone), `track ${gone} should no longer be playable`);
   }
   ok(isPlayableTrack(21) && isPlayableTrack(5), 'the kept tracks should still be playable');
-  ok(!isPlayableTrack(0) && !isPlayableTrack(26) && !isPlayableTrack(1.5),
+  // The reattach showcase tracks ship, so they must be playable - the bug was the
+  // server refusing a run on a track the game shows.
+  ok(isPlayableTrack(26) && isPlayableTrack(27) && isPlayableTrack(28),
+    'the reattach showcase tracks should be playable');
+  ok(!isPlayableTrack(0) && !isPlayableTrack(29) && !isPlayableTrack(1.5),
     'out-of-range and fractional tracks must not be playable');
+  // The playable set is derived from the track tables, so adding a track there
+  // must be the only step: nothing may hard-code the list.
+  ok(TRACK_COUNT === 13, `the shipped track count should be 13, got ${TRACK_COUNT}`);
 
   // A track keeps its own road: track 21 is the same road it was before the gap,
   // so its shape is not a function of how many tracks happen to exist.
@@ -391,8 +490,27 @@ console.log('a submitted run is verified by re-simulation, never trusted');
 
   // The playable set is not a range (6-20 were removed), so a run on a removed
   // track must be refused even though it is under the old 1..25 ceiling.
-  for (const gone of [6, 20, 26, 0, 1.5]) {
+  for (const gone of [6, 20, 0, 1.5, 29]) {
     ok(!replayRun(gone, encoded).ok, `a run on track ${gone} must be rejected`);
+  }
+  // A run on a reattach showcase track now verifies: the server learned the
+  // reattach physics, so these tracks are no longer rejected with a 422.
+  {
+    const rt = new Track(26, trackOpts(26));
+    const rc = new Car(); rc.reset(rt);
+    const rsteps = [];
+    let k = 0;
+    while (rc.alive && k++ < 200000) {
+      const h = rc.attached
+        ? rc.remaining > 0
+        : Math.hypot(rc.fillet.c.x - rc.x, rc.fillet.c.y - rc.y) <= CFG.grabRange;
+      rsteps.push(h);
+      rc.step(FIXED_DT, h);
+    }
+    ok(rc.finished, 'a clean line on track 26 should finish');
+    const rv = replayRun(26, encodeSteps(rsteps));
+    ok(rv.ok, 'a run on reattach track 26 should verify, not be rejected');
+    ok(Math.abs(rv.time - rc.time) < 1e-9, 'the server should reproduce the reattach run');
   }
   ok(!replayRun(1, 'nonsense').ok, 'non-binary steps must be rejected');
   ok(!replayRun(1, '').ok, 'an empty step string must be rejected');

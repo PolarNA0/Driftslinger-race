@@ -2,7 +2,7 @@
 // Copied verbatim from physics/car.js so the Edge Function replays runs with exactly
 // the physics the game runs. Edit physics/car.js and re-run the sync.
 import { CFG } from './config.js';
-import { angDiff, clamp } from './util.js';
+import { angDiff, clamp, lerp } from './util.js';
 
 const TAU = Math.PI * 2;
 
@@ -47,8 +47,19 @@ export class Car {
     this.orbitAngle = 0;
     this.sign = 1;
     this.radius = CFG.driftRadius;
-    this.spent = -1;       // corner we have let go of, which cannot be grabbed again
+    // Corners we have spent: a plain pillar is spent the moment it is let go, a
+    // reattach pillar only when its arc is ridden to the end (see `release`).
+    this.spentCorners = {};
+    this.grabbedCorners = {};  // grabs per corner, so one reattach per pillar pays
     this.grabbed = 0;
+    this.regrabs = 0;
+    this.releasedCorner = -1;  // corner we last let go of
+    this.releasedAngle = 0;    // the angle we left it from, for a re-grab's unwrap
+    this.reattachAttempt = false;  // armed by bailing out of a live reattach pillar
+    this.detourPx = 0;             // how far we have flown since that bail
+    this.travelled = 0;            // distance actually covered (the endless score)
+    this.speedScale = 1;           // the reattach slingshot, when one is running
+    this.effectTimer = 0;          // how long it still lasts
     this.alive = true;
     this.dead = null;
     this.finished = false;
@@ -71,9 +82,22 @@ export class Car {
 
   get fillet() { return this.track.fillets[this.corner]; }
 
+  /**
+   * The car's speed right now: the base speed, and the reattach slingshot if one
+   * is running. Kept in one place so drift, fly and the release snap can never
+   * disagree about how fast the car is going.
+   */
+  speed() { return CFG.speed * this.speedScale; }
+
   step(dt, held) {
     if (!this.alive || this.finished) return this;
     this.time += dt;
+    // A reattach boost is brief: count it down so the next step is back to the
+    // base speed unless another reattach lands.
+    if (this.effectTimer > 0) {
+      this.effectTimer = Math.max(0, this.effectTimer - dt);
+      if (this.effectTimer === 0) this.speedScale = 1;
+    }
 
     if (held) {
       if (!this.attached) this.tryGrab();
@@ -100,6 +124,9 @@ export class Car {
       this.s = p.s;
     }
     if (p.d > this.maxOff) this.maxOff = p.d;
+    // While a reattach is armed and we are off the pole, accumulate how far we have
+    // flown. That detour is what the slingshot is scaled by.
+    if (this.reattachAttempt && !this.attached) this.detourPx += this.speed() * dt;
     // Crossing the finish line ends the run cleanly, even if the car is
     // mid-swing. Checked before the wall so a win on the line is not a crash.
     if (this.s >= this.track.finishS) {
@@ -134,20 +161,50 @@ export class Car {
    */
   tryGrab() {
     const f = this.fillet;
-    if (this.corner === this.spent) return false;
+    if (this.spentCorners[this.corner]) return false;
     const d = Math.hypot(f.c.x - this.x, f.c.y - this.y);
-    if (d > CFG.grabRange) return false;
+    // Catching the same pole again after a bail reaches further than a fresh grab:
+    // a committed detour takes the car away from the pole, and without the extra
+    // reach there would be no room to fly and still come back.
+    const isRegrab = this.corner === this.releasedCorner && this.grabbedCorners[this.corner] !== undefined;
+    let reach = CFG.grabRange;
+    if (isRegrab && f.reattach) reach = CFG.grabRange * CFG.reattachGrabMult;
+    if (d > reach) return false;
     this.attached = true;
     this.sign = f.sign;
     this.radius = clamp(d, CFG.minGrabRadius, f.r + CFG.grabRange);
     // Unwrap the orbit angle onto the arc. atan2 returns (-PI, PI], so a raw
     // value cannot represent a corner that turns 180 or 270 degrees - the
     // "distance left to the end of the arc" would wrap and read as already done.
-    // Pick the representative congruent to the angle that sits nearest the arc's
-    // start; from there the drift accumulates without wrapping, and `done` /
-    // `remaining` compare straight against `a2` however far round the corner goes.
+    // Normally we unwrap onto the arc start: a fresh grab is made on the approach,
+    // with the car sitting near the entry. A re-grab is different - the car flew
+    // off partway round, so unwrap onto the angle it left from. Using the entry
+    // there would drop the car back to the start and throw away its progress.
     const raw = Math.atan2(this.y - f.c.y, this.x - f.c.x);
-    this.orbitAngle = raw + TAU * Math.round((f.a1 - raw) / TAU);
+    const ref = this.corner === this.releasedCorner ? this.releasedAngle : f.a1;
+    this.orbitAngle = raw + TAU * Math.round((ref - raw) / TAU);
+    if (isRegrab) {
+      this.regrabs++;
+      // Catching a pole we bailed out of: the detour since the bail is the
+      // slingshot. A quick release-and-recatch flew almost nowhere, so it earns
+      // nothing; a long, committed detour earns the most. A pillar pays at most
+      // once - a paying catch spends it - so grinding one pole cannot stack.
+      if (this.reattachAttempt && f.reattach) {
+        const t = clamp(
+          (this.detourPx - CFG.reattachMinDetour) / (CFG.reattachRefDetour - CFG.reattachMinDetour),
+          0, 1,
+        );
+        if (t > 0) {
+          this.speedScale = lerp(1, CFG.reattachBoostMax, t);
+          this.effectTimer = CFG.reattachEffectTime;
+          this.spentCorners[this.corner] = true;
+        }
+      }
+      this.reattachAttempt = false;
+    }
+    // Count the grabs per pillar: one reattach pays, a second on the same pillar
+    // does not, and each pillar is counted on its own.
+    this.grabbedCorners[this.corner] = (this.grabbedCorners[this.corner] ?? 0) + 1;
     this.grabbed++;
     return true;
   }
@@ -188,17 +245,20 @@ export class Car {
         ? f.r - this.radius
         : Math.sign(f.r - this.radius) * step;
     }
-    const total = CFG.speed * dt;
+    const total = this.speed() * dt;
     const tangential = Math.sqrt(Math.max(0, total * total - dR * dR));
     this.orbitAngle += (this.sign * tangential) / this.radius;
     this.radius += dR;
+    this.travelled += total;
     this.place();
   }
 
   fly(dt) {
     this.centre(dt);
-    this.x += Math.cos(this.angle) * CFG.speed * dt;
-    this.y += Math.sin(this.angle) * CFG.speed * dt;
+    const d = this.speed() * dt;
+    this.x += Math.cos(this.angle) * d;
+    this.y += Math.sin(this.angle) * d;
+    this.travelled += d;
   }
 
   /**
@@ -235,14 +295,29 @@ export class Car {
    */
   release(dt) {
     const f = this.fillet;
-    const step = (CFG.speed / this.radius) * dt;
-    if (this.done && this.sign * (this.orbitAngle - f.a2) <= step) {
+    const step = (this.speed() / this.radius) * dt;
+    const carried = this.done;
+    if (carried && this.sign * (this.orbitAngle - f.a2) <= step) {
       this.orbitAngle = f.a2;
       this.radius = f.r;
       this.place();
     }
     this.attached = false;
-    this.spent = this.corner;
+    this.releasedCorner = this.corner;
+    this.releasedAngle = this.orbitAngle;
+    // A plain pillar is spent the moment you let go. A reattachable pillar is
+    // spent only by riding the arc to its end: bail out early and it stays open,
+    // so the same pole can be caught again. An ordinary clean line rides every
+    // arc out, so its behaviour is unchanged.
+    //
+    // Bailing out of a live reattach pillar arms the slingshot: the detour from
+    // here to the re-catch is what a later catch pays out on. Riding the arc out
+    // does not arm it, and spends the pillar as before.
+    if (!carried && f.reattach) {
+      this.reattachAttempt = true;
+      this.detourPx = 0;
+    }
+    if (carried || !f.reattach) this.spentCorners[this.corner] = true;
   }
 
   /**
@@ -264,5 +339,10 @@ export class Car {
     return this.sign * (this.orbitAngle - f.a2) >= 0;
   }
 
-  get distance() { return this.time * CFG.speed; }
+  /**
+   * Distance covered, in pixels. This is what was actually travelled, not time x
+   * base speed: a reattach slingshot is faster than the base speed, so the two
+   * would diverge. It is the endless score.
+   */
+  distance() { return this.travelled; }
 }

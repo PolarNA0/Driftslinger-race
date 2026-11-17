@@ -59,4 +59,20 @@ export const CFG = {
                        // given. Otherwise the builder sizes it to hit the target.
   speedrunStartFrac: 0.15, // the car starts this far along the lead-in, so the
                            // clock starts a little into the road.
+
+  // --- reattach pillars ------------------------------------------------------
+  // A reattach pillar stays live if you let go before its arc is done, so you can
+  // fly off and catch the same pole again. The reward is a slingshot, scaled by the
+  // detour: the longer you fly before re-catching, the bigger the speed boost, up
+  // to a cap. A quick release-and-recatch - the "spam" line - flies almost nowhere,
+  // so it earns almost nothing, which is what keeps spamming from being the way.
+  // The boost is granted at most once per pillar, so grinding one pole cannot stack.
+  reattachBoostMax: 1.3,    // speed multiplier at a full-length detour
+  reattachEffectTime: 0.7,  // how long the boost lasts, seconds
+  reattachMinDetour: 6.0,   // detour (px) below which there is no boost
+  reattachRefDetour: 90.0,  // detour (px) that earns the full boost
+  // A reattach pillar reaches further than an ordinary one, so a committed detour
+  // can still be caught. Without it the pole radius leaves only a sliver of flight
+  // before the car is out of range, and there is no room for a real detour.
+  reattachGrabMult: 1.6,
 };

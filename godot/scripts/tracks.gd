@@ -10,7 +10,22 @@ class_name Tracks
 # were (21-25 are still the advanced tracks), so a leaderboard entry or a replay
 # for track 1 is still track 1. The gaps are deliberate: replacements will be
 # dropped into the empty numbers later.
-const PLAYABLE_TRACKS := [1, 2, 3, 4, 5, 21, 22, 23, 24, 25]
+#
+# The set is *derived* from the track tables (ADVANCED, REATTACH_TRACKS below), so
+# adding a track is one entry in one table and nothing else: it joins the menu, the
+# verifier and the upload path at once, and cannot be forgotten in one of them and
+# shipped as "cannot be uploaded". This mirrors the JS physics (physics/tracks.js),
+# which derives its playable set the same way.
+static func _track_numbers() -> Array:
+	var nums := [1, 2, 3, 4, 5]
+	for k in ADVANCED.keys():
+		nums.append(int(k))
+	for k in REATTACH_TRACKS.keys():
+		nums.append(int(k))
+	nums.sort()
+	return nums
+
+static var PLAYABLE_TRACKS := _track_numbers()
 
 # Is `n` a track the game plays? The set has gaps, so a range check would accept a
 # removed track; membership is the honest test.
@@ -108,9 +123,11 @@ const REATTACH_TRACKS := {
 
 # Every track number the game shows, in menu order: the ported time-attack tracks
 # first, then the reattach showcase tracks. The numbers are their own, not their
-# menu position, so removing tracks 6-20 leaves the kept tracks unshifted.
+# menu position, so removing tracks 6-20 leaves the kept tracks unshifted. Derived
+# from the same tables as PLAYABLE_TRACKS, so the menu and the upload path cannot
+# disagree about which tracks exist.
 const FIRST_REATTACH_TRACK := 26
-const MENU_TRACKS := [1, 2, 3, 4, 5, 21, 22, 23, 24, 25, 26, 27, 28]
+static var MENU_TRACKS := PLAYABLE_TRACKS
 
 # Is `n` a track the menu offers? Guards the menu seed the same way the playable
 # set guards the verifier.
