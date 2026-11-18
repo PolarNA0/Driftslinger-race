@@ -139,8 +139,9 @@ func _build_tab_bar() -> void:
 	margin.add_child(row)
 
 	# Garage on the left, Play in the middle, Account on the right - the order a
-	# player expects, with the primary tab where the thumb rests.
-	for spec in [["garage", "garage", "Garage"], ["play", "play", "Play"], ["account", "account", "Account"]]:
+	# player expects, with the primary tab where the thumb rests. The Editor sits
+	# between Garage and Play: it is a making-things tab, next to the car picker.
+	for spec in [["garage", "garage", "Garage"], ["editor", "editor", "Editor"], ["play", "play", "Play"], ["account", "account", "Account"]]:
 		var name: String = spec[0]
 		var b := _tab_button(spec[1], spec[2], func(): select(name))
 		row.add_child(b)

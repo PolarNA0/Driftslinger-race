@@ -52,7 +52,17 @@ build is the only client.
 - `godot/scripts/render.gd` — top-down orthographic view, road themes, the
   car sprites, and the responsive zoom (see "Fitting every screen").
 - `godot/scripts/app.gd` — the shell: the tabbed menu, overlays, leaderboard,
-  history, accounts, car picker, the round restart button.
+  history, accounts, car picker, the track editor and the custom-track picker,
+  the round restart button.
+- `godot/scripts/customtracks.gd` — `CustomTracks`, the model behind the Editor
+  tab: a custom track is an ordered op list (`Track.build_ops` shape), authored,
+  stored per account, validated, transformed and resolved to `Track` opts. Ids
+  start at `ID_BASE` (1000) so they can never collide with a built-in number.
+- `godot/scripts/track_editor.gd` — `TrackEditor`, the full-screen editor
+  overlay: the piece palette, the piece list with per-piece controls, undo, the
+  mirror/reverse/clear transforms and the live map.
+- `godot/scripts/track_preview.gd` — `TrackPreview`, a top-down map of a whole
+  road fitted to its rect, built from a real `Track` so the plan matches the drive.
 - `godot/scripts/menu_shell.gd` — `MenuShell`, the full-screen menu frame:
   top bar, content sheet, bottom tab bar (see "The menu is a tabbed app
   shell").
@@ -69,8 +79,8 @@ build is the only client.
 - `godot/scenes/main.tscn`, `godot/project.godot` — scene and project settings.
 - `godot/tools/` — headless verifiers (`parity.gd`, `verify_tracks.gd`,
   `verify_reattach.gd`, `verify_endless.gd`, `verify_board.gd`, `verify_online.gd`,
-  `verify_guard.gd`, `verify_ui.gd`, `verify_cars.gd`, `verify_keys.gd`).
-  See `godot/README.md`.
+  `verify_guard.gd`, `verify_ui.gd`, `verify_editor.gd`, `verify_cars.gd`,
+  `verify_keys.gd`). See `godot/README.md`.
 
 ### JavaScript (the server's physics)
 
@@ -113,6 +123,8 @@ godot --headless --path godot --script res://tools/verify_endless.gd  # endless 
 godot --headless --path godot --script res://tools/verify_board.gd    # board paging
 godot --headless --path godot --script res://tools/verify_online.gd   # online layer (offline paths)
 godot --headless --path godot --script res://tools/verify_guard.gd    # holding/mashing must lose
+godot --headless --path godot --script res://tools/verify_editor.gd   # the track editor's model + roads
+godot --headless --path godot --script res://tools/verify_ui.gd       # menu/overlay fit, editor, tabs
 godot --headless --path godot --script res://tools/verify_ui.gd       # menu fits every screen
 godot --headless --path godot --script res://tools/verify_cars.gd     # every car has its own sprite
 godot --headless --path godot --script res://tools/verify_keys.gd     # restart/play keybinds
@@ -426,11 +438,12 @@ The menu is not a card floating over the road. `godot/scripts/menu_shell.gd`
 a bottom tab bar - and fills the whole window at every size. `app.gd` owns the
 tab pages and populates them; the shell owns no game state.
 
-- **Three tabs, plus Settings in the top bar.** Play, Garage, Account across the
-  bottom; the gear in the top-right opens Settings as a modal card (it holds the
-  two key bindings and the build version). The old "Tracks" button is gone - the
-  track chooser lives on the Play tab as a grid of numbers, with the selected
-  track and its best above it.
+- **Four tabs, plus Settings in the top bar.** Garage, Editor, Play, Account
+  across the bottom; the gear in the top-right opens Settings as a modal card (it
+  holds the key bindings and the build version). The old "Tracks" button is gone -
+  the track chooser lives on the Play tab as a grid of numbers, with the selected
+  track and its best above it, and the player's own tracks in a "My tracks" picker
+  underneath. Editor is a making-things tab, so it sits next to Garage.
 - **Endless hides the track chooser.** Endless is one open road, so the whole
   track section (`track_section`) is hidden in that mode rather than shown and
   ignored; `verify_ui.gd` asserts it is gone and unreachable. Speedrun shows it.
@@ -470,6 +483,54 @@ tab pages and populates them; the shell owns no game state.
   buttons set `clip_text` and `SIZE_EXPAND_FILL`; without it a button reserves
   its full text width as a minimum and pushes the column past the viewport.
 - **The version line is on Settings**, not under the Play button.
+
+## The track editor (the Editor tab)
+
+Players build their own roads on the **Editor** tab. The model is
+`godot/scripts/customtracks.gd` (`CustomTracks`), the UI is
+`godot/scripts/track_editor.gd` (`TrackEditor`, a full-screen overlay) and the
+map is `godot/scripts/track_preview.gd` (`TrackPreview`). Nothing here invents
+geometry: a custom track is the same ordered op list `Track.build_ops` already
+walks for the advanced and reattach tracks, so a hand-built road drives exactly
+like a shipped one.
+
+- **A custom track is an op list, not a new kind of road.** `CustomTracks` only
+  authors and stores that list; `Track` turns it into a road. This is why the
+  preview can be trusted: `TrackPreview` builds a real `Track` from the ops, so
+  the shape on screen is the shape the car drives, lead-in and closing straight
+  included.
+- **Custom ids start at `ID_BASE` (1000).** The record, time, replay and history
+  stores are all keyed by the track number, so a custom id must never collide with
+  a built-in one. `App` resolves an id to its ops through `Game.opts_provider`, a
+  `Callable` App installs, so `Game` stays free of the editor and a built-in track
+  needs no provider.
+- **A custom track is a speedrun course.** It is finite and timed, so the mode is
+  forced to speedrun: `_set_mode("endless")` moves the selection back to a built-in
+  track rather than hiding the custom picker with a dead selection behind it, and
+  the custom picker is hidden in endless like the built-in grid.
+- **Custom runs are local-only.** The server has never heard of a custom id and the
+  shape is the player's own, so a finished custom run never uploads and shows no
+  leaderboard or world-record row (`App._on_game_change`). The run is still saved
+  locally - time, history and replay - which is all a custom track needs. The same
+  reason means it cannot be ranked: `Leaderboard` only knows the built-in tracks.
+- **Validation is the gate, and it is the same on both sides.** `CustomTracks.validate`
+  refuses a road that would fold (a corner angle outside `ANGLES`, a radius or
+  straight out of range, fewer than two corners, too many pieces), and the Play
+  button is disabled while it refuses. The editor cannot build a road the game
+  cannot drive.
+- **The direction default keeps the road from folding.** Corners alternate: two
+  90-degree corners the same way would point the road back over itself.
+  `CustomTracks.next_corner` therefore defaults each new corner to the opposite of
+  the last, and the palette offers 90 / 180 / 270 - a single arc over a half turn
+  is one pole (see "Track shape").
+- **The editor's pinned parts fit the screen; the piece list scrolls.** On a phone
+  the map plus the controls are taller than the display, so the header, the map,
+  the palette and the actions are pinned and only the piece list
+  (`piece_scroll`) scrolls. `verify_ui.gd` presses New track, asserts every pinned
+  button is inside the viewport, then drives the custom road to its finish and
+  asserts the finish card is local-only.
+- **`CustomTracks.duplicate_track`, not `duplicate`.** A `static func duplicate`
+  collides with the built-in `Resource.duplicate` and GDScript picks the wrong one.
 
 ## UI look, boot splash and fitting every screen
 

@@ -51,8 +51,8 @@ func _check_size(vp: Vector2i) -> void:
 	if shell.size.x < vp.x - 2 or shell.size.y < vp.y - 2:
 		_fail("shell is %s, want about %s" % [shell.size, vp])
 
-	# The three tabs are all reachable, and switching to each one raises its page.
-	for name in ["play", "garage", "account"]:
+	# Every tab is reachable, and switching to each one raises its page.
+	for name in ["play", "garage", "editor", "account"]:
 		if not shell.tabs.has(name):
 			_fail("tab '%s' missing" % name)
 			continue
@@ -148,23 +148,120 @@ func _check_size(vp: Vector2i) -> void:
 	if app.btn_restart_round.visible:
 		_fail("restart button still visible at the menu")
 
+	# The Editor tab opens the track editor, a full-screen overlay. The pinned parts
+	# (the header, the palette, the actions) must fit the viewport; the piece list is
+	# the one part that scrolls, so its rows are not required to be on screen.
+	shell.select("editor")
+	await process_frame
+	app._new_custom_track()
+	await process_frame
+	if not app.editor.visible:
+		_fail("editor did not open for a new track")
+	else:
+		for b in _pinned_buttons(app.editor):
+			if not _in_view(b, vp):
+				_fail("editor: '%s' out of view at %s" % [_label_of(b), b.get_global_rect()])
+		if not _in_view(app.editor.play_button, vp):
+			_fail("editor: Play button out of view at %s" % app.editor.play_button.get_global_rect())
+	# Close and delete the track the check made, leaving the store as it started.
+	var made_id: int = app.editor.id
+	app.editor._on_close()
+	await process_frame
+	if app.editor.visible:
+		_fail("editor did not close")
+
+	# A custom track is a real course: it loads into the game with the ops the editor
+	# built, and it is local-only - a run on it never uploads and shows no board.
+	app._open_editor(made_id)
+	await process_frame
+	var want_corners: int = CustomTracks.corner_count(app.editor.ops)
+	if want_corners <= 0:
+		_fail("editor had no corners to load")
+	app._on_editor_play()
+	await process_frame
+	if app.game.track == null:
+		_fail("custom track did not load into the game")
+	else:
+		if app.game.track.fillets.size() != want_corners:
+			_fail("custom track has %d corners, editor built %d" % [app.game.track.fillets.size(), want_corners])
+		if app.game.mode != "speedrun":
+			_fail("custom track loaded outside speedrun")
+	# Drive the custom track to its finish through the real game loop, with the same
+	# clean line verify_tracks uses, so the finish card is built the way a player's
+	# run builds it. Then check it is local-only: no leaderboard, no world record.
+	if app.game.track != null:
+		var t: Track = app.game.track
+		var i := 0
+		while app.game.car.alive and not app.game.car.finished and i < 200000:
+			i += 1
+			var held := false
+			if app.game.car.attached:
+				held = app.game.car.remaining() > 0.0
+			else:
+				var f: Dictionary = t.fillets[app.game.car.corner]
+				var c: Vector2 = f["c"]
+				held = U.dist(c.x, c.y, app.game.car.x, app.game.car.y) <= Cfg.GRAB_RANGE
+			app.game.set_held(held)
+			app.game._physics_process(1.0 / 120.0)
+		await process_frame
+		if not app.game.car.finished:
+			_fail("a clean line did not finish the custom track")
+		if app.btn_finish_lb.visible:
+			_fail("finish card offers a leaderboard for a custom track")
+		if app.btn_finish_wr.visible:
+			_fail("finish card offers a world record for a custom track")
+
+	app._to_menu()
+	await process_frame
+	CustomTracks.erase(made_id)
+	app._refresh_editor_list()
+	app._refresh_custom_list()
+
 	sub.queue_free()
 	await process_frame
 
 
+# A tab page scrolls vertically (its ScrollContainer disables horizontal scroll),
+# so a control below the fold is reachable by scrolling but a control wider than the
+# viewport is not. That is the bug the old menu had, so width is what is checked.
 func _check_page(name: String, page: Control, vp: Vector2i) -> void:
 	var n := 0
 	for b in _buttons(page):
 		n += 1
-		if not _in_view(b, vp):
-			_fail("%s: '%s' out of view at %s" % [name, _label_of(b), b.get_global_rect()])
+		if not _fits_width(b, vp):
+			_fail("%s: '%s' too wide at %s" % [name, _label_of(b), b.get_global_rect()])
 	if n == 0:
 		_fail("%s: no buttons found" % name)
+
+
+# Every button in the editor that is not inside the scrolling piece list. Those are
+# the ones that must always be reachable, so they are what the fit check measures.
+func _pinned_buttons(editor: Node) -> Array:
+	var out: Array = []
+	var skip: Node = editor.piece_scroll
+	for b in _buttons(editor):
+		if not _in_subtree(b, skip):
+			out.append(b)
+	return out
+
+
+func _in_subtree(n: Node, root: Node) -> bool:
+	var p := n
+	while p != null:
+		if p == root:
+			return true
+		p = p.get_parent()
+	return false
 
 
 func _in_view(c: Control, vp: Vector2i) -> bool:
 	var r := c.get_global_rect()
 	return r.position.x >= -1.0 and r.position.y >= -1.0 and r.end.x <= vp.x + 1.0 and r.end.y <= vp.y + 1.0
+
+
+func _fits_width(c: Control, vp: Vector2i) -> bool:
+	var r := c.get_global_rect()
+	return r.position.x >= -1.0 and r.end.x <= vp.x + 1.0
 
 
 func _label_of(b: Button) -> String:

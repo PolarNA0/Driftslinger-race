@@ -41,6 +41,11 @@ var shake := 0.0
 var mode := "endless"
 var seed_num := 1
 var car_skin := 0
+
+# Supplies `Track.new` opts for a seed. App installs this so a custom (player-built)
+# track id resolves to its op list; a built-in track needs no provider and falls
+# back to `Tracks.track_opts`. Kept as a Callable so Game stays free of the editor.
+var opts_provider: Callable = Callable()
 var held := false
 var acc := 0.0
 var state := "ready"
@@ -67,7 +72,7 @@ func load_track(p_seed: int, p_mode: String = "") -> void:
 	# has to be the same for everyone or the distance board compares nothing. The
 	# passed seed is the speedrun track and is ignored in endless.
 	seed_num = ENDLESS_SEED if mode == "endless" else p_seed
-	track = Track.new(seed_num) if mode == "endless" else Track.new(seed_num, Tracks.track_opts(seed_num))
+	track = Track.new(seed_num) if mode == "endless" else Track.new(seed_num, _opts_for(seed_num))
 	car = Car.new()
 	car.reset(track)
 	renderer.track = track
@@ -101,7 +106,7 @@ func set_ghost_self(p_seed: int) -> bool:
 	var rep = Storage.get_replay(p_seed)
 	if rep == null:
 		return false
-	var gt := Track.new(p_seed, Tracks.track_opts(p_seed))
+	var gt := Track.new(p_seed, _opts_for(p_seed))
 	var gc := Car.new()
 	gc.reset(gt)
 	ghost_car = gc
@@ -119,6 +124,17 @@ func clear_ghost() -> void:
 	if renderer != null:
 		renderer.ghost_car = null
 		renderer.ghost_visible = false
+
+
+# The opts for a seed: the player's own track when App can supply one, otherwise the
+# built-in table. A custom track that has since been deleted falls back to the
+# built-in shape for its number rather than crashing mid-run.
+func _opts_for(p_seed: int) -> Dictionary:
+	if opts_provider.is_valid():
+		var o: Variant = opts_provider.call(p_seed)
+		if o is Dictionary and not (o as Dictionary).is_empty():
+			return o
+	return Tracks.track_opts(p_seed)
 
 
 func start() -> void:

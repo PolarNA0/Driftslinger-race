@@ -165,13 +165,24 @@ godot --headless --path . --script res://tools/verify_online.gd
 
 `tools/verify_ui.gd` checks the menu layout at phone and desktop sizes. It builds
 the real scene in a `SubViewport` of each size (headless cannot resize the OS
-window), presses the real tabs, and fails if any control lands outside the
-viewport or if a tab's page does not come up. This is the guard for the bug the
-old card menu had: a control taller than the screen, so its buttons could not be
-pressed.
+window), presses the real tabs, and fails if a tab's page does not come up or a
+control is wider than the viewport (the bug the old card menu had). It then opens
+the track editor, asserts the pinned parts - header, palette, actions - are inside
+the viewport, and drives the custom road to its finish to assert the finish card
+is local-only (no leaderboard, no world record).
 
 ```sh
 godot --headless --path . --script res://tools/verify_ui.gd
+```
+
+`tools/verify_editor.gd` checks the track editor's model, `CustomTracks`, and the
+roads it produces. A hand-built track goes through the same `Track` the game loads
+and the same `Car`: it must build, be driven by a clean line, and finish. The
+store is checked too - new / rename / duplicate / delete, unique ids and names,
+the cap, and that a deleted id resolves to empty so the game can fall back.
+
+```sh
+godot --headless --path . --script res://tools/verify_editor.gd
 ```
 
 `tools/verify_cars.gd` checks that every car in `Renderer2D.CAR_MODELS` names

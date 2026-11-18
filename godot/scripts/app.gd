@@ -2,11 +2,11 @@ extends Control
 
 # Shown on the Settings screen so a player can tell which build they are running
 # (and a bug report can name it). Keep in step with the release tag.
-const VERSION := "1.5"
+const VERSION := "1.6"
 
-# The shell around the game: a full-screen, tabbed menu (Play / Garage / Account,
-# with Settings in the top bar), the leaderboard, run history, accounts, and the
-# overlays for pause / crash / finish / replay-done.
+# The shell around the game: a full-screen, tabbed menu (Play / Garage / Editor /
+# Account, with Settings in the top bar), the track editor, the leaderboard, run
+# history, accounts, and the overlays for pause / crash / finish / replay-done.
 #
 # The simulation lives in Game (a Node2D) which draws itself through Renderer2D;
 # this Control sits above it and owns only the interface. Background taps that
@@ -37,6 +37,19 @@ var menu_seed := 1
 var menu_mode := "speedrun"
 var ghost_mode := "off"
 var car_skin := 0
+
+var editor: TrackEditor           # the full-screen track editor overlay
+var editor_list: VBoxContainer    # the Editor tab's track rows
+var custom_section: VBoxContainer # "My tracks" on the Play tab
+var custom_list: VBoxContainer    # the custom-track rows on the Play tab
+
+var dlg_root: Control             # the shared prompt/confirm dialog
+var dlg_title: Label
+var dlg_body: Label
+var dlg_input: LineEdit
+var dlg_ok: Button
+var dlg_cancel: Button
+var dlg_accept: Callable = Callable()
 
 var board_seed := 1
 var board_mode := "speedrun"   # "speedrun" ranks times, "endless" ranks distances
@@ -92,13 +105,16 @@ var finish_sub: Label
 var finish_rank: Label
 var btn_watch: Button
 var btn_finish_wr: Button
+var btn_finish_lb: Button
 var replay_tag: Label
 var replay_sub: Label
 
 
 func _ready() -> void:
 	menu_seed = int(Storage.get_pref("track", 1))
-	if not Tracks.is_menu_track(menu_seed):
+	# A built-in track number, or one of the player's own tracks. A custom id whose
+	# track has been deleted falls back to track 1 rather than loading nothing.
+	if not Tracks.is_menu_track(menu_seed) and not CustomTracks.has(menu_seed):
 		menu_seed = 1
 	menu_mode = str(Storage.get_pref("mode", "speedrun"))
 	if menu_mode != "endless":
@@ -121,6 +137,8 @@ func _ready() -> void:
 	game.changed.connect(_on_game_change)
 	game.ticked.connect(_on_tick)
 	game.car_skin = car_skin
+	# A custom track id resolves to its op list; a built-in track needs no provider.
+	game.opts_provider = func(seed: int) -> Dictionary: return CustomTracks.opts_for_id(seed)
 
 	layer = CanvasLayer.new()
 	add_child(layer)
@@ -132,6 +150,7 @@ func _ready() -> void:
 
 	_build_hud()
 	_build_shell()
+	_build_dialog()
 	_build_board()
 	_build_history()
 	_build_dead()
@@ -157,7 +176,7 @@ func _capture_after(secs: float) -> void:
 	if args.has("--shot-tab"):
 		var which: String = args[args.find("--shot-tab") + 1]
 		match which:
-			"garage", "play", "account":
+			"garage", "play", "account", "editor":
 				_to_menu()
 				shell.select(which)
 			"settings":
@@ -321,6 +340,94 @@ func _card_title(text: String) -> Label:
 	return _style_title(_label(text, 26))
 
 
+# --- Prompt / confirm dialog -------------------------------------------------
+# One modal serves both renaming (a text field) and deleting (a yes/no). It sits
+# above everything, including the track editor, so a rename from the Editor tab
+# works whether the editor is open or not.
+
+func _build_dialog() -> void:
+	dlg_root = Control.new()
+	dlg_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dlg_root.visible = false
+	dlg_root.mouse_filter = Control.MOUSE_FILTER_STOP
+	ui_root.add_child(dlg_root)
+
+	var bg := ColorRect.new()
+	bg.color = Color(0, 0, 0, 0.66)
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dlg_root.add_child(bg)
+
+	var centre := CenterContainer.new()
+	centre.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dlg_root.add_child(centre)
+
+	var panel := PanelContainer.new()
+	centre.add_child(panel)
+	var margin := MarginContainer.new()
+	for side in ["left", "right", "top", "bottom"]:
+		margin.add_theme_constant_override("margin_" + side, 16)
+	panel.add_child(margin)
+	var col := _col(10)
+	col.custom_minimum_size = Vector2(300, 0)
+	margin.add_child(col)
+
+	dlg_title = _style_title(_label("", 22))
+	col.add_child(dlg_title)
+	dlg_body = _label("", 14)
+	dlg_body.add_theme_color_override("font_color", UiTheme.INK_DIM)
+	dlg_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	col.add_child(dlg_body)
+	dlg_input = LineEdit.new()
+	dlg_input.max_length = CustomTracks.MAX_NAME
+	col.add_child(dlg_input)
+	var row := _row(8)
+	col.add_child(row)
+	dlg_cancel = _button("Cancel", _close_dialog)
+	dlg_cancel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(dlg_cancel)
+	dlg_ok = _primary_button("OK", _accept_dialog)
+	dlg_ok.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(dlg_ok)
+	dlg_input.text_submitted.connect(func(_t): _accept_dialog())
+
+
+func _ask_text(title: String, value: String, cb: Callable) -> void:
+	dlg_title.text = title
+	dlg_body.visible = false
+	dlg_input.visible = true
+	dlg_input.text = value
+	dlg_input.grab_focus()
+	dlg_input.select_all()
+	dlg_ok.text = "Save"
+	dlg_accept = cb
+	dlg_root.visible = true
+
+
+func _confirm(title: String, body: String, cb: Callable, ok_label: String = "Delete") -> void:
+	dlg_title.text = title
+	dlg_body.text = body
+	dlg_body.visible = true
+	dlg_input.visible = false
+	dlg_ok.text = ok_label
+	dlg_accept = cb
+	dlg_root.visible = true
+
+
+func _accept_dialog() -> void:
+	var cb := dlg_accept
+	_close_dialog()
+	if cb.is_valid():
+		if dlg_input.visible:
+			cb.call(dlg_input.text)
+		else:
+			cb.call()
+
+
+func _close_dialog() -> void:
+	dlg_root.visible = false
+	dlg_accept = Callable()
+
+
 # Accent-colour a heading label (used for the cards whose heading text changes at
 # runtime: the account card and the run-end tags).
 func _style_title(l: Label) -> Label:
@@ -454,9 +561,20 @@ func _build_shell() -> void:
 	# add_child runs MenuShell._ready synchronously, so content exists here.
 	_build_play_tab()
 	_build_garage_tab()
+	_build_editor_tab()
 	_build_account_tab()
 	_build_settings_page()
 	shell.select("play")
+
+	# The track editor is a full-screen overlay over the shell, not a tab page: it
+	# wants the whole window while it is open. App owns it so a run can launch from
+	# it and come back to it.
+	editor = TrackEditor.new()
+	editor.app = self
+	editor.closed.connect(_on_editor_closed)
+	editor.play_requested.connect(_on_editor_play)
+	editor.changed.connect(_refresh_custom_list)
+	ui_root.add_child(editor)
 
 
 # A tab page: a full-rect scroll area with a centred, width-capped column, so the
@@ -495,8 +613,12 @@ func _on_tab(name: String) -> void:
 	match name:
 		"play":
 			shell.set_title("Play", "Pick a track and go")
+			_refresh_custom_list()
 		"garage":
 			shell.set_title("Garage", "Choose your car")
+		"editor":
+			shell.set_title("Editor", "Build your own tracks")
+			_refresh_editor_list()
 		"account":
 			shell.set_title("Account", "Your name, your times")
 			_refresh_account_page()
@@ -545,6 +667,189 @@ func _build_play_tab() -> void:
 	col.add_child(more)
 	more.add_child(_action_button("trophy", "Leaderboard", func(): _show_leaderboard(menu_seed)))
 	more.add_child(_action_button("clock", "Replays", _show_history))
+
+	# Custom tracks live under the built-in grid: the same picker, one row per track.
+	custom_section = _col(6)
+	col.add_child(custom_section)
+	custom_section.add_child(_section("My tracks"))
+	custom_list = _col(6)
+	custom_section.add_child(custom_list)
+	_refresh_custom_list()
+
+
+# --- Editor tab -------------------------------------------------------------
+
+func _build_editor_tab() -> void:
+	var col := _new_tab("editor")
+	var intro := _label("Build your own roads. Tap one to edit it, or start a new one.", 13)
+	intro.add_theme_color_override("font_color", UiTheme.INK_MUTE)
+	intro.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	col.add_child(intro)
+	col.add_child(_primary_button("New track", _new_custom_track))
+	editor_list = _col(6)
+	col.add_child(editor_list)
+	_refresh_editor_list()
+
+
+# The list of custom tracks: one card per track, with rename / duplicate / delete.
+# Tapping the card itself opens the editor for that track.
+func _refresh_editor_list() -> void:
+	if editor_list == null:
+		return
+	for c in editor_list.get_children():
+		c.queue_free()
+	var tracks := CustomTracks.list()
+	if tracks.is_empty():
+		var empty := _label("No tracks yet. Tap New track to make one.", 13)
+		empty.add_theme_color_override("font_color", UiTheme.INK_MUTE)
+		empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		editor_list.add_child(empty)
+		return
+	for t in tracks:
+		var row: Dictionary = t
+		editor_list.add_child(_custom_row(row))
+
+
+func _custom_row(t: Dictionary) -> Control:
+	var id := int(t["id"])
+	var card := PanelContainer.new()
+	card.theme_type_variation = "SubCard"
+	var col := _col(6)
+	card.add_child(col)
+
+	var top := _row(6)
+	col.add_child(top)
+	var open := Button.new()
+	open.text = str(t["name"])
+	open.clip_text = true
+	open.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	open.custom_minimum_size = Vector2(0, 44)
+	open.pressed.connect(func(): _open_editor(id))
+	top.add_child(open)
+
+	var v := CustomTracks.validate(t["ops"] as Array)
+	var info := _label("%d corners \u00b7 %s" % [int(v["corners"]), "ready" if bool(v["ok"]) else str(v["error"])], 12)
+	info.add_theme_color_override("font_color", UiTheme.INK_MUTE if bool(v["ok"]) else UiTheme.DANGER)
+	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	col.add_child(info)
+
+	var actions := _row(6)
+	col.add_child(actions)
+	actions.add_child(_row_action("pencil", "Rename", func(): _rename_custom(id, t["name"])))
+	actions.add_child(_row_action("copy", "Copy", func():
+		CustomTracks.duplicate_track(id)
+		_refresh_editor_list()
+		_refresh_custom_list()))
+	actions.add_child(_row_action("trash", "Delete", func(): _confirm_delete_custom(id, str(t["name"]))))
+	return card
+
+
+func _row_action(icon_kind: String, text: String, cb: Callable) -> Button:
+	var b := Button.new()
+	b.clip_text = true
+	b.custom_minimum_size = Vector2(0, 40)
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b.pressed.connect(cb)
+	var box := HBoxContainer.new()
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_theme_constant_override("separation", 4)
+	box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(box)
+	var ic := UiIcon.new()
+	ic.kind = icon_kind
+	ic.color = UiTheme.INK_DIM
+	ic.thickness = 2.0
+	ic.custom_minimum_size = Vector2(16, 16)
+	ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(ic)
+	var l := _label(text, 13)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(l)
+	return b
+
+
+func _new_custom_track() -> void:
+	var t := CustomTracks.new_track()
+	if t.is_empty():
+		_confirm("Track limit reached", "You can keep up to %d tracks. Delete one to make room." % CustomTracks.MAX_TRACKS, func(): pass, "OK")
+		return
+	_refresh_editor_list()
+	_refresh_custom_list()
+	_open_editor(int(t["id"]))
+
+
+func _open_editor(id: int) -> void:
+	editor.open_for(self, id)
+	_show_only("")
+
+
+func _on_editor_closed() -> void:
+	editor.visible = false
+	_refresh_editor_list()
+	_refresh_custom_list()
+	_to_menu()
+	shell.select("editor")
+
+
+func _on_editor_play() -> void:
+	var opts := CustomTracks.opts_for_id(editor.id)
+	var v := CustomTracks.validate(editor.ops)
+	if not bool(v["ok"]) or opts.is_empty():
+		return
+	editor.visible = false
+	_start_run(editor.id)
+
+
+func _rename_custom(id: int, current: String) -> void:
+	_ask_text("Rename track", current, func(value):
+		CustomTracks.rename(id, value)
+		_refresh_editor_list()
+		_refresh_custom_list())
+
+
+func _confirm_delete_custom(id: int, name: String) -> void:
+	_confirm("Delete track?", "Delete \u201c%s\u201d? This cannot be undone." % name, func():
+		CustomTracks.erase(id)
+		if menu_seed == id:
+			menu_seed = 1
+			Storage.set_pref("track", 1)
+		_refresh_editor_list()
+		_refresh_custom_list())
+
+
+# --- Custom tracks on the Play tab ------------------------------------------
+
+func _refresh_custom_list() -> void:
+	if custom_list == null:
+		return
+	for c in custom_list.get_children():
+		c.queue_free()
+	var tracks := CustomTracks.list()
+	if tracks.is_empty():
+		var empty := _label("No custom tracks yet. Make one in the Editor tab.", 12)
+		empty.add_theme_color_override("font_color", UiTheme.INK_MUTE)
+		empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		custom_list.add_child(empty)
+		return
+	for t in tracks:
+		var row: Dictionary = t
+		var id := int(t["id"])
+		var v := CustomTracks.validate(row["ops"] as Array)
+		var b := Button.new()
+		b.toggle_mode = true
+		b.theme_type_variation = "ToggleButton"
+		b.clip_text = true
+		b.custom_minimum_size = Vector2(0, 44)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.text = "%s  \u00b7  %d corners" % [str(row["name"]), int(v["corners"])]
+		b.button_pressed = menu_seed == id
+		b.disabled = not bool(v["ok"])
+		b.pressed.connect(func():
+			menu_seed = id
+			Storage.set_pref("track", id)
+			_refresh_track_list())
+		custom_list.add_child(b)
 
 
 
@@ -922,7 +1227,10 @@ func _refresh_track_list() -> void:
 		b.button_pressed = (int(b.get_meta("track")) == menu_seed)
 	if play_track_label == null:
 		return
-	play_track_label.text = "Track %d" % menu_seed
+	if CustomTracks.has(menu_seed):
+		play_track_label.text = CustomTracks.display_name(menu_seed)
+	else:
+		play_track_label.text = "Track %d" % menu_seed
 	if menu_mode == "speedrun":
 		var best: Variant = Storage.get_best_time(menu_seed)
 		play_best_label.text = "best --" if best == null else "best %s" % _fmt_time(float(best))
@@ -930,13 +1238,17 @@ func _refresh_track_list() -> void:
 		# Endless is one shared road, so the record is this player's best distance on it.
 		var best_d := float(Storage.get_record(Game.ENDLESS_SEED)["dist"])
 		play_best_label.text = "best --" if best_d <= 0.0 else "best %s" % _fmt_dist(best_d)
+	_refresh_custom_list()
 
 
 # Endless has no track to pick, so the chooser is hidden rather than shown and
-# ignored. Speedrun is where a track means anything.
+# ignored. Speedrun is where a track means anything - and the same goes for the
+# custom-track picker underneath it.
 func _refresh_track_visibility() -> void:
 	if track_section != null:
 		track_section.visible = (menu_mode != "endless")
+	if custom_section != null:
+		custom_section.visible = (menu_mode != "endless")
 
 
 func _refresh_mode_list() -> void:
@@ -949,6 +1261,11 @@ func _refresh_mode_list() -> void:
 func _set_mode(m: String) -> void:
 	menu_mode = m
 	Storage.set_pref("mode", m)
+	# A custom track is a finite, timed road, so it is a speedrun course. Selecting
+	# endless would leave the custom picker hidden with a dead selection behind it.
+	if m == "endless" and CustomTracks.has(menu_seed):
+		menu_seed = Tracks.MENU_TRACKS[0]
+		Storage.set_pref("track", menu_seed)
 	_refresh_mode_list()
 	_refresh_track_list()
 
@@ -1128,8 +1445,9 @@ func _show_history() -> void:
 		var seed := int(r["seed"])
 		var best: Variant = Storage.get_best_time(seed)
 		var pb := best != null and absf(float(r["time"]) - float(best)) < 1e-9
-		hist_rows.add_child(_label("Track %d   %s   %s   %s" % [
-			seed, "Personal best" if pb else "Finished",
+		var label := CustomTracks.display_name(seed) if CustomTracks.has(seed) else "Track %d" % seed
+		hist_rows.add_child(_label("%s   %s   %s   %s" % [
+			label, "Personal best" if pb else "Finished",
 			_fmt_time(float(r["time"])), _ago(float(r["at"]))], 14))
 	_show_only("history")
 
@@ -1384,7 +1702,8 @@ func _build_finish() -> void:
 		if wr != null:
 			_watch_wr(game.seed_num, wr))
 	row.add_child(btn_finish_wr)
-	col.add_child(_button("Leaderboard", func(): _show_leaderboard(game.seed_num)))
+	btn_finish_lb = _button("Leaderboard", func(): _show_leaderboard(game.seed_num))
+	col.add_child(btn_finish_lb)
 	col.add_child(_button("Run it again", func(): _start_run(game.seed_num)))
 	col.add_child(_button("Main menu", _to_menu))
 
@@ -1549,18 +1868,23 @@ func _on_game_change(extra: Dictionary) -> void:
 		finish_time.text = _fmt_time(game.run_time())
 		var best2 := game.run_time() if prev2 == null else minf(float(prev2), game.run_time())
 		finish_sub.text = "best %s" % _fmt_time(best2)
-		var rank := Leaderboard.player_rank(best2, _reals_for(game.seed_num))
+		var custom := CustomTracks.has(game.seed_num)
+		var rank := 0 if custom else Leaderboard.player_rank(best2, _reals_for(game.seed_num))
 		finish_rank.text = "#%d on Track %d" % [rank, game.seed_num] if rank > 0 else ""
 		btn_watch.visible = Storage.get_replay(game.seed_num) != null
-		btn_finish_wr.visible = Leaderboard.world_record(_reals_for(game.seed_num)) != null
+		btn_finish_wr.visible = not custom and Leaderboard.world_record(_reals_for(game.seed_num)) != null
+		btn_finish_lb.visible = not custom
 		_show_only("finish")
 		hint_label.visible = false
 		_show_round_button(false)
-		# Queue the run, then try to send it. Nothing here blocks play: the run is
-		# already saved locally, so a failure just leaves it queued.
-		var seed_done := game.seed_num
-		Api.enqueue(seed_done, Replay.encode_steps(game.steps), _player_name())
-		_submit_queued(seed_done)
+		# A custom track is local-only: the server has never heard of its id and its
+		# shape is the player's own, so there is no board to upload to. The run is
+		# already saved locally (the time, the history and the replay), which is all a
+		# custom track needs.
+		if not custom:
+			var seed_done := game.seed_num
+			Api.enqueue(seed_done, Replay.encode_steps(game.steps), _player_name())
+			_submit_queued(seed_done)
 
 
 # Send queued endless runs. There is no finish card to refresh - endless ends in a
@@ -1652,6 +1976,10 @@ func _on_restart_round() -> void:
 # =============================================================================
 
 func _unhandled_input(event: InputEvent) -> void:
+	# The track editor and the prompt dialog are modal: while either is up, a tap or a
+	# key must not reach the one-button mechanic behind them.
+	if (editor != null and editor.visible) or (dlg_root != null and dlg_root.visible):
+		return
 	# A key press while rebinding becomes the new binding, and is swallowed.
 	if key_capturing != "" and event is InputEventKey and event.pressed and not event.echo:
 		_bind_key(event.keycode)

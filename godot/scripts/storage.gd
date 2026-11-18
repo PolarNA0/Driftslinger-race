@@ -130,6 +130,21 @@ static func add_run(seed: int, time: float, at: float = -1.0) -> int:
 	return 0
 
 
+# --- custom tracks: player-authored roads, per account -----------------------
+# The version suffix is the schema: bump it and old shapes are ignored rather
+# than misread, which is why it is here.
+const CUSTOM_NAME := "customtracks.v1"
+
+
+static func get_custom_tracks() -> Array:
+	var list: Variant = _read(CUSTOM_NAME, [])
+	return list if list is Array else []
+
+
+static func save_custom_tracks(list: Array) -> void:
+	_write(CUSTOM_NAME, list)
+
+
 # --- preferences: global, not per account ------------------------------------
 const PREF_NAME := "prefs.v1"
 
