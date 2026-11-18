@@ -41,10 +41,6 @@ const REATTACH_BOOST_MAX := 1.30    # speed multiplier at a full-length detour
 const REATTACH_EFFECT_TIME := 0.70  # how long the boost lasts, seconds
 const REATTACH_MIN_DETOUR := 6.0    # detour (px) below which there is no boost
 const REATTACH_REF_DETOUR := 90.0   # detour (px) that earns the full boost
-# The detour -> boost curve is front-loaded (`t ** REATTACH_CURVE`, exponent < 1),
-# so even a modest detour gives a boost a player can feel, not a ~2% sliver that
-# reads as "nothing happened". Spam still flies under MIN_DETOUR and earns zero.
-const REATTACH_CURVE := 0.6
 # A reattach pillar reaches further than an ordinary one, so a committed detour
 # can still be caught. Without it the pole radius leaves only a sliver of flight
 # before the car is out of range, and there is no room for a real detour.

@@ -344,16 +344,17 @@ length and a small release error accumulates into a wall hit by the far end.
   detour past the pillar's reach means the re-catch never happens and the run is
   lost. That is the whole mechanic: a real risk/reward curve, not a flat per-pillar
   bonus.
-  - **The detour->boost curve is front-loaded** (`t ** CFG.REATTACH_CURVE`,
-    exponent 0.6). A *linear* curve gave ~1.06x for a modest detour, which players
-    read as "the reattach did nothing" - the report that prompted the retune. The
-    exponent raises a modest detour to >=1.10x without touching the cap, so the
-    payoff is felt at every detour a player would actually fly.
-  - **The payoff is shown, not just applied.** The boost was invisible (an
-    internal `speed_scale` with no readout), so a player could not tell it fired.
-    `app.gd` flashes `SLINGSHOT xN.NN` in the HUD while `Car.speed_scale > 1.001`.
-    Any future speed effect should get the same treatment - an unfelt payoff is
-    the same as no payoff.
+  - **Do not change the boost numbers without re-checking the recorded runs.** The
+    curve is linear (`t` straight into `lerp`), and a *front-loaded* curve
+    (`t ** 0.6`) was tried and reverted: it makes the detour stronger, which is
+    enough to change a real line's trajectory. The board's 9.925 on track 28
+    re-simulates to 1191 ticks on this physics and on the server's, but under the
+    front-loaded curve those same steps leave the road at 7.68s. The physics is
+    part of the leaderboard's contract: a tuning change is a different game, and
+    every stored replay is a run of the old one. `tools/parity.gd` and
+    `tools/test.mjs` only pin the *shared* numbers - they will not catch a change
+    to `REATTACH_BOOST_MAX`/`REATTACH_EFFECT_TIME`, so re-simulate a real board
+    row after touching them.
   - **A reattach pillar reaches further than a normal one.** `try_grab` widens the
     range for a re-catch of a live reattach pillar by `CFG.REATTACH_GRAB_MULT`.
     Without it a pole radius (~86px) leaves only a sliver of flight before the car

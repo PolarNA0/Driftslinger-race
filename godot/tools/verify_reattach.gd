@@ -240,10 +240,7 @@ func _init() -> void:
 		var short := _slingshot(t, 8)
 		var long := _slingshot(t, 24)
 		var spam_plain: bool = spam["finished"] and spam["max_s"] == 1.0
-		# A *modest* detour has to give a boost a player can feel. The linear curve
-		# gave ~1.06 here, which read as "nothing happened"; the front-loaded curve
-		# gives >=1.10, and that is the point of REATTACH_CURVE.
-		var short_boost: bool = short["finished"] and short["max_s"] >= 1.10
+		var short_boost: bool = short["finished"] and short["max_s"] > 1.0
 		var long_boost: bool = long["finished"] and long["max_s"] > short["max_s"]
 		var long_faster: bool = float(long["time"]) < float(clean["time"]) - 0.05
 		var clean_plain: bool = clean["finished"] and clean["max_s"] == 1.0 and clean["min_s"] == 1.0

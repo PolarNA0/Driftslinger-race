@@ -194,7 +194,6 @@ func try_grab() -> bool:
 					/ (Cfg.REATTACH_REF_DETOUR - Cfg.REATTACH_MIN_DETOUR),
 				0.0, 1.0)
 			if t > 0.0:
-				t = pow(t, Cfg.REATTACH_CURVE)
 				speed_scale = lerpf(1.0, Cfg.REATTACH_BOOST_MAX, t)
 				effect_timer = Cfg.REATTACH_EFFECT_TIME
 				spent_corners[corner] = true
