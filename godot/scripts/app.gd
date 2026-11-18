@@ -69,6 +69,7 @@ var ui_root: Control
 # --- nodes -------------------------------------------------------------------
 var hud_dist: Label
 var hud_sub: Label
+var hud_boost: Label
 var hint_label: Label
 var btn_pause: Button
 var btn_restart_round: Button
@@ -497,6 +498,17 @@ func _build_hud() -> void:
 	hud_sub.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
 	hud_sub.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top.add_child(hud_sub)
+
+	# The reattach slingshot is otherwise invisible: a brief internal speed change with
+	# no readout, so a player cannot tell it fired. This flashes "SLINGSHOT xN.NN" while
+	# the boost runs - the only feedback that the payoff exists, and a reward in itself.
+	hud_boost = _label("", 24)
+	hud_boost.add_theme_color_override("font_color", UiTheme.ACCENT)
+	hud_boost.add_theme_constant_override("outline_size", 6)
+	hud_boost.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
+	hud_boost.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud_boost.visible = false
+	top.add_child(hud_boost)
 
 	# Name the input the player actually has: a phone taps the screen, a desktop
 	# holds the mouse or Space. A touch-first hint on a laptop reads as "I need a
@@ -1943,6 +1955,12 @@ func _on_tick() -> void:
 		hud_sub.text = "best %s" % _fmt_dist(maxf(float(game.record_dist()), game.metres()))
 	if game.car.grabbed > 0 or game.car.time > 1.2:
 		hint_label.visible = false
+	# Flash the reattach slingshot while it is running, so the payoff is legible.
+	if game.car.speed_scale > 1.001:
+		hud_boost.text = "SLINGSHOT x%.2f" % game.car.speed_scale
+		hud_boost.visible = true
+	else:
+		hud_boost.visible = false
 
 
 func _hud_reset() -> void:
@@ -1957,6 +1975,7 @@ func _hud_reset() -> void:
 	else:
 		hud_dist.text = "0 m"
 		hud_sub.text = "best %s" % _fmt_dist(float(Storage.get_record(game.seed_num)["dist"]))
+	hud_boost.visible = false
 
 
 func _on_pause() -> void:
