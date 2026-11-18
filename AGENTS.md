@@ -344,6 +344,16 @@ length and a small release error accumulates into a wall hit by the far end.
   detour past the pillar's reach means the re-catch never happens and the run is
   lost. That is the whole mechanic: a real risk/reward curve, not a flat per-pillar
   bonus.
+  - **The detour->boost curve is front-loaded** (`t ** CFG.REATTACH_CURVE`,
+    exponent 0.6). A *linear* curve gave ~1.06x for a modest detour, which players
+    read as "the reattach did nothing" - the report that prompted the retune. The
+    exponent raises a modest detour to >=1.10x without touching the cap, so the
+    payoff is felt at every detour a player would actually fly.
+  - **The payoff is shown, not just applied.** The boost was invisible (an
+    internal `speed_scale` with no readout), so a player could not tell it fired.
+    `app.gd` flashes `SLINGSHOT xN.NN` in the HUD while `Car.speed_scale > 1.001`.
+    Any future speed effect should get the same treatment - an unfelt payoff is
+    the same as no payoff.
   - **A reattach pillar reaches further than a normal one.** `try_grab` widens the
     range for a re-catch of a live reattach pillar by `CFG.REATTACH_GRAB_MULT`.
     Without it a pole radius (~86px) leaves only a sliver of flight before the car
@@ -498,6 +508,14 @@ tab pages and populates them; the shell owns no game state.
 - **Buttons that carry a label must be able to shrink.** Grid and segment
   buttons set `clip_text` and `SIZE_EXPAND_FILL`; without it a button reserves
   its full text width as a minimum and pushes the column past the viewport.
+- **`clip_text` hides the last digit if the chip is too narrow.** The track grid
+  is 7 wide, and the default `ToggleButton` padding (16px a side) left only ~15px
+  of text room in a ~47px chip at phone width, so the two-digit numbers 21-28
+  silently clipped to their first digit - track 27 read as "2". The track list
+  uses a `GridChip` toggle variation (6px padding, `theme.gd`) so the digits fit.
+  `verify_ui.gd` measures each chip's text against its content width and fails if
+  it clips, because the failure is silent - the button still works, it just shows
+  the wrong number.
 - **The version line is on Settings**, not under the Play button.
 
 ## The track editor (the Editor tab)
@@ -566,6 +584,20 @@ like a shipped one.
   `focus_index` centres a piece. A tap (not a drag) picks the piece under the
   finger and selects it. `verify_editor.gd` checks the camera math, that a
   piece's midpoint picks that piece, and that Fit brings the road on screen.
+- **A touch drag arrives twice, so handle one family only.** Godot's
+  `input_devices/pointing/emulate_mouse_from_touch` is **on** by default (Android
+  and iOS need it), so one finger drag is delivered as *both* an
+  `InputEventScreenDrag` and an emulated `InputEventMouseMotion`. `TrackPreview`
+  handled both, so every drag panned the map at double speed - the reported "the
+  canvas panning is super sensitive". Emulated events carry
+  `InputEvent.DEVICE_ID_EMULATION`, so `_gui_input` ignores emulated mouse events
+  and lets the touch events do the work; a real mouse is not emulated, so the
+  wheel, drag and click still work on desktop. `verify_editor.gd` drives the real
+  `_gui_input` with a touch drag, an emulated mouse drag and a pinch and asserts
+  only the first two move the camera as intended (the emulated drag must not pan).
+- **A phone has no mouse wheel, so zoom must also be a pinch.**
+  `InputEventMagnifyGesture` is handled in `TrackPreview._gui_input` (zoom about
+  the pinch point); the `+`/`-` buttons stay as the coarse fallback.
 - **`verify_ui.gd` guards the fit.** It presses New track, asserts every pinned
   button (header + camera row, i.e. everything outside `control_scroll`) is inside
   the viewport, opens each page and checks its controls fit the width, checks the
