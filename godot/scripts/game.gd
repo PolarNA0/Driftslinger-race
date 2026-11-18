@@ -72,12 +72,17 @@ func load_track(p_seed: int, p_mode: String = "") -> void:
 	# has to be the same for everyone or the distance board compares nothing. The
 	# passed seed is the speedrun track and is ignored in endless.
 	seed_num = ENDLESS_SEED if mode == "endless" else p_seed
-	track = Track.new(seed_num) if mode == "endless" else Track.new(seed_num, _opts_for(seed_num))
+	var opts := {} if mode == "endless" else _opts_for(seed_num)
+	track = Track.new(seed_num, opts) if not opts.is_empty() else Track.new(seed_num)
 	car = Car.new()
 	car.reset(track)
 	renderer.track = track
 	renderer.car_ref = car
 	renderer.seed_num = seed_num
+	# A custom track paints its own road/ground; a built-in track has no theme in its
+	# opts and keeps the per-seed palette.
+	var theme: Variant = opts.get("theme", null)
+	renderer.theme_override = CustomTracks.theme_colors({"road": str(theme["road"]), "ground": str(theme["ground"])}) if theme is Dictionary else {}
 	renderer.car_index = car_skin
 	renderer.ghost_car = null
 	renderer.ghost_visible = false

@@ -167,9 +167,13 @@ godot --headless --path . --script res://tools/verify_online.gd
 the real scene in a `SubViewport` of each size (headless cannot resize the OS
 window), presses the real tabs, and fails if a tab's page does not come up or a
 control is wider than the viewport (the bug the old card menu had). It then opens
-the track editor, asserts the pinned parts - header, palette, actions - are inside
-the viewport, and drives the custom road to its finish to assert the finish card
-is local-only (no leaderboard, no world record).
+the track editor and checks the new editor: every pinned control (the header and
+the camera row - everything outside the scrolling control area) is inside the
+viewport, each of the Build / Look / Help pages comes up with controls that fit the
+width, the map has a real road, and `Fit` brings that road on screen. Finally it
+loads the custom road into the game, checks the track's own colours reached the
+renderer, and drives it to its finish to assert the finish card is local-only (no
+leaderboard, no world record).
 
 ```sh
 godot --headless --path . --script res://tools/verify_ui.gd
@@ -177,9 +181,15 @@ godot --headless --path . --script res://tools/verify_ui.gd
 
 `tools/verify_editor.gd` checks the track editor's model, `CustomTracks`, and the
 roads it produces. A hand-built track goes through the same `Track` the game loads
-and the same `Car`: it must build, be driven by a clean line, and finish. The
-store is checked too - new / rename / duplicate / delete, unique ids and names,
-the cap, and that a deleted id resolves to empty so the game can fall back.
+and the same `Car`: it must build, be driven by a clean line, and finish. It pins
+the rule that every corner the editor allows is catchable (`MAX_RADIUS` is inside
+`Cfg.GRAB_RANGE`, and the widest allowed corners really are driven), the corner
+and piece caps, and the colours (`theme_of` / `set_theme` / `theme_colors`, the
+invalid-value fallback, and that `opts_for_id` carries the theme through). It also
+exercises the map camera - world/screen round-trip, zoom, pan, `focus_index`, and
+that a piece's midpoint picks that piece. The store is checked too - new / rename
+/ duplicate / delete, unique ids and names, the track cap, and that a deleted id
+resolves to empty so the game can fall back.
 
 ```sh
 godot --headless --path . --script res://tools/verify_editor.gd

@@ -733,6 +733,17 @@ func _custom_row(t: Dictionary) -> Control:
 	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	col.add_child(info)
 
+	# A swatch of the track's own colours, so the list reads as the roads it holds.
+	var swatches := _row(6)
+	col.add_child(swatches)
+	var colors := CustomTracks.theme_colors(t)
+	for c in [colors["ground"], colors["road"]]:
+		var dot := ColorRect.new()
+		dot.color = c
+		dot.custom_minimum_size = Vector2(28, 16)
+		dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		swatches.add_child(dot)
+
 	var actions := _row(6)
 	col.add_child(actions)
 	actions.add_child(_row_action("pencil", "Rename", func(): _rename_custom(id, t["name"])))

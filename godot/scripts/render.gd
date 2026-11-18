@@ -71,7 +71,15 @@ func _sprite(path: String) -> Texture2D:
 	return _sprites[path]
 
 
+# A custom track carries its own road and ground colours, so it looks the way its
+# author made it. `theme_override` is empty for every built-in track, which keeps
+# the per-seed palette exactly as it was.
+var theme_override := {}
+
+
 func theme() -> Dictionary:
+	if not theme_override.is_empty():
+		return theme_override
 	return THEMES[((seed_num - 1) % THEMES.size() + THEMES.size()) % THEMES.size()]
 
 

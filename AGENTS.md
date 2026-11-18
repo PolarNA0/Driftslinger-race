@@ -59,10 +59,13 @@ build is the only client.
   stored per account, validated, transformed and resolved to `Track` opts. Ids
   start at `ID_BASE` (1000) so they can never collide with a built-in number.
 - `godot/scripts/track_editor.gd` — `TrackEditor`, the full-screen editor
-  overlay: the piece palette, the piece list with per-piece controls, undo, the
-  mirror/reverse/clear transforms and the live map.
-- `godot/scripts/track_preview.gd` — `TrackPreview`, a top-down map of a whole
-  road fitted to its rect, built from a real `Track` so the plan matches the drive.
+  overlay: a responsive two-pane layout (map + controls), the Build / Look / Help
+  pages, the piece list with per-piece controls, undo and rename. See "The track
+  editor (the Editor tab)".
+- `godot/scripts/track_preview.gd` — `TrackPreview`, the editor's map: a top-down
+  view of the road with a pan/zoom camera (`fit`, `zoom_by`, `pan_by`,
+  `focus_index`) and tap-to-select (`pick_at`). Built from a real `Track`, so the
+  plan matches the drive, and painted with the track's own colours.
 - `godot/scripts/menu_shell.gd` — `MenuShell`, the full-screen menu frame:
   top bar, content sheet, bottom tab bar (see "The menu is a tabbed app
   shell").
@@ -124,8 +127,7 @@ godot --headless --path godot --script res://tools/verify_board.gd    # board pa
 godot --headless --path godot --script res://tools/verify_online.gd   # online layer (offline paths)
 godot --headless --path godot --script res://tools/verify_guard.gd    # holding/mashing must lose
 godot --headless --path godot --script res://tools/verify_editor.gd   # the track editor's model + roads
-godot --headless --path godot --script res://tools/verify_ui.gd       # menu/overlay fit, editor, tabs
-godot --headless --path godot --script res://tools/verify_ui.gd       # menu fits every screen
+godot --headless --path godot --script res://tools/verify_ui.gd       # menu/overlay fit, editor pages + map
 godot --headless --path godot --script res://tools/verify_cars.gd     # every car has its own sprite
 godot --headless --path godot --script res://tools/verify_keys.gd     # restart/play keybinds
 
@@ -515,22 +517,51 @@ like a shipped one.
   reason means it cannot be ranked: `Leaderboard` only knows the built-in tracks.
 - **Validation is the gate, and it is the same on both sides.** `CustomTracks.validate`
   refuses a road that would fold (a corner angle outside `ANGLES`, a radius or
-  straight out of range, fewer than two corners, too many pieces), and the Play
-  button is disabled while it refuses. The editor cannot build a road the game
-  cannot drive.
+  straight out of range, fewer than two corners, more than `MAX_CORNERS` corners,
+  too many pieces), and the Play button is disabled while it refuses. The editor
+  cannot build a road the game cannot drive.
+- **`MAX_RADIUS` must stay inside `Cfg.GRAB_RANGE` (95).** A pole is only
+  catchable from within `GRAB_RANGE`, so a corner whose arc radius is at or past
+  that is *impossible* - the car flies straight past the pole into the wall. The
+  editor used to allow radius up to 120 and reported such a track "ready"; it is
+  now capped at 92, and `verify_editor.gd` pins `MAX_RADIUS < GRAB_RANGE` and
+  drives the widest allowed corners to prove they are catchable. If you ever raise
+  `MAX_RADIUS`, raise the proof with it.
 - **The direction default keeps the road from folding.** Corners alternate: two
   90-degree corners the same way would point the road back over itself.
   `CustomTracks.next_corner` therefore defaults each new corner to the opposite of
   the last, and the palette offers 90 / 180 / 270 - a single arc over a half turn
   is one pole (see "Track shape").
-- **The editor's pinned parts fit the screen; the piece list scrolls.** On a phone
-  the map plus the controls are taller than the display, so the header, the map,
-  the palette and the actions are pinned and only the piece list
-  (`piece_scroll`) scrolls. `verify_ui.gd` presses New track, asserts every pinned
-  button is inside the viewport, then drives the custom road to its finish and
-  asserts the finish card is local-only.
+- **A custom track carries its own colours.** `road` and `ground` are hex strings
+  on the stored entry; the stripe and the poles are derived from them
+  (`CustomTracks.theme_colors`) so a player picks two colours and gets a coherent
+  road. The colours travel to a run on the `Track` opts (`opts(ops, entry)`), and
+  `Game.load_track` copies them onto `Renderer2D.theme_override`. A built-in track
+  has no theme in its opts, so `theme_override` stays empty and the per-seed
+  palette is unchanged. `theme_of` always returns a complete, valid pair (a missing
+  or malformed value falls back to `DEFAULT_THEME`), so the renderer never guards a
+  half-set palette.
+- **The editor is responsive.** `TrackEditor._apply_layout` flips one
+  `BoxContainer`: on a wide window the map is the left pane and the controls the
+  right; on a phone the map is pinned on top and the controls scroll beneath it.
+  The panels are never re-parented, so the map camera and the scroll position
+  survive a resize. The controls are three pages behind a segmented switch - Build,
+  Look, Help - so no page is a wall of controls.
+- **The map is a camera and an editing surface.** `TrackPreview` pans (drag),
+  zooms (pinch / wheel / the `+`/`-` buttons), `fit`s the whole road, and
+  `focus_index` centres a piece. A tap (not a drag) picks the piece under the
+  finger and selects it. `verify_editor.gd` checks the camera math, that a
+  piece's midpoint picks that piece, and that Fit brings the road on screen.
+- **`verify_ui.gd` guards the fit.** It presses New track, asserts every pinned
+  button (header + camera row, i.e. everything outside `control_scroll`) is inside
+  the viewport, opens each page and checks its controls fit the width, checks the
+  map has a road, then drives the custom road to its finish and asserts the finish
+  card is local-only.
 - **`CustomTracks.duplicate_track`, not `duplicate`.** A `static func duplicate`
   collides with the built-in `Resource.duplicate` and GDScript picks the wrong one.
+- **`TrackEditor.palette` / `TrackPreview.palette`, not `theme`.** `theme` is a
+  built-in `Control` member (`Control.theme`); naming the field that fails to
+  compile with "Member theme redefined".
 
 ## UI look, boot splash and fitting every screen
 

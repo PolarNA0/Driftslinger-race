@@ -18,14 +18,21 @@ class_name CustomTracks
 const ID_BASE := 1000
 const MAX_TRACKS := 100
 const MAX_PIECES := 48
+const MAX_CORNERS := 24
 const MAX_NAME := 24
 
 # Corner angles the builder handles cleanly. A single arc over a half turn would
 # fold the road onto itself, so the editor offers 90 / 180 / 270 and lets the
 # player stack them - a 270 is one pole (see the track-shape notes in AGENTS.md).
 const ANGLES := [90, 180, 270]
+
+# The widest corner a player can build is bounded by how far a pole can be caught:
+# `Car.try_grab` refuses a pole further than `Cfg.GRAB_RANGE` (95px) from the car,
+# so a corner whose arc radius is at or past that is literally impossible - the car
+# flies straight past the pole and hits the wall. This cap is that limit with a
+# little margin, so every corner the editor offers is catchable.
+const MAX_RADIUS := 92.0
 const MIN_RADIUS := 40.0
-const MAX_RADIUS := 120.0
 const RADIUS_STEP := 4.0
 const MIN_LEN := 60.0
 const MAX_LEN := 600.0
@@ -34,6 +41,25 @@ const LEAD_IN := 720.0
 const FINISH_LEN := 460.0
 const DEFAULT_RADIUS := 62.0
 const DEFAULT_LEN := 230.0
+
+# --- colours -----------------------------------------------------------------
+# A custom track carries its own look: a road colour and a ground (background)
+# colour. The stripe and the pillars are derived from those two, so a player picks
+# two colours and gets a consistent road rather than four that can clash. Stored as
+# hex strings so the whole track stays plain JSON.
+
+const THEME_PRESETS := [
+	{"name": "Classic", "road": "494949", "ground": "48d350"},
+	{"name": "Night", "road": "c8c8c8", "ground": "113a56"},
+	{"name": "Sunset", "road": "4b4b4b", "ground": "fea92e"},
+	{"name": "Candy", "road": "4a4a4a", "ground": "dc2051"},
+	{"name": "Sky", "road": "4a4a4a", "ground": "59c4ff"},
+	{"name": "Wine", "road": "cbcbcb", "ground": "4d1023"},
+	{"name": "Mint", "road": "3a3a3a", "ground": "7ef2b0"},
+	{"name": "Grape", "road": "e2e2e2", "ground": "6a3fd6"},
+]
+
+const DEFAULT_THEME := {"road": "4a4a4a", "ground": "48d350"}
 
 const NAME_POOL := [
 	"Neon Loop", "Sunset Run", "Tight Squeeze", "Long Way", "Switchback",
@@ -108,10 +134,13 @@ static func new_track() -> Dictionary:
 	var list := _store()
 	if list.size() >= MAX_TRACKS:
 		return {}
+	var preset: Dictionary = THEME_PRESETS[list.size() % THEME_PRESETS.size()]
 	var entry := {
 		"id": _next_id(list),
 		"name": _unique_name(list, NAME_POOL[list.size() % NAME_POOL.size()]),
 		"ops": default_ops(),
+		"road": str(preset["road"]),
+		"ground": str(preset["ground"]),
 	}
 	list.append(entry)
 	_save(list)
@@ -153,10 +182,13 @@ static func duplicate_track(id: int) -> Variant:
 	if src == null:
 		return null
 	var list := _store()
+	var palette := theme_of(src)
 	var copy := {
 		"id": _next_id(list),
 		"name": _unique_name(list, "%s copy" % str(src["name"])),
 		"ops": (src["ops"] as Array).duplicate(true),
+		"road": palette["road"],
+		"ground": palette["ground"],
 	}
 	list.append(copy)
 	_save(list)
@@ -224,6 +256,63 @@ static func next_corner(ops: Array, deg: int = 90) -> Dictionary:
 	return make_corner(signi(-last_dir) * absi(deg))
 
 
+# --- theme -------------------------------------------------------------------
+
+# The colours for a stored track, always complete: a track saved before colours
+# existed (or one with a missing/short value) falls back to the default, so the
+# renderer never has to guard against a half-set theme.
+static func theme_of(entry: Variant) -> Dictionary:
+	if entry == null or not (entry is Dictionary):
+		return DEFAULT_THEME.duplicate()
+	var road := _hex(str(entry.get("road", "")), str(DEFAULT_THEME["road"]))
+	var ground := _hex(str(entry.get("ground", "")), str(DEFAULT_THEME["ground"]))
+	return {"road": road, "ground": ground}
+
+
+static func _hex(value: String, fallback: String) -> String:
+	var v := value.strip_edges().lstrip("#")
+	if v.length() != 6 or not _is_hex(v):
+		return fallback
+	return v.to_upper()
+
+
+static func _is_hex(v: String) -> bool:
+	for i in range(v.length()):
+		var c := v[i]
+		if not ("0123456789abcdefABCDEF".contains(c)):
+			return false
+	return true
+
+
+static func theme_for_id(id: int) -> Dictionary:
+	return theme_of(get_track(id))
+
+
+static func set_theme(id: int, road: String, ground: String) -> void:
+	var list := _store()
+	for e in list:
+		if int(e["id"]) == id:
+			e["road"] = _hex(road, str(DEFAULT_THEME["road"]))
+			e["ground"] = _hex(ground, str(DEFAULT_THEME["ground"]))
+	_save(list)
+
+
+# The stripe and the pillars are derived from the two colours the player picks, so
+# the road reads as one palette instead of four colours that can clash. `stripe` is
+# a touch lighter than the road; `pole` is a darkened ground, which keeps the poles
+# distinct from the road without inventing a fifth colour.
+static func theme_colors(entry: Variant) -> Dictionary:
+	var t := theme_of(entry)
+	var road := Color(t["road"])
+	var ground := Color(t["ground"])
+	return {
+		"road": road,
+		"ground": ground,
+		"stripe": road.lightened(0.10),
+		"pole": ground.darkened(0.45),
+	}
+
+
 # --- validation --------------------------------------------------------------
 
 # A track the game can actually drive. Returns {ok, error, corners, length}.
@@ -252,6 +341,8 @@ static func validate(ops: Array) -> Dictionary:
 	length += FINISH_LEN
 	if corners < 2:
 		return {"ok": false, "error": "A track needs at least 2 corners.", "corners": corners, "length": length}
+	if corners > MAX_CORNERS:
+		return {"ok": false, "error": "Too many corners (max %d)." % MAX_CORNERS, "corners": corners, "length": length}
 	return {"ok": true, "error": "", "corners": corners, "length": length}
 
 
@@ -285,13 +376,14 @@ static func reverse(ops: Array) -> Array:
 
 # The `opts` dictionary `Track.new` wants. Radius is the default; each corner
 # carries its own, so a mixed-radius track builds correctly.
-static func opts(ops: Array) -> Dictionary:
+static func opts(ops: Array, entry: Variant = null) -> Dictionary:
 	return {
 		"corners": corner_count(ops),
 		"radius": DEFAULT_RADIUS,
 		"lead_in": LEAD_IN,
 		"finish_len": FINISH_LEN,
 		"ops": ops.duplicate(true),
+		"theme": theme_of(entry),
 	}
 
 
@@ -300,7 +392,7 @@ static func opts_for_id(id: int) -> Dictionary:
 	var t: Variant = get_track(id)
 	if t == null:
 		return {}
-	return opts(t["ops"])
+	return opts(t["ops"], t)
 
 
 static func display_name(id: int) -> String:

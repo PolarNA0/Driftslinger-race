@@ -42,7 +42,7 @@ func _drivable(ops: Array, label: String) -> bool:
 	if not bool(v["ok"]):
 		print("  %s: validate says no: %s FAIL" % [label, str(v["error"])])
 		return false
-	var t := Track.new(0, CustomTracks.opts(ops))
+	var t := Track.new(0, CustomTracks.opts(ops, {"road": "4a4a4a", "ground": "48d350"}))
 	var r := _drive(t)
 	var ok: bool = bool(r["finished"]) and float(r["max_off"]) < Cfg.ROAD_HALF_WIDTH
 	print("  %s: corners=%d length=%.0f finished=%s time=%.3f maxOff=%.2f %s"
@@ -183,6 +183,113 @@ func _init() -> void:
 	var gone: bool = CustomTracks.opts_for_id(999999).is_empty()
 	print("  a deleted/unknown id resolves to empty (Game falls back): %s" % ("OK" if gone else "FAIL"))
 	pass_all = gone and pass_all
+
+	print("== every corner the editor allows is catchable ==")
+	# The editor's radius cap has to be inside the grab range, or a wide corner is a
+	# track that cannot be driven: the car flies past the pole and hits the wall. This
+	# is the bug the old 120px cap shipped, so it is pinned here.
+	var wide := []
+	for i in range(6):
+		wide.append(CustomTracks.make_straight(240.0))
+		wide.append(CustomTracks.make_corner(90 if i % 2 == 0 else -90, CustomTracks.MAX_RADIUS))
+	var wide_v := CustomTracks.validate(wide)
+	var wide_ok: bool = bool(wide_v["ok"]) and CustomTracks.MAX_RADIUS < Cfg.GRAB_RANGE
+	print("  max radius %d < grab range %d: %s" % [int(CustomTracks.MAX_RADIUS), int(Cfg.GRAB_RANGE), "OK" if wide_ok else "FAIL"])
+	pass_all = wide_ok and pass_all
+	pass_all = _drivable(wide, "widest corners") and pass_all
+	# And a radius past the cap is refused rather than built.
+	var past := CustomTracks.validate([
+		CustomTracks.make_straight(240.0),
+		{"t": "A", "deg": 90, "r": Cfg.GRAB_RANGE + 20.0},
+		CustomTracks.make_straight(240.0),
+		CustomTracks.make_corner(-90),
+	])
+	var past_ok: bool = not bool(past["ok"])
+	print("  a radius past the grab range is refused: %s" % ("OK" if past_ok else "FAIL"))
+	pass_all = past_ok and pass_all
+
+	print("== the corner-count cap ==")
+	var many := []
+	for i in range(CustomTracks.MAX_CORNERS + 1):
+		many.append(CustomTracks.make_corner(90 if i % 2 == 0 else -90))
+	var many_v := CustomTracks.validate(many)
+	var many_ok: bool = not bool(many_v["ok"]) and str(many_v["error"]).contains("Too many corners")
+	print("  more than %d corners is refused: %s" % [CustomTracks.MAX_CORNERS, "OK" if many_ok else "FAIL"])
+	pass_all = many_ok and pass_all
+
+	print("== colours ==")
+	Storage.save_custom_tracks([])
+	var ct := CustomTracks.new_track()
+	var theme: Dictionary = CustomTracks.theme_of(ct)
+	var has_theme: bool = str(theme["road"]).length() == 6 and str(theme["ground"]).length() == 6
+	print("  a new track carries a complete theme: %s" % ("OK" if has_theme else "FAIL"))
+	pass_all = has_theme and pass_all
+	CustomTracks.set_theme(int(ct["id"]), "ff0000", "00ff00")
+	var set: Dictionary = CustomTracks.theme_for_id(int(ct["id"]))
+	var set_ok: bool = set["road"] == "FF0000" and set["ground"] == "00FF00"
+	print("  set_theme stores the colours: %s" % ("OK" if set_ok else "FAIL"))
+	pass_all = set_ok and pass_all
+	# A missing or short value falls back to the default, so the renderer never sees a
+	# half-set palette.
+	var fallback: Dictionary = CustomTracks.theme_of({"id": 1, "ops": [], "road": "zz"})
+	var fb_ok: bool = fallback["road"] == str(CustomTracks.DEFAULT_THEME["road"])
+	print("  an invalid colour falls back to the default: %s" % ("OK" if fb_ok else "FAIL"))
+	pass_all = fb_ok and pass_all
+	# A theme on the opts is what the renderer reads when the track is played.
+	var topts: Dictionary = CustomTracks.opts_for_id(int(ct["id"]))
+	var topts_ok: bool = topts.has("theme") and str(topts["theme"]["road"]) == "FF0000"
+	print("  opts_for_id carries the theme through: %s" % ("OK" if topts_ok else "FAIL"))
+	pass_all = topts_ok and pass_all
+	# The derived stripe and pole are always present and never equal to the road.
+	var colors: Dictionary = CustomTracks.theme_colors(ct)
+	var colors_ok: bool = colors.has("stripe") and colors.has("pole") and colors["stripe"] != colors["road"]
+	print("  theme_colors derives stripe and pole: %s" % ("OK" if colors_ok else "FAIL"))
+	pass_all = colors_ok and pass_all
+
+	print("== the preview camera ==")
+	var pv := TrackPreview.new()
+	pv.size = Vector2(360.0, 240.0)
+	pv.rebuild(CustomTracks.default_ops())
+	pv.palette = CustomTracks.theme_of(ct)
+	var cam_ok: bool = pv.ok and pv._road.size() >= 2
+	print("  the preview builds the road: %s" % ("OK" if cam_ok else "FAIL"))
+	pass_all = cam_ok and pass_all
+	if cam_ok:
+		pv.fit()
+		var w0 := pv.screen_to_world(Vector2(180.0, 120.0))
+		var s0 := pv.world_to_screen(w0)
+		var round_ok: bool = absf(s0.x - 180.0) < 0.01 and absf(s0.y - 120.0) < 0.01
+		print("  world<->screen round-trips: %s" % ("OK" if round_ok else "FAIL"))
+		pass_all = round_ok and pass_all
+		var zoom0 := pv._zoom
+		pv.zoom_by(1.5)
+		var zoom_ok: bool = pv._zoom > zoom0
+		print("  zoom_by changes the zoom: %s" % ("OK" if zoom_ok else "FAIL"))
+		pass_all = zoom_ok and pass_all
+		var before := pv._origin
+		pv.pan_by(Vector2(30.0, -10.0))
+		var pan_ok: bool = pv._origin != before
+		print("  pan_by moves the camera: %s" % ("OK" if pan_ok else "FAIL"))
+		pass_all = pan_ok and pass_all
+		# Tapping a piece on the map picks that piece: walk every piece's midpoint back
+		# to screen space and expect it to come back.
+		var picks_ok := true
+		for sp in pv._spans:
+			var mid := pv.world_to_screen(Vector2(float(sp["cx"]), float(sp["cy"])))
+			var hit := pv.pick_at(mid)
+			if hit != int(sp["op"]):
+				picks_ok = false
+				break
+		print("  every piece's midpoint picks that piece: %s" % ("OK" if picks_ok else "FAIL"))
+		pass_all = picks_ok and pass_all
+		pv.focus_index(2)
+		var foc := pv._span(2)
+		var foc_screen := pv.world_to_screen(Vector2(float(foc["cx"]), float(foc["cy"])))
+		var focus_ok: bool = foc_screen.distance_to(Vector2(180.0, 120.0)) < 2.0
+		print("  focus_index centres a piece: %s" % ("OK" if focus_ok else "FAIL"))
+		pass_all = focus_ok and pass_all
+	pv.free()
+	Storage.save_custom_tracks([])
 
 	print("== the store is capped ==")
 	Storage.save_custom_tracks([])

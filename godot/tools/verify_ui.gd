@@ -148,9 +148,9 @@ func _check_size(vp: Vector2i) -> void:
 	if app.btn_restart_round.visible:
 		_fail("restart button still visible at the menu")
 
-	# The Editor tab opens the track editor, a full-screen overlay. The pinned parts
-	# (the header, the palette, the actions) must fit the viewport; the piece list is
-	# the one part that scrolls, so its rows are not required to be on screen.
+	# The Editor tab opens the track editor, a full-screen overlay. The header and
+	# the camera row are pinned and must fit the viewport; the Build / Look / Help
+	# pages live in a scroll area, so only their width is guaranteed.
 	shell.select("editor")
 	await process_frame
 	app._new_custom_track()
@@ -163,6 +163,24 @@ func _check_size(vp: Vector2i) -> void:
 				_fail("editor: '%s' out of view at %s" % [_label_of(b), b.get_global_rect()])
 		if not _in_view(app.editor.play_button, vp):
 			_fail("editor: Play button out of view at %s" % app.editor.play_button.get_global_rect())
+		# The map has a real road and a working camera.
+		var pv = app.editor.preview
+		if not pv.ok or pv._road.size() < 2:
+			_fail("editor map has no road to show")
+		else:
+			pv.fit()
+			var mid: Vector2 = pv.world_to_screen(pv._road[pv._road.size() / 2])
+			if not _in_view(app.editor.preview, vp):
+				_fail("editor map out of view")
+			elif mid.x < -1.0 or mid.x > pv.size.x + 1.0 or mid.y < -1.0 or mid.y > pv.size.y + 1.0:
+				_fail("editor camera: Fit did not bring the road into the map (%s)" % mid)
+		# Each page comes up, and its controls fit the width of the scroll area.
+		for page in ["look", "help", "build"]:
+			app.editor._switch_page(page)
+			await process_frame
+			for b in _buttons(app.editor.page_box):
+				if not _fits_width(b, vp):
+					_fail("editor %s page: '%s' too wide at %s" % [page, _label_of(b), b.get_global_rect()])
 	# Close and delete the track the check made, leaving the store as it started.
 	var made_id: int = app.editor.id
 	app.editor._on_close()
@@ -177,6 +195,9 @@ func _check_size(vp: Vector2i) -> void:
 	var want_corners: int = CustomTracks.corner_count(app.editor.ops)
 	if want_corners <= 0:
 		_fail("editor had no corners to load")
+	# Give the track a distinctive look, then check the run paints it: the theme the
+	# editor sets has to reach the renderer, or a custom track plays in the wrong colours.
+	CustomTracks.set_theme(app.editor.id, "ff0000", "00ff00")
 	app._on_editor_play()
 	await process_frame
 	if app.game.track == null:
@@ -186,6 +207,10 @@ func _check_size(vp: Vector2i) -> void:
 			_fail("custom track has %d corners, editor built %d" % [app.game.track.fillets.size(), want_corners])
 		if app.game.mode != "speedrun":
 			_fail("custom track loaded outside speedrun")
+		# The custom theme reaches the renderer (a built-in track leaves it empty).
+		var ov: Dictionary = app.game.renderer.theme_override
+		if ov.is_empty() or ov["road"] != Color("ff0000") or ov["ground"] != Color("00ff00"):
+			_fail("custom track theme did not reach the renderer: %s" % ov)
 	# Drive the custom track to its finish through the real game loop, with the same
 	# clean line verify_tracks uses, so the finish card is built the way a player's
 	# run builds it. Then check it is local-only: no leaderboard, no world record.
@@ -234,11 +259,12 @@ func _check_page(name: String, page: Control, vp: Vector2i) -> void:
 		_fail("%s: no buttons found" % name)
 
 
-# Every button in the editor that is not inside the scrolling piece list. Those are
-# the ones that must always be reachable, so they are what the fit check measures.
+# Every button in the editor that is not inside the scrolling control area. Those are
+# the ones that must always be reachable (the header and the camera row), so they are
+# what the in-view check measures; the page controls may sit below the fold.
 func _pinned_buttons(editor: Node) -> Array:
 	var out: Array = []
-	var skip: Node = editor.piece_scroll
+	var skip: Node = editor.control_scroll
 	for b in _buttons(editor):
 		if not _in_subtree(b, skip):
 			out.append(b)
