@@ -36,6 +36,7 @@ var palette := {"road": "", "ground": ""}
 const PAD := 20.0
 const MIN_ZOOM := 0.05
 const MAX_ZOOM := 6.0
+const WHEEL_STEP := 1.15
 
 
 func _ready() -> void:
@@ -165,13 +166,21 @@ func pick_at(pos: Vector2) -> int:
         return -1
 
 
+# A finger drag arrives twice: once as a touch event and once as an emulated mouse
+# event (`input_devices/pointing/emulate_mouse_from_touch` is on by default and
+# Android/iOS need it). Handling both panned the map at double speed, which is the
+# "super sensitive" drag. Emulated events carry DEVICE_ID_EMULATION, so they are
+# ignored here and the touch events do the work. A real mouse is not emulated, so
+# the wheel, drag and click still work on desktop.
 func _gui_input(event: InputEvent) -> void:
         if event is InputEventMouseButton:
                 var mb := event as InputEventMouseButton
+                if mb.device == InputEvent.DEVICE_ID_EMULATION:
+                        return
                 if mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.pressed:
-                        _zoom_at(mb.position, 1.15)
+                        _zoom_at(mb.position, WHEEL_STEP)
                 elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and mb.pressed:
-                        _zoom_at(mb.position, 1.0 / 1.15)
+                        _zoom_at(mb.position, 1.0 / WHEEL_STEP)
                 elif mb.button_index == MOUSE_BUTTON_LEFT:
                         if mb.pressed:
                                 _dragging = true
@@ -180,8 +189,10 @@ func _gui_input(event: InputEvent) -> void:
                                 _dragging = false
                                 if _drag_moved < 6.0:
                                         _tap(mb.position)
-        elif event is InputEventMouseMotion and _dragging:
+        elif event is InputEventMouseMotion:
                 var mm := event as InputEventMouseMotion
+                if mm.device == InputEvent.DEVICE_ID_EMULATION or not _dragging:
+                        return
                 _drag_moved += mm.relative.length()
                 pan_by(mm.relative)
         elif event is InputEventScreenTouch:
@@ -197,6 +208,12 @@ func _gui_input(event: InputEvent) -> void:
                 var sd := event as InputEventScreenDrag
                 _drag_moved += sd.relative.length()
                 pan_by(sd.relative)
+        # A phone has no mouse wheel, so pinch is the only natural way to zoom without
+        # the small +/- buttons.
+        elif event is InputEventMagnifyGesture:
+                var mg := event as InputEventMagnifyGesture
+                _zoom_at(mg.position, mg.factor)
+                accept_event()
 
 
 func _tap(pos: Vector2) -> void:

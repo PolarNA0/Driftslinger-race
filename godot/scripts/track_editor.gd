@@ -194,7 +194,7 @@ func _build_camera_row() -> Control:
 	row.add_child(_mini_text("-", func(): preview.zoom_by(1.0 / 1.3)))
 	row.add_child(_mini_text("+", func(): preview.zoom_by(1.3)))
 	var hint := Label.new()
-	hint.text = "Drag to pan \u00b7 tap a piece to select"
+	hint.text = "Drag to pan \u00b7 pinch to zoom \u00b7 tap a piece to select"
 	hint.add_theme_font_size_override("font_size", 12)
 	hint.add_theme_color_override("font_color", UiTheme.INK_MUTE)
 	hint.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -558,7 +558,8 @@ func _build_help() -> void:
 	box.add_child(_hint("Hold the button to sling the car around a pole. Let go to fly straight to the next one. Leave the road and the run is over."))
 	box.add_child(_hint("Tap Play to try the track at any time. The run is saved on this device - custom tracks are not uploaded."))
 	box.add_child(_section("How to build"))
-	box.add_child(_hint("Add a piece: a Straight, or a corner of 90\u00b0, 180\u00b0 or 270\u00b0. Corners alternate left and right so the road does not fold back on itself."))
+	box.add_child(_hint("Add a track piece: a Straight, or a corner of 90\u00b0, 180\u00b0 or 270\u00b0. Corners alternate left and right so the road does not fold back on itself."))
+	box.add_child(_hint("Every corner is a pillar the car slings around. A Reattach corner is a pillar you can bail out of early and catch again for a slingshot."))
 	box.add_child(_hint("Tap a piece in the list - or on the map - to select it, then change its length, angle, radius or direction. Use the arrows to move it, the bin to delete it."))
 	box.add_child(_hint("The map is a camera: drag to pan, pinch or the + / - buttons to zoom, Fit to see the whole road."))
 	box.add_child(_section("Rules"))

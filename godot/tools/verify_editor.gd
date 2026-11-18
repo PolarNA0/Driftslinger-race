@@ -50,6 +50,40 @@ func _drivable(ops: Array, label: String) -> bool:
 	return ok
 
 
+# Builders for the input events the map consumes, so the checks drive the real
+# `_gui_input` rather than the camera methods directly.
+func _touch(pressed: bool, pos: Vector2) -> InputEventScreenTouch:
+	var e := InputEventScreenTouch.new()
+	e.index = 0
+	e.pressed = pressed
+	e.position = pos
+	return e
+
+
+func _drag(rel: Vector2, device: int) -> InputEventScreenDrag:
+	var e := InputEventScreenDrag.new()
+	e.index = 0
+	e.relative = rel
+	e.position = Vector2(100.0, 100.0) + rel
+	e.device = device
+	return e
+
+
+func _mouse_motion(rel: Vector2, device: int) -> InputEventMouseMotion:
+	var e := InputEventMouseMotion.new()
+	e.relative = rel
+	e.position = Vector2(100.0, 100.0) + rel
+	e.device = device
+	return e
+
+
+func _pinch(factor: float) -> InputEventMagnifyGesture:
+	var e := InputEventMagnifyGesture.new()
+	e.factor = factor
+	e.position = Vector2(180.0, 120.0)
+	return e
+
+
 func _init() -> void:
 	var pass_all := true
 
@@ -288,6 +322,29 @@ func _init() -> void:
 		var focus_ok: bool = foc_screen.distance_to(Vector2(180.0, 120.0)) < 2.0
 		print("  focus_index centres a piece: %s" % ("OK" if focus_ok else "FAIL"))
 		pass_all = focus_ok and pass_all
+		# A finger drag is delivered twice (touch + emulated mouse). The map must pan
+		# on the touch event only, or every drag moves it at double speed - the
+		# "super sensitive" bug. An emulated mouse drag must not pan at all.
+		var org := pv._origin
+		pv._gui_input(_touch(true, Vector2(100.0, 100.0)))
+		pv._gui_input(_mouse_motion(Vector2(20.0, 0.0), InputEvent.DEVICE_ID_EMULATION))
+		var emu_ok: bool = pv._origin == org
+		print("  an emulated mouse motion does not pan (no double-pan): %s" % ("OK" if emu_ok else "FAIL"))
+		pass_all = emu_ok and pass_all
+		pv._gui_input(_touch(false, Vector2(100.0, 100.0)))
+		org = pv._origin
+		pv._gui_input(_touch(true, Vector2(100.0, 100.0)))
+		pv._gui_input(_drag(Vector2(20.0, 0.0), 0))
+		var touch_ok: bool = pv._origin != org
+		print("  a real touch drag does pan: %s" % ("OK" if touch_ok else "FAIL"))
+		pass_all = touch_ok and pass_all
+		pv._gui_input(_touch(false, Vector2(120.0, 100.0)))
+		# Pinch zooms the map, so a phone can zoom without the +/- buttons.
+		var pinch_before := pv._zoom
+		pv._gui_input(_pinch(1.4))
+		var pinch_ok: bool = pv._zoom > pinch_before
+		print("  pinch zoom changes the zoom: %s" % ("OK" if pinch_ok else "FAIL"))
+		pass_all = pinch_ok and pass_all
 	pv.free()
 	Storage.save_custom_tracks([])
 
