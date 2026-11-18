@@ -230,6 +230,20 @@ different platforms, two different traps:
   the keyboard for a focused line edit regardless, but if the APK still refuses to
   raise it, turn immersive mode off (accepting the status/nav bars) and retest
   before digging deeper.
+- **Web build: the custom shell must not defeat the hidden input.** `web/shell.html`
+  is where two WebView traps live, and in-app browsers (Discord, Facebook) are the
+  ones that hit them. First, `user-select: none` on `html, body` is inherited by the
+  hidden `<input>` Godot injects to raise the keyboard, and a WebView that finds an
+  unselectable field may decline to focus it at all - so the shell re-enables
+  `user-select`/`touch-action` for `input, textarea`. Godot's own default shell never
+  sets `user-select`, which is why this is a custom-shell-only regression. Second,
+  Godot only *creates* that input when `'ontouchstart' in window` is true; a WebView
+  that reports touch points but omits the hint gets the desktop IME path and raises
+  no keyboard, while taps still work (the touch callback is bound unconditionally),
+  so the game looks fine and only sign-in fails. The shell restores the hint when
+  `navigator.maxTouchPoints > 0`, keyed on that rather than a user-agent so a real
+  desktop is never told it has a touchscreen. Upstream Godot issue #117342 (virtual
+  keyboard with fullscreen on mobile) is the remaining open suspect.
 
 `LineEdit` is the right node either way - `Input.virtual_keyboard_show` and
 `virtual_keyboard_enabled` only matter for custom `Control`s.

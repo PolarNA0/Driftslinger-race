@@ -53,6 +53,22 @@
                                 touch-action: none;
                         }
 
+                        /* Godot's experimental virtual keyboard raises the soft
+                           keyboard by focusing a hidden <input>/<textarea> it injects
+                           as a sibling of the canvas. `user-select` is inherited, so
+                           the page-wide `user-select: none` above would make that
+                           field unselectable - and several mobile WebViews (in-app
+                           browsers especially) then decline to focus it at all, so no
+                           keyboard appears even with the export option on. Give the
+                           field its selection back; it is the only input on the page.
+                           Do NOT hide it: a display:none or zero-size field is another
+                           way a WebView refuses to raise the keyboard. */
+                        input, textarea {
+                                user-select: text;
+                                -webkit-user-select: text;
+                                touch-action: auto;
+                        }
+
                         #status {
                                 position: fixed;
                                 inset: 0;
@@ -155,6 +171,17 @@
                 <script>
 const GODOT_CONFIG = $GODOT_CONFIG;
 const GODOT_THREADS_ENABLED = $GODOT_THREADS_ENABLED;
+
+// Godot offers its virtual keyboard only when 'ontouchstart' is in window, and
+// silently falls back to the desktop IME path when it is not - which does not
+// raise the soft keyboard on several Android WebViews. A touch device that
+// reports touch points but not the touch hint is exactly that case, so restore
+// the hint before the engine reads it. Keyed on maxTouchPoints so a real
+// desktop (no touch) is never told it has a touchscreen.
+if (!('ontouchstart' in window) && navigator.maxTouchPoints > 0) {
+        window.ontouchstart = null;
+}
+
 const engine = new Engine(GODOT_CONFIG);
 
 (function () {
