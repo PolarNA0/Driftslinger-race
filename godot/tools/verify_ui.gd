@@ -75,6 +75,19 @@ func _check_size(vp: Vector2i) -> void:
 	await process_frame
 	if not app.track_section.visible:
 		_fail("track chooser hidden in speedrun")
+	# Every track number must fit inside its chip. The chips are `clip_text`, so a chip
+	# narrower than its label silently drops the last digit ("27" reads as "2") - which
+	# is exactly what the 7-wide grid did at phone width before GridChip's tight padding.
+	for b in app.track_buttons:
+		if not b.is_visible_in_tree():
+			continue
+		var fs: int = b.get_theme_font_size("font_size")
+		var f: Font = b.get_theme_font("font")
+		var tw := f.get_string_size(b.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var sb: StyleBox = b.get_theme_stylebox("normal")
+		var avail: float = b.size.x - float(sb.content_margin_left) - float(sb.content_margin_right)
+		if tw > avail + 0.5:
+			_fail("track chip '%s' clips its number: text %.1f > %.1f avail" % [b.text, tw, avail])
 	app._set_mode("endless")
 	await process_frame
 	if app.track_section.visible:

@@ -51,13 +51,13 @@ static func _flat(bg: Color, edge: Color, radius: int, border: int, pad_h: int, 
 
 
 static func _button_styles(t: Theme, type_name: String, base_bg: Color, base_edge: Color,
-                text: Color, radius: int = 12) -> void:
-        t.set_stylebox("normal", type_name, _flat(base_bg, base_edge, radius, 2, 16, 12))
-        t.set_stylebox("hover", type_name, _flat(base_bg.lightened(0.10), base_edge.lightened(0.12), radius, 2, 16, 12))
-        t.set_stylebox("pressed", type_name, _flat(base_bg.lightened(0.20), base_edge.lightened(0.24), radius, 2, 16, 12))
-        t.set_stylebox("hover_pressed", type_name, _flat(base_bg.lightened(0.20), base_edge.lightened(0.24), radius, 2, 16, 12))
-        t.set_stylebox("focus", type_name, _flat(Color(0, 0, 0, 0), ACCENT, radius, 2, 16, 12))
-        t.set_stylebox("disabled", type_name, _flat(DISABLED_BG, DISABLED_EDGE, radius, 2, 16, 12))
+                text: Color, radius: int = 12, pad_h: int = 16) -> void:
+        t.set_stylebox("normal", type_name, _flat(base_bg, base_edge, radius, 2, pad_h, 12))
+        t.set_stylebox("hover", type_name, _flat(base_bg.lightened(0.10), base_edge.lightened(0.12), radius, 2, pad_h, 12))
+        t.set_stylebox("pressed", type_name, _flat(base_bg.lightened(0.20), base_edge.lightened(0.24), radius, 2, pad_h, 12))
+        t.set_stylebox("hover_pressed", type_name, _flat(base_bg.lightened(0.20), base_edge.lightened(0.24), radius, 2, pad_h, 12))
+        t.set_stylebox("focus", type_name, _flat(Color(0, 0, 0, 0), ACCENT, radius, 2, pad_h, 12))
+        t.set_stylebox("disabled", type_name, _flat(DISABLED_BG, DISABLED_EDGE, radius, 2, pad_h, 12))
         t.set_color("font_color", type_name, text)
         t.set_color("font_hover_color", type_name, text)
         t.set_color("font_pressed_color", type_name, text)
@@ -90,6 +90,15 @@ static func build() -> Theme:
         t.set_stylebox("hover_pressed", "ToggleButton", _flat(ACCENT, ACCENT.lightened(0.15), 12, 2, 16, 12))
         t.set_color("font_pressed_color", "ToggleButton", ACCENT_TEXT)
         t.set_color("font_hover_pressed_color", "ToggleButton", ACCENT_TEXT)
+
+        # A square-ish chip for the picker grids (track numbers, car swatches). The
+        # default 16px side padding leaves only ~15px of text room in a 7-wide grid on
+        # a phone, so a two-digit track number clipped to its first digit ("27" -> "2").
+        # Tighter padding gives the digits the room they need without widening the grid.
+        t.set_type_variation("GridChip", "ToggleButton")
+        _button_styles(t, "GridChip", BTN, BTN_EDGE, INK, 12, 6)
+        t.set_stylebox("pressed", "GridChip", _flat(ACCENT, ACCENT.lightened(0.15), 12, 2, 6, 12))
+        t.set_stylebox("hover_pressed", "GridChip", _flat(ACCENT, ACCENT.lightened(0.15), 12, 2, 6, 12))
 
         # --- Panels: the overlay cards and the watch badge ---
         var panel := _flat(PANEL, PANEL_EDGE, 20, 2, 20, 18)

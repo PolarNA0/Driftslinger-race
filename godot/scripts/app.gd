@@ -1214,7 +1214,7 @@ func _build_track_list(parent: Node) -> void:
 	for s in Tracks.MENU_TRACKS:
 		var b := Button.new()
 		b.toggle_mode = true
-		b.theme_type_variation = "ToggleButton"
+		b.theme_type_variation = "GridChip"
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.clip_text = true
 		b.custom_minimum_size = Vector2(0, 44)
