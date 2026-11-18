@@ -39,9 +39,12 @@ var ghost_mode := "off"
 var car_skin := 0
 
 var board_seed := 1
+var board_mode := "speedrun"   # "speedrun" ranks times, "endless" ranks distances
 var board_page_no := 1
 var board_reals := []          # real runs on board_seed, as the server last returned
 var board_reals_seed := 0
+var board_reals_mode := ""     # the mode board_reals belongs to, so seed 7 speedrun
+                               # and seed 7 endless are never confused
 var watching: Variant = null   # {kind, seed, name, time, label, tag, sub}
 
 var acct_mode := "login"
@@ -924,9 +927,8 @@ func _refresh_track_list() -> void:
 		var best: Variant = Storage.get_best_time(menu_seed)
 		play_best_label.text = "best --" if best == null else "best %s" % _fmt_time(float(best))
 	else:
-		# Endless is one open road, not a per-track course, so the record is the
-		# player's best distance anywhere.
-		var best_d := Storage.best_distance()
+		# Endless is one shared road, so the record is this player's best distance on it.
+		var best_d := float(Storage.get_record(Game.ENDLESS_SEED)["dist"])
 		play_best_label.text = "best --" if best_d <= 0.0 else "best %s" % _fmt_dist(best_d)
 
 
@@ -997,6 +999,9 @@ func _build_board() -> void:
 
 
 func _render_board() -> void:
+	if board_mode == "endless":
+		_render_endless_board()
+		return
 	var seed := board_seed
 	var best: Variant = Storage.get_best_time(seed)
 	var me: Variant = null
@@ -1042,19 +1047,54 @@ func _render_board() -> void:
 	lb_next.disabled = int(page["page"]) >= int(page["pages"])
 
 
+# The endless board is player + distance, furthest first. It is short - one row
+# per player - so it is shown whole, with no paging. The server ranks it; the
+# client only draws it.
+func _render_endless_board() -> void:
+	var reals := _reals_for(board_seed, "endless")
+	var mine := float(Storage.get_record(Game.ENDLESS_SEED)["dist"])
+	lb_title.text = "Endless"
+	if reals.is_empty() and mine <= 0.0:
+		lb_note.text = "No runs yet \u00b7 be the first"
+	else:
+		lb_note.text = "%d racers \u00b7 furthest wins" % reals.size()
+
+	for c in lb_rows.get_children():
+		c.queue_free()
+	var shown_you := false
+	for r in reals:
+		var row: Dictionary = r
+		if bool(row.get("you", false)):
+			shown_you = true
+		lb_rows.add_child(_label("%d   %s   %s" % [int(row.get("rank", 0)), str(row.get("name", "")), _fmt_dist(float(row.get("dist", 0.0)))], 14))
+	# A local best the server has not listed yet, so the player still sees their own
+	# distance while the upload lands.
+	if not shown_you and mine > 0.0:
+		lb_rows.add_child(_label("\u00b7   %s   %s (not uploaded)" % [_player_name(), _fmt_dist(mine)], 14))
+	lb_page_label.text = "1 / 1"
+	lb_prev.disabled = true
+	lb_next.disabled = true
+
+
 func _show_leaderboard(seed: int) -> void:
-	board_seed = seed
-	# The page the player belongs on comes from their rank in the merged board, so
-	# the real runs have to be counted. Before they load this is a first guess and
-	# the board corrects it once they are in.
-	var best: Variant = Storage.get_best_time(seed)
-	var reals := _reals_for(seed)
-	board_page_no = 1 if best == null else Leaderboard.page_for_rank(Leaderboard.player_rank(float(best), reals))
+	# The board follows the menu mode: endless ranks distances, speedrun ranks times.
+	# Endless is one shared road, so its board is keyed by the shared seed, not by
+	# whatever track the menu happens to be showing.
+	board_mode = menu_mode
+	board_seed = Game.ENDLESS_SEED if board_mode == "endless" else seed
+	board_page_no = 1
+	if board_mode == "speedrun":
+		# The page the player belongs on comes from their rank in the merged board, so
+		# the real runs have to be counted. Before they load this is a first guess and
+		# the board corrects it once they are in.
+		var best: Variant = Storage.get_best_time(seed)
+		var reals := _reals_for(seed)
+		board_page_no = 1 if best == null else Leaderboard.page_for_rank(Leaderboard.player_rank(float(best), reals))
 	_render_board()
 	_show_only("board")
 	# Then fetch the real runs and re-render with them merged in. The local board is
 	# drawn first so it is never blank while that loads.
-	_load_reals(seed)
+	_load_reals(board_seed, board_mode)
 
 
 # =============================================================================
@@ -1246,6 +1286,17 @@ func _sync_my_runs() -> void:
 		# and without one the board cannot play it back.
 		if Storage.get_replay(seed) == null:
 			Storage.save_replay(seed, Replay.make_replay(seed, Replay.decode_steps(str(steps)), time))
+	# Endless distances come down too: the account is the source of truth, so a fresh
+	# device pulls its endless bests back rather than showing nothing.
+	var endless: Variant = await Api.fetch_my_endless()
+	if endless != null:
+		for e in endless:
+			var erow: Dictionary = e
+			var eseed := int(erow["seed"])
+			var emetres := float(erow["metres"])
+			var eprev: Dictionary = Storage.get_record(eseed)
+			if emetres > float(eprev.get("dist", 0.0)):
+				Storage.save_record(eseed, emetres, int(eprev.get("corners", 0)))
 	_refresh_track_list()
 
 
@@ -1257,14 +1308,16 @@ func _flush_queue() -> void:
 	if sent == null:
 		return
 	var d: Dictionary = sent
-	await _load_reals(int(d.get("track", board_seed)))
+	var mode := str(d.get("mode", "speedrun"))
+	if mode == "speedrun":
+		await _load_reals(int(d.get("track", board_seed)), "speedrun")
 	_refresh_track_list()
 
 
 # The real runs for a track, as the server last returned them, mapped to the shape
 # the board merge wants. Empty when the server has not answered for this track.
-func _reals_for(seed: int) -> Array:
-	if board_reals_seed != seed:
+func _reals_for(seed: int, mode: String = "speedrun") -> Array:
+	if board_reals_seed != seed or board_reals_mode != mode:
 		return []
 	var out := []
 	for r in board_reals:
@@ -1272,6 +1325,8 @@ func _reals_for(seed: int) -> Array:
 		out.append({
 			"name": str(row.get("name", "")),
 			"time": float(row.get("time", 0.0)),
+			"dist": float(row.get("dist", 0.0)),
+			"rank": int(row.get("rank", 0)),
 			"steps": row.get("steps"),
 			"you": bool(row.get("you", false)),
 		})
@@ -1280,15 +1335,16 @@ func _reals_for(seed: int) -> Array:
 
 # Fetch a track's real runs and re-render whatever is showing them. Called after a
 # run is uploaded and whenever the board is opened.
-func _load_reals(seed: int) -> void:
-	var rows: Variant = await Api.fetch_board(seed)
+func _load_reals(seed: int, mode: String = "speedrun") -> void:
+	var rows: Variant = await Api.fetch_board(seed, mode)
 	if rows == null:
 		return
 	board_reals = rows
 	board_reals_seed = seed
+	board_reals_mode = mode
 	# The player may have moved on while that was in flight, in which case there is
 	# nothing on screen to re-render.
-	if overlay == "board" and board_seed == seed:
+	if overlay == "board" and board_seed == seed and board_mode == mode:
 		_render_board()
 
 
@@ -1305,6 +1361,7 @@ func _build_dead() -> void:
 	dead_sub = _label("", 16)
 	col.add_child(dead_sub)
 	col.add_child(_button("Try again", func(): _start_run(game.seed_num)))
+	col.add_child(_button("Leaderboard", func(): _show_leaderboard(game.seed_num)))
 	col.add_child(_button("Main menu", _to_menu))
 
 
@@ -1476,6 +1533,11 @@ func _on_game_change(extra: Dictionary) -> void:
 			dead_dist.text = _fmt_dist(game.metres())
 			var best := maxf(float(prev["dist"]), game.metres())
 			dead_sub.text = "best %s \u00b7 %d corners" % [_fmt_dist(best), game.car.grabbed]
+			# Endless runs are not replayed server-side: the score is the distance, so
+			# the client reports it. Best-effort, exactly like a speedrun upload.
+			var seed_done := game.seed_num
+			Api.enqueue_endless(seed_done, game.metres(), _player_name())
+			_submit_endless(seed_done)
 		_show_only("dead")
 		hint_label.visible = false
 		_show_round_button(false)
@@ -1499,6 +1561,13 @@ func _on_game_change(extra: Dictionary) -> void:
 		var seed_done := game.seed_num
 		Api.enqueue(seed_done, Replay.encode_steps(game.steps), _player_name())
 		_submit_queued(seed_done)
+
+
+# Send queued endless runs. There is no finish card to refresh - endless ends in a
+# crash - so this only flushes the queue and updates the local readouts.
+func _submit_endless(seed: int) -> void:
+	await Api.flush()
+	_refresh_track_list()
 
 
 # Send queued runs, then refresh the finish card and the board against the merged

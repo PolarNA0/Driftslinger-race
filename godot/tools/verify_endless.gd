@@ -192,5 +192,31 @@ func _init() -> void:
 	else:
 		print("  detour boost x%.3f, spam x%.3f OK" % [boost_fires, spam_plain])
 
+	# 7) the endless upload keeps only the furthest distance per seed, so a later
+	#    shorter run cannot overwrite a better one still waiting to send. Drives the
+	#    real Api queue, not a copy of it.
+	print("the endless queue keeps the furthest distance per seed")
+	Api._write_queue([])
+	Api.enqueue_endless(7, 120.0, "me")
+	Api.enqueue_endless(7, 80.0, "me")
+	Api.enqueue_endless(7, 240.0, "me")
+	Api.enqueue(3, "01", "me")
+	var endless_entries := 0
+	var endless_metres := 0.0
+	var speed_entries := 0
+	for e in Api.read_queue():
+		var entry: Dictionary = e
+		if str(entry.get("mode", "speedrun")) == "endless":
+			endless_entries += 1
+			endless_metres = maxf(endless_metres, float(entry.get("metres", 0.0)))
+		else:
+			speed_entries += 1
+	if endless_entries == 1 and absf(endless_metres - 240.0) < 1e-6 and speed_entries == 1:
+		print("  one endless entry at 240 m, one speedrun entry kept OK")
+	else:
+		bad += 1
+		print("  FAIL: endless=%d metres=%.1f speed=%d" % [endless_entries, endless_metres, speed_entries])
+	Api._write_queue([])
+
 	print("ENDLESS %s" % ("PASS" if bad == 0 else "FAIL (%d)" % bad))
 	quit(1 if bad > 0 else 0)

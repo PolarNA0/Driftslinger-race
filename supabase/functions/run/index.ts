@@ -41,11 +41,51 @@ Deno.serve(async (req) => {
   const { data: { user }, error: authError } = await admin.auth.getUser(token);
   if (authError || !user) return json({ error: 'bad token' }, 401);
 
-  let body: { track?: unknown; steps?: unknown };
+  let body: { track?: unknown; steps?: unknown; mode?: unknown; metres?: unknown };
   try {
     body = await req.json();
   } catch {
     return json({ error: 'bad json' }, 400);
+  }
+
+  const mode = body?.mode === 'endless' ? 'endless' : 'speedrun';
+
+  // Endless is a distance board, not a verified record: the client reports the
+  // metres it reached and the server stores the best. There is no steps replay for
+  // it - the run's score is a distance, and the server's physics has no endless
+  // ramp - so this path trusts the number. It writes only to `endless_runs`, so the
+  // verified speedrun board is untouched.
+  if (mode === 'endless') {
+    const seed = Number(body?.track);
+    const metres = Number(body?.metres);
+    if (!Number.isInteger(seed) || seed <= 0) {
+      return json({ error: 'bad seed' }, 422);
+    }
+    // A ceiling keeps a nonsense upload (Infinity, 1e9) out of the board. It is far
+    // past any reachable distance, so it only ever catches garbage.
+    if (!Number.isFinite(metres) || metres < 0 || metres > 10_000_000) {
+      return json({ error: 'bad distance' }, 422);
+    }
+
+    const { data, error } = await admin.rpc('submit_endless_run', {
+      p_user: user.id,
+      p_seed: seed,
+      p_metres: Math.round(metres),
+    });
+
+    if (error) {
+      if (error.code === '23503') return json({ error: 'no profile' }, 409);
+      return json({ error: 'store failed' }, 500);
+    }
+
+    return json({
+      ok: true,
+      mode: 'endless',
+      metres: data.metres,
+      rank: data.rank,
+      total: data.total,
+      improved: data.improved,
+    });
   }
 
   const track = Number(body?.track);

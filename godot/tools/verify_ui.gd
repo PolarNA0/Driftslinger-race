@@ -105,6 +105,29 @@ func _check_size(vp: Vector2i) -> void:
 	if settings.visible:
 		_fail("settings overlay did not close")
 
+	# The leaderboard opens in both modes and every row fits. Endless is the new
+	# board, so it is checked explicitly: a row wider than the card would be the
+	# phone-fit bug back on a new screen.
+	for mode in ["speedrun", "endless"]:
+		app._set_mode(mode)
+		await process_frame
+		app._show_leaderboard(1)
+		await process_frame
+		var board: Control = app.overlays["board"]
+		if not board.visible:
+			_fail("board overlay did not open in %s" % mode)
+		elif app.board_mode != mode:
+			_fail("board_mode is %s, want %s" % [app.board_mode, mode])
+		else:
+			_check_page("board-%s" % mode, board, vp)
+			for b in app.lb_rows.get_children():
+				if b is Control and not _in_view(b, vp):
+					_fail("board-%s: row out of view at %s" % [mode, (b as Control).get_global_rect()])
+		app._to_menu()
+		await process_frame
+	app._set_mode("speedrun")
+	await process_frame
+
 	# The flow: the shell is up at the menu, hidden during a run, and back after.
 	if not shell.visible:
 		_fail("shell hidden at boot")

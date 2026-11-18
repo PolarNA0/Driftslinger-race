@@ -39,6 +39,16 @@ Deno.serve(async (req) => {
 
   const url = new URL(req.url);
   const track = Number(url.searchParams.get('track'));
+  const mode = url.searchParams.get('mode') === 'endless' ? 'endless' : 'speedrun';
+
+  if (!Number.isInteger(track) || track <= 0) {
+    return json({ error: 'bad track' }, 400);
+  }
+
+  // Endless is its own board: a distance, ranked furthest-first, with no steps to
+  // replay. It lives in its own view, so this is a different read, not a different
+  // ordering of the same one.
+  if (mode === 'endless') return endlessBoard(track, req);
 
   if (!isPlayableTrack(track)) {
     return json({ error: 'bad track' }, 400);
@@ -110,3 +120,58 @@ Deno.serve(async (req) => {
     you: myRank,
   });
 });
+
+/**
+ * The endless board: player + distance, furthest first.
+ *
+ * No steps travel with a row - an endless run is not replayed, so there is nothing
+ * to watch. `dist` is the score (metres) and the row keeps the same `name`/`you`
+ * shape as a speedrun row so the client's renderer is shared. A signed-in caller
+ * also learns their own rank.
+ */
+async function endlessBoard(seed: number, req: Request): Promise<Response> {
+  const { data, error } = await anon
+    .from('endless_leaderboard')
+    .select('rank, username, metres, user_id')
+    .eq('seed', seed)
+    .order('rank', { ascending: true })
+    .limit(MAX_ROWS);
+
+  if (error) return json({ error: 'board unavailable' }, 500);
+
+  let me: string | null = null;
+  let myRank: number | null = null;
+  const token = bearer(req);
+  if (token) {
+    const { data: auth } = await anon.auth.getUser(token);
+    if (auth?.user) {
+      me = auth.user.id;
+      const { data: mine } = await anon
+        .from('endless_leaderboard')
+        .select('rank')
+        .eq('seed', seed)
+        .eq('user_id', me)
+        .maybeSingle();
+      myRank = mine?.rank ?? null;
+    }
+  }
+
+  const rows = (data ?? []).map((r) => ({
+    rank: r.rank,
+    name: r.username,
+    dist: r.metres,
+    // An endless row is never watchable: there are no steps behind it.
+    steps: null,
+    watchable: false,
+    you: me !== null && r.user_id === me,
+  }));
+
+  return json({
+    mode: 'endless',
+    rows,
+    page: 1,
+    pages: 1,
+    total: rows.length,
+    you: myRank,
+  });
+}

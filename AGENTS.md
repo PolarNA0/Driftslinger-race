@@ -772,66 +772,49 @@ The one place the two physics must stay in step is the reattach numbers: change
 together, then `node tools/sync-physics.mjs`. `tools/test.mjs` and
 `verify_reattach.gd` assert the same claims on each side.
 
-### Endless leaderboards should be added soon
+### The endless board is player + distance
 
-Endless mode has no online board yet. The speedrun board cannot be reused: a
-time board ranks lowest-first and a distance board ranks highest-first, and the
-`runs` row is keyed by `track` with a `ticks` value that only ever lowers. An
-endless board needs its own key, its own ranking and its own submit path. This is
-the work, in the order it should be done; it is **not implemented** - the owner
-will add it. Nothing here changes the rule that a client never sends a score.
+Endless has its own online board now, and it is deliberately the simple one: it
+lists **the player and the distance**, furthest first. It is not the speedrun
+board and it does not share a table with it.
 
-**The endless score is distance travelled, and it now depends on the line.**
-This used to be "distance = ticks x speed", a pure function of the step count,
-because the car moved at exactly `CFG.SPEED` always. The endless ramp and the
-reattach slingshot both broke that: the car is faster the further it gets and a
-slingshot is faster still, so `Car.distance()` (the endless score) counts what was
-actually travelled, not `time x base speed`. Anything that wants to verify an
-endless run server-side must therefore **port the ramp and the slingshot** into
-`physics/`, not just replay button steps at a fixed speed - `_shared/physics/
-verify.js` replaying at `CFG.SPEED` would under-report every run. The ramp is
-deterministic (a pure function of road position), so this is a porting job, not a
-redesign, and the "Endless mode ramps" section above describes it.
+**Why its own table.** A speedrun row is a *verified* run: it carries the button
+steps and the tick count the `run` function replayed to get them, and the board
+ranks lowest-first. An endless row is a distance, ranked highest-first, with no
+steps and no replay. Folding it into `runs` would mean nullable columns for both
+modes and a ranking that flips direction per row. So `endless_runs`
+(`supabase/migrations/0005_endless.sql`) holds `(user_id, seed, metres)`, one row
+per player per seed, and `endless_leaderboard` ranks it
+`rank() over (partition by seed order by metres desc, created_at asc)`.
 
-**Endless must run on one shared seed before it can have a shared board.** Today
-endless builds `Track.new(menu_seed)` with no `opts` (`game.gd:load_track`), and
-`menu_seed` is the persisted `track` preference - so two players on two devices
-can be racing different roads. A shared board is meaningless unless everyone
-drives the same road, so pin endless to a single seed (or a small fixed set) and
-send that seed with the run. The seed is the only thing the server needs to
-rebuild the exact road, and the JS and Godot endless builders already agree
-(verified against each other for seed 7: same `turnSign`, same first fillet, same
-road samples).
+**This is the one place a client sends a score, and only here.** The rule "a
+client never sends a time" still holds for the *verified* speedrun board, and
+nothing in this path can write to `runs`. An endless run is not re-simulated:
+there is no endless ramp in the server's `physics/`, and a distance board does not
+need one. The `run` function accepts `{mode:'endless', track:<seed>, metres:<n>}`
+and calls `submit_endless_run`, which keeps the higher `metres`; the `board`
+function takes `?mode=endless` and reads `endless_leaderboard`. Both are still
+service-role only for writes.
 
-The concrete steps:
+**Endless is pinned to one shared seed.** A distance board only compares anything
+if everyone drives the same road, so `Game.ENDLESS_SEED` (7) is the road, not the
+player's track preference: `game.gd:load_track` ignores the passed seed in endless
+and the board is keyed by that constant. Change the constant to change the endless
+road for everyone at once.
 
-1. **Schema (`supabase/migrations/0004_endless.sql`).** Add `mode text not null
-   default 'speedrun' check (mode in ('speedrun', 'endless'))` to `runs`, drop
-   the `(user_id, track)` unique index and recreate it as `(user_id, mode, track)`
-   so one player holds a best per mode per seed. Keep `ticks` as the stored
-   value: metres are derived (`ticks / 120.0 * speed / pxPerMetre`), so the
-   ranking stays integer-exact the way the time board does. Add an
-   `endless_leaderboard` view that ranks `mode = 'endless'` rows by `ticks`
-   **descending** (`rank() over (partition by track order by ticks desc,
-   created_at asc)`), and leave `leaderboard` filtering `mode = 'speedrun'`.
-2. **`submit_run`.** Add `p_mode` and store it; for endless, keep the higher
-   `ticks` instead of the lower (the `elsif p_ticks < v_prev` becomes `>` for
-   endless). Revoke/grant as before - only the service role may call it.
-3. **`run` Edge Function.** Accept `mode` (default `speedrun`) and, for endless,
-   replay until the car dies and require it to have travelled (a run that dies on
-   step 1 is not a score). The steps cap stays. Still no score in the request.
-4. **`board` Edge Function.** Take `?mode=` (default `speedrun`), pick the view,
-   and order the endless board by metres descending. The `steps` join is
-   unchanged (`runs` still holds one row per player per mode per seed).
-5. **Client (`api.gd`, `app.gd`).** Send `mode` and the endless seed with an
-   endless upload; fetch and render the endless board with a distance column
-   (`_fmt_dist`) instead of a time column, and rank by distance. `Game` already
-   records `steps` for every run, so an endless run is watchable for free.
-6. **Verifiers.** `tools/test.mjs` should assert an endless replay's score equals
-   `ticks/120*speed/pxPerMetre` and that the score is independent of the button
-   pattern at a fixed step count; `verify_online.gd` should cover the endless
-   merge the same way it covers the speedrun one.
+**Endless runs are not watchable.** There are no steps behind a row, so the board
+row is a plain label - no Replay button - and `board` sends `steps: null`,
+`watchable: false`. The client's `_render_endless_board` draws rank, name and
+`_fmt_dist(metres)`, and appends the player's own local best if the server has not
+listed it yet.
 
-The one thing not to do: send a distance. The whole point of the board is that
-the number is derived from the steps, so a client cannot post a score it did not
-earn - exactly as with a time.
+**The score is a distance, and it depends on the line.** `Car.distance()` counts
+what was actually travelled, not `time x base speed`: the endless ramp and a
+reattach slingshot both make the car faster than base speed. That is the client's
+number and the server stores it as given.
+
+The upload path is best-effort like everything else: `Api.enqueue_endless` keeps
+only the furthest distance per seed in the queue, so a later shorter run cannot
+overwrite a better one still waiting to send, and `_sync_my_runs` pulls the
+player's endless bests back down on sign-in.
+

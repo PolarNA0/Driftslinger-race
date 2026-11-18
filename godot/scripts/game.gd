@@ -17,6 +17,16 @@ const FIXED_DT := 1.0 / 120.0
 const MAX_STEPS := 8
 const LEAD := 90.0
 
+# Endless is one shared road, not a per-device one.
+#
+# The endless board ranks players against each other, and that only means anything
+# if everyone is driving the same road. The seed is what builds the road, so it is
+# pinned here rather than taken from the player's track preference: two devices
+# playing endless race the identical road, and a distance on the board is a
+# distance on the same course. Change this number to change the endless road for
+# everyone at once (and it is the seed the board is keyed by).
+const ENDLESS_SEED := 7
+
 signal changed(extra: Dictionary)
 signal ticked()
 
@@ -53,7 +63,10 @@ func _ready() -> void:
 func load_track(p_seed: int, p_mode: String = "") -> void:
 	if p_mode != "":
 		mode = p_mode
-	seed_num = p_seed
+	# Endless always uses the shared seed, whatever the caller asked for: the road
+	# has to be the same for everyone or the distance board compares nothing. The
+	# passed seed is the speedrun track and is ignored in endless.
+	seed_num = ENDLESS_SEED if mode == "endless" else p_seed
 	track = Track.new(seed_num) if mode == "endless" else Track.new(seed_num, Tracks.track_opts(seed_num))
 	car = Car.new()
 	car.reset(track)

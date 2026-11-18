@@ -73,12 +73,38 @@ static func enqueue(track: int, steps: String, name: String) -> int:
 	var q := []
 	for e in read_queue():
 		var entry: Dictionary = e
+		if str(entry.get("mode", "speedrun")) != "speedrun":
+			q.append(entry)
+			continue
 		if int(entry.get("track", -1)) == track and str(entry.get("steps", "")) == steps:
 			continue
 		q.append(entry)
 	q.append({
+		"mode": "speedrun",
 		"track": track,
 		"steps": steps,
+		"name": name,
+		"at": int(Time.get_unix_time_from_system() * 1000.0),
+	})
+	_write_queue(q)
+	return q.size()
+
+
+# Queue a finished endless run. The score is a distance, so the queue keeps only
+# the furthest for the seed: a later shorter run must not overwrite a better one.
+static func enqueue_endless(seed: int, metres: float, name: String) -> int:
+	var q := []
+	var best := metres
+	for e in read_queue():
+		var entry: Dictionary = e
+		if str(entry.get("mode", "speedrun")) == "endless" and int(entry.get("track", -1)) == seed:
+			best = maxf(best, float(entry.get("metres", 0.0)))
+			continue
+		q.append(entry)
+	q.append({
+		"mode": "endless",
+		"track": seed,
+		"metres": best,
 		"name": name,
 		"at": int(Time.get_unix_time_from_system() * 1000.0),
 	})
@@ -98,10 +124,17 @@ static func _post(entry: Dictionary) -> Dictionary:
 	if token == "":
 		return {"retry": true}
 
+	var payload := {"track": int(entry["track"])}
+	if str(entry.get("mode", "speedrun")) == "endless":
+		payload["mode"] = "endless"
+		payload["metres"] = float(entry.get("metres", 0.0))
+	else:
+		payload["steps"] = str(entry["steps"])
+
 	var res: Dictionary = await Net.shared().post_json(
 		NetConfig.function_endpoint("run"),
 		NetConfig.auth_headers(token),
-		{"track": int(entry["track"]), "steps": str(entry["steps"])},
+		payload,
 	)
 
 	# 422: the server replayed the run and it was not a finish. Re-sending it
@@ -179,15 +212,44 @@ static func fetch_my_runs() -> Variant:
 	return out
 
 
+# The signed-in player's own endless distances, keyed by seed, or null when
+# offline. Mirrors fetch_my_runs for the endless board: the account is the source
+# of truth, so a fresh device pulls its distances back down.
+static func fetch_my_endless() -> Variant:
+	var me := Account.current_user_id()
+	if me == "":
+		return null
+	var token: String = await Account.auth_token()
+	if token == "":
+		return null
+	var res: Dictionary = await Net.shared().get_json(
+		"%s/endless_runs?user_id=eq.%s&select=seed,metres" % [NetConfig.rest_endpoint(), me],
+		NetConfig.auth_headers(token),
+	)
+	if not bool(res["ok"]):
+		return null
+	var rows: Variant = res["body"]
+	if not (rows is Array):
+		return null
+	var out := []
+	for r in rows:
+		var row: Dictionary = r
+		out.append({"seed": int(row["seed"]), "metres": float(row["metres"])})
+	return out
+
+
 # The real runs on a track, or null when offline.
 #
 # This is not a page of a board: it is every real run on the track, so the client
 # can rank and page them itself. A track holds one run per player, so the whole
 # list is small and there is nothing to paginate here.
-static func fetch_board(track: int) -> Variant:
+static func fetch_board(track: int, mode: String = "speedrun") -> Variant:
 	var token: String = await Account.auth_token()
+	var query := "?track=%d" % track
+	if mode == "endless":
+		query += "&mode=endless"
 	var res: Dictionary = await Net.shared().get_json(
-		"%s?track=%d" % [NetConfig.function_endpoint("board"), track],
+		"%s%s" % [NetConfig.function_endpoint("board"), query],
 		NetConfig.auth_headers(token),
 	)
 	if not bool(res["ok"]):
