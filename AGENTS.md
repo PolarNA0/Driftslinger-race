@@ -562,6 +562,16 @@ like a shipped one.
 - **`TrackEditor.palette` / `TrackPreview.palette`, not `theme`.** `theme` is a
   built-in `Control` member (`Control.theme`); naming the field that fails to
   compile with "Member theme redefined".
+- **`set_anchors_and_offsets_preset`, not `set_anchors_preset`, for a full-rect node
+  that is already in the tree.** The editor overlay is built and added to `ui_root`
+  in `App._ready`, so when its `_ready` runs it is already parented. The
+  anchors-only call keeps the node's current rect and only rewrites the anchors, so
+  the overlay stayed **0x0** - and because the map and the control panel are its
+  children, they collapsed too (the map drew a sliver and a drag missed it, which
+  reads as "the camera is static"). The `and_offsets` call sets the offsets as well
+  and the overlay fills the viewport. `verify_ui.gd` now asserts the overlay, the
+  map and the control panel are all a usable size, and drives a real drag through
+  `TrackPreview._gui_input` to prove the camera moves.
 
 ## UI look, boot splash and fitting every screen
 

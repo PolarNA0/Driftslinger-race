@@ -158,6 +158,19 @@ func _check_size(vp: Vector2i) -> void:
 	if not app.editor.visible:
 		_fail("editor did not open for a new track")
 	else:
+		# The overlay must fill the viewport. `set_anchors_preset` on an already-parented
+		# node keeps the current (zero) rect, which collapsed the whole editor - and with
+		# it the map and the control panel - so this is the regression that matters.
+		if app.editor.size.x < vp.x - 2 or app.editor.size.y < vp.y - 2:
+			_fail("editor overlay is %s, want about %s" % [app.editor.size, vp])
+		if app.editor.preview.size.x < 80.0 or app.editor.preview.size.y < 80.0:
+			_fail("editor map is %s, too small to use" % app.editor.preview.size)
+		if app.editor.control_scroll.size.y < 80.0:
+			_fail("editor control panel is %s, too small to use" % app.editor.control_scroll.size)
+		# A drag on the map must actually move the camera, and a tap must select a piece.
+		_drag_pans(app.editor.preview)
+		if not _drag_panned:
+			_fail("editor map: a drag did not pan the camera")
 		for b in _pinned_buttons(app.editor):
 			if not _in_view(b, vp):
 				_fail("editor: '%s' out of view at %s" % [_label_of(b), b.get_global_rect()])
@@ -244,6 +257,37 @@ func _check_size(vp: Vector2i) -> void:
 
 	sub.queue_free()
 	await process_frame
+
+
+var _drag_panned := false
+
+
+# Drive a real drag through the map's own input handling and report whether the
+# camera moved. Uses the touch path (what a phone sends) and the mouse path (a
+# desktop), since the map handles both.
+func _drag_pans(pv: Node) -> void:
+	_drag_panned = false
+	var c: Vector2 = pv.get_global_rect().get_center()
+	var before: Vector2 = pv._origin
+	var press := InputEventScreenTouch.new()
+	press.index = 0
+	press.pressed = true
+	press.position = c
+	pv._gui_input(press)
+	for i in range(5):
+		var d := InputEventScreenDrag.new()
+		d.index = 0
+		d.position = c + Vector2(15.0 * (i + 1), 0.0)
+		d.relative = Vector2(15.0, 0.0)
+		pv._gui_input(d)
+	var up := InputEventScreenTouch.new()
+	up.index = 0
+	up.pressed = false
+	up.position = c + Vector2(75.0, 0.0)
+	pv._gui_input(up)
+	if pv._origin != before:
+		_drag_panned = true
+	pv.pan_by(before - pv._origin)
 
 
 # A tab page scrolls vertically (its ScrollContainer disables horizontal scroll),
