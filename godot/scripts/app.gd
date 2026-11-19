@@ -1254,11 +1254,28 @@ func _build_track_list(parent: Node) -> void:
 # The per-track best under each chip, so the grid answers "which have I run?"
 # without opening every track. Only the built-in chips are in the grid; custom
 # tracks have their own list.
+#
+# The colours follow the chip's own state. The theme paints a selected chip in the
+# gold accent and swaps the button's text to ACCENT_TEXT for contrast, but a child
+# Label does not inherit that: left alone, the number stayed near-white and the
+# best stayed INK_DIM, both about 1.4:1 against gold - invisible.
 func _refresh_track_bests() -> void:
-	for s in track_pb_labels:
-		var pb: Label = track_pb_labels[s]
-		var best: Variant = Storage.get_best_time(int(s))
+	for b in track_buttons:
+		var s := int(b.get_meta("track"))
+		var pb: Label = track_pb_labels.get(s)
+		if pb == null:
+			continue
+		var best: Variant = Storage.get_best_time(s)
 		pb.text = "--" if best == null else _fmt_time(float(best))
+		_paint_chip(b, pb)
+
+
+func _paint_chip(b: Button, pb: Label) -> void:
+	var num: Label = pb.get_parent().get_child(0)
+	var on := b.button_pressed
+	num.add_theme_color_override("font_color", UiTheme.ACCENT_TEXT if on else UiTheme.INK)
+	pb.add_theme_color_override("font_color",
+		Color(UiTheme.ACCENT_TEXT, 0.8) if on else UiTheme.INK_DIM)
 
 
 func _show_tracks() -> void:

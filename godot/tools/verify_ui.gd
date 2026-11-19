@@ -107,6 +107,28 @@ func _check_size(vp: Vector2i) -> void:
 	var seeded: Label = app.track_pb_labels[seed_track]
 	if not seeded.text.contains("10.14"):
 		_fail("track chip did not show the seeded best (got '%s')" % seeded.text)
+	# The selected chip is painted in the gold accent. A child Label does not pick up
+	# the theme's `font_pressed_color`, so both lines have to be recoloured by hand or
+	# they sit near-white on gold at about 1.4:1 and disappear.
+	var selected: Button = null
+	for b in app.track_buttons:
+		if b.button_pressed:
+			selected = b
+			break
+	if selected == null:
+		_fail("no track chip is selected")
+	else:
+		var sbox: Node = selected.get_child(0)
+		var sbg: Color = (selected.get_theme_stylebox("pressed") as StyleBoxFlat).bg_color
+		for l in sbox.get_children():
+			var sl := l as Label
+			if sl == null:
+				continue
+			var sc := sl.get_theme_color("font_color")
+			sc.a = 1.0
+			var cr := _contrast(sc, sbg)
+			if cr < 4.5:
+				_fail("selected chip label '%s' is %.2f:1 on the accent" % [sl.text, cr])
 	Storage._write("times.v1", snapshot)
 	app._refresh_track_list()
 	await process_frame
@@ -362,6 +384,19 @@ func _in_subtree(n: Node, root: Node) -> bool:
 func _in_view(c: Control, vp: Vector2i) -> bool:
 	var r := c.get_global_rect()
 	return r.position.x >= -1.0 and r.position.y >= -1.0 and r.end.x <= vp.x + 1.0 and r.end.y <= vp.y + 1.0
+
+
+# WCAG relative luminance and contrast ratio, for text on a painted chip.
+func _luminance(c: Color) -> float:
+	var lin := func(x: float) -> float:
+		return x / 12.92 if x <= 0.03928 else pow((x + 0.055) / 1.055, 2.4)
+	return 0.2126 * lin.call(c.r) + 0.7152 * lin.call(c.g) + 0.0722 * lin.call(c.b)
+
+
+func _contrast(a: Color, b: Color) -> float:
+	var la := _luminance(a)
+	var lb := _luminance(b)
+	return (maxf(la, lb) + 0.05) / (minf(la, lb) + 0.05)
 
 
 func _fits_width(c: Control, vp: Vector2i) -> bool:
