@@ -509,14 +509,24 @@ tab pages and populates them; the shell owns no game state.
 - **Buttons that carry a label must be able to shrink.** Grid and segment
   buttons set `clip_text` and `SIZE_EXPAND_FILL`; without it a button reserves
   its full text width as a minimum and pushes the column past the viewport.
-- **`clip_text` hides the last digit if the chip is too narrow.** The track grid
-  is 7 wide, and the default `ToggleButton` padding (16px a side) left only ~15px
-  of text room in a ~47px chip at phone width, so the two-digit numbers 21-28
-  silently clipped to their first digit - track 27 read as "2". The track list
-  uses a `GridChip` toggle variation (6px padding, `theme.gd`) so the digits fit.
-  `verify_ui.gd` measures each chip's text against its content width and fails if
-  it clips, because the failure is silent - the button still works, it just shows
-  the wrong number.
+- **`clip_text` hides the last digit if the chip is too narrow.** The track list
+  is a `GridContainer` of `GridChip` toggles, each carrying the number and the
+  player's best time as two child `Label`s. The column count is what decides
+  whether those fit: at 7 columns a phone chip has ~28px of content and a
+  "10.142s" best needs 32px, so every real PB clipped. It is **5 columns** now,
+  which gives 44px and still fits thirteen tracks in three rows with the Play
+  button at y=404 of 820. `verify_ui.gd` measures both labels against the chip's
+  content width - against a *seeded* realistic time, not the `--` of a fresh
+  install - and fails if either clips, because the failure is silent: the button
+  still works, it just shows the wrong text.
+- **A child `Label` does not inherit a button's `font_pressed_color`.** The
+  selected track chip is painted in the gold accent, and the theme swaps the
+  *button's* text to `ACCENT_TEXT` for contrast. Labels added as children keep
+  their own colour, so a near-white number and an `INK_DIM` best sat at 1.36:1
+  and 1.47:1 against the gold - invisible. `_refresh_track_bests` recolours both
+  lines from the chip's own `button_pressed`, and `verify_ui.gd` measures the
+  selected chip's labels against the accent and fails under 4.5:1. Any new
+  button-with-labels needs the same treatment.
 - **The version line is on Settings**, not under the Play button.
 
 ## The track editor (the Editor tab)
@@ -723,6 +733,14 @@ like a shipped one.
 - Guest PBs do **not** migrate into an account on sign-in: the `guest` bucket and
   the account bucket are separate. Guest runs do still queue and upload
   (`godot/scripts/api.gd`), but the local best time stays under `guest`.
+- **Sign in, then refresh - never the other way round.** `_after_sign_in` awaits
+  `_sync_my_runs` before it calls `_refresh_track_list`. `_sync_my_runs` is what
+  merges the account's server times into the local store, so refreshing first
+  drew the chips with the previous account's (usually empty) times and nothing
+  redrew them: a player signing in on a fresh device saw `--` under every track
+  and concluded their PBs were gone, even though the board held them. The merge
+  is `_merge_my_runs` / `_merge_my_endless`, split out from the fetch so the
+  ordering can be tested without a network.
 - The run clock is `Car.time` (the simulated time). Do not add a second clock:
   the HUD, the saved best and a ghost's time must all be the same number, or a
   run and a ghost of that run disagree by a step (8ms) - enough to change a rank.
