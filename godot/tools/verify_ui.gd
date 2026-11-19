@@ -75,19 +75,41 @@ func _check_size(vp: Vector2i) -> void:
 	await process_frame
 	if not app.track_section.visible:
 		_fail("track chooser hidden in speedrun")
-	# Every track number must fit inside its chip. The chips are `clip_text`, so a chip
-	# narrower than its label silently drops the last digit ("27" reads as "2") - which
-	# is exactly what the 7-wide grid did at phone width before GridChip's tight padding.
+	# Every track chip must fit its number AND its best time. Both are `clip_text`,
+	# so a chip narrower than its label silently drops the last digit ("27" reads as
+	# "2", and a best of "10.142s" loses its tail) - which is exactly what the 7-wide
+	# grid did at phone width.
+	# A fresh install shows "--", which is the shortest possible best, so seed a
+	# realistic time first or this check would pass while every real PB clipped.
+	var seed_track: int = Tracks.MENU_TRACKS[0]
+	var snapshot: Variant = Storage._read("times.v1", {})
+	Storage.save_best_time(seed_track, 10.1416)
+	app._refresh_track_list()
+	await process_frame
 	for b in app.track_buttons:
 		if not b.is_visible_in_tree():
 			continue
-		var fs: int = b.get_theme_font_size("font_size")
-		var f: Font = b.get_theme_font("font")
-		var tw := f.get_string_size(b.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-		var sb: StyleBox = b.get_theme_stylebox("normal")
-		var avail: float = b.size.x - float(sb.content_margin_left) - float(sb.content_margin_right)
-		if tw > avail + 0.5:
-			_fail("track chip '%s' clips its number: text %.1f > %.1f avail" % [b.text, tw, avail])
+		var box: Node = b.get_child(0)
+		for l in box.get_children():
+			var lbl := l as Label
+			if lbl == null:
+				continue
+			var fs: int = lbl.get_theme_font_size("font_size")
+			var f: Font = lbl.get_theme_font("font")
+			var tw := f.get_string_size(lbl.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+			var sb: StyleBox = b.get_theme_stylebox("normal")
+			var avail: float = b.size.x - float(sb.content_margin_left) - float(sb.content_margin_right)
+			if tw > avail + 0.5:
+				_fail("track chip '%s' clips '%s': text %.1f > %.1f avail" % [
+					b.get_meta("track"), lbl.text, tw, avail])
+	# The seeded time must actually have reached the chip, or the check above proves
+	# nothing about a real PB.
+	var seeded: Label = app.track_pb_labels[seed_track]
+	if not seeded.text.contains("10.14"):
+		_fail("track chip did not show the seeded best (got '%s')" % seeded.text)
+	Storage._write("times.v1", snapshot)
+	app._refresh_track_list()
+	await process_frame
 	app._set_mode("endless")
 	await process_frame
 	if app.track_section.visible:

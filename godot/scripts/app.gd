@@ -80,6 +80,7 @@ var overlay_cards := []        # the card columns, so a resize can re-widen them
 var mode_buttons := {}         # "speedrun"/"endless" -> Button
 var ghost_buttons := {}        # "off"/"self" -> Button
 var track_buttons := []        # one per track, in order
+var track_pb_labels := {}      # track number -> the Label under it showing the best
 var car_buttons := []
 var lb_title: Label
 var lb_note: Label
@@ -1201,12 +1202,16 @@ func _refresh_car_preview() -> void:
 	car_name_label.text = str(model["name"])
 
 
-# A grid of track numbers rather than full-width rows: thirteen tracks fit in two
-# rows, so the Play button stays on screen without scrolling on a phone.
+# A grid of track chips: the number with the player's best time under it, the way
+# the old JS client's `Track 3<small>10.14</small>` read. Five columns rather than
+# seven because a chip has to fit both a two-digit number and a "10.142" best - at
+# seven columns a chip has 28px of content and the time needs 32px, so it clipped.
+# Thirteen tracks over five columns is three rows, which still fits the tab.
 func _build_track_list(parent: Node) -> void:
 	track_buttons.clear()
+	track_pb_labels.clear()
 	var grid := GridContainer.new()
-	grid.columns = 7
+	grid.columns = 5
 	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	grid.add_theme_constant_override("h_separation", 6)
 	grid.add_theme_constant_override("v_separation", 6)
@@ -1216,16 +1221,44 @@ func _build_track_list(parent: Node) -> void:
 		b.toggle_mode = true
 		b.theme_type_variation = "GridChip"
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.clip_text = true
-		b.custom_minimum_size = Vector2(0, 44)
-		b.text = str(s)
+		b.custom_minimum_size = Vector2(0, 54)
 		b.set_meta("track", s)
 		b.pressed.connect(func():
 			menu_seed = s
 			Storage.set_pref("track", s)
 			_refresh_track_list())
+		# A Button draws no text of its own here; the number and the best are child
+		# Labels so they can differ in size and colour. IGNORE keeps the taps going to
+		# the button underneath.
+		var box := _col(0)
+		box.set_anchors_preset(Control.PRESET_FULL_RECT)
+		box.alignment = BoxContainer.ALIGNMENT_CENTER
+		box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		b.add_child(box)
+		var num := _label(str(s), 16)
+		num.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		num.clip_text = true
+		num.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		box.add_child(num)
+		var pb := _label("--", 10)
+		pb.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		pb.clip_text = true
+		pb.add_theme_color_override("font_color", UiTheme.INK_DIM)
+		pb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		box.add_child(pb)
 		grid.add_child(b)
 		track_buttons.append(b)
+		track_pb_labels[s] = pb
+
+
+# The per-track best under each chip, so the grid answers "which have I run?"
+# without opening every track. Only the built-in chips are in the grid; custom
+# tracks have their own list.
+func _refresh_track_bests() -> void:
+	for s in track_pb_labels:
+		var pb: Label = track_pb_labels[s]
+		var best: Variant = Storage.get_best_time(int(s))
+		pb.text = "--" if best == null else _fmt_time(float(best))
 
 
 func _show_tracks() -> void:
@@ -1236,6 +1269,7 @@ func _refresh_track_list() -> void:
 	_refresh_track_visibility()
 	for b in track_buttons:
 		b.button_pressed = (int(b.get_meta("track")) == menu_seed)
+	_refresh_track_bests()
 	if play_track_label == null:
 		return
 	if CustomTracks.has(menu_seed):
@@ -1568,8 +1602,12 @@ func _submit_name() -> void:
 # list change, their times come back from the server, and the guest queue can go.
 func _after_sign_in() -> void:
 	_refresh_account_page()
-	_refresh_track_list()
+	# Pull the account's runs down before rebuilding the chips: `_sync_my_runs` writes
+	# the server bests into the local store, so refreshing first would draw the chips
+	# with the previous account's (or guest) times and they would not update again
+	# until something else triggered a redraw.
 	await _sync_my_runs()
+	_refresh_track_list()
 	await _flush_queue()
 
 
@@ -1598,8 +1636,19 @@ func _boot_account() -> void:
 # write, so a better local time is never lost to a worse server one.
 func _sync_my_runs() -> void:
 	var runs: Variant = await Api.fetch_my_runs()
-	if runs == null:
-		return
+	if runs != null:
+		_merge_my_runs(runs)
+	# Endless distances come down too: the account is the source of truth, so a fresh
+	# device pulls its endless bests back rather than showing nothing.
+	var endless: Variant = await Api.fetch_my_endless()
+	if endless != null:
+		_merge_my_endless(endless)
+	_refresh_track_list()
+
+
+# Fold the server's own runs into the local store. Split out from the fetch so the
+# merge can be tested without a network.
+func _merge_my_runs(runs: Array) -> void:
 	for r in runs:
 		var row: Dictionary = r
 		var seed := int(row["track"])
@@ -1615,18 +1664,16 @@ func _sync_my_runs() -> void:
 		# and without one the board cannot play it back.
 		if Storage.get_replay(seed) == null:
 			Storage.save_replay(seed, Replay.make_replay(seed, Replay.decode_steps(str(steps)), time))
-	# Endless distances come down too: the account is the source of truth, so a fresh
-	# device pulls its endless bests back rather than showing nothing.
-	var endless: Variant = await Api.fetch_my_endless()
-	if endless != null:
-		for e in endless:
-			var erow: Dictionary = e
-			var eseed := int(erow["seed"])
-			var emetres := float(erow["metres"])
-			var eprev: Dictionary = Storage.get_record(eseed)
-			if emetres > float(eprev.get("dist", 0.0)):
-				Storage.save_record(eseed, emetres, int(eprev.get("corners", 0)))
-	_refresh_track_list()
+
+
+func _merge_my_endless(rows: Array) -> void:
+	for e in rows:
+		var erow: Dictionary = e
+		var eseed := int(erow["seed"])
+		var emetres := float(erow["metres"])
+		var eprev: Dictionary = Storage.get_record(eseed)
+		if emetres > float(eprev.get("dist", 0.0)):
+			Storage.save_record(eseed, emetres, int(eprev.get("corners", 0)))
 
 
 # Send anything the queue is holding. A guest's runs wait here until they sign in.
