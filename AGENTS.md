@@ -225,12 +225,22 @@ different platforms, two different traps:
   sign-in ever "does nothing" on a phone again, check this first - it is one
   boolean, and desktop is unaffected because those users have a real keyboard,
   which is why the report is "some people".
-- **Android build: `screen/immersive_mode=true` is a second suspect.** Immersive
-  mode keeps the app fullscreen and can stop the soft keyboard from showing for a
-  focused `LineEdit` on some devices and Android versions. Godot 4.5 should force
-  the keyboard for a focused line edit regardless, but if the APK still refuses to
-  raise it, turn immersive mode off (accepting the status/nav bars) and retest
-  before digging deeper.
+- **Android build: `screen/immersive_mode` is now `false`, and that is the fix, not
+  a preference.** Immersive mode was the last unfixed cause of "the keyboard never
+  appears" in the APK. Godot raises the IME from `GodotEditText` with
+  `imm.showSoftInput(edit, 0)` - flags `0`, the least reliable form - and while
+  immersive is on, `Godot.kt` calls
+  `WindowCompat.setDecorFitsSystemWindows(window, !(edgeToEdge || useImmersive))`,
+  i.e. `false`, so the window does not resize for the IME and that call silently
+  no-ops on many devices. Turning it off costs the status/nav bars and buys a
+  keyboard. Do not turn it back on without testing sign-in on a real device.
+- **Every `LineEdit` must live in a `ScrollContainer` with `follow_focus = true`.**
+  Even with the IME raised, the window shrinks to make room for it and a scroll
+  container that does not follow focus leaves the field where it was, underneath the
+  keyboard - which players also report as "the keyboard doesn't show up" (upstream
+  #87411). There are three such containers (`_new_overlay`, `_new_tab`, the prompt
+  dialog) and `verify_ui` walks the tree and fails if any `LineEdit` is outside one
+  or the container does not follow focus. That check is what caught the dialog.
 - **Web build: the custom shell must not defeat the hidden input.** `web/shell.html`
   is where two WebView traps live, and in-app browsers (Discord, Facebook) are the
   ones that hit them. First, `user-select: none` on `html, body` is inherited by the
@@ -243,8 +253,9 @@ different platforms, two different traps:
   no keyboard, while taps still work (the touch callback is bound unconditionally),
   so the game looks fine and only sign-in fails. The shell restores the hint when
   `navigator.maxTouchPoints > 0`, keyed on that rather than a user-agent so a real
-  desktop is never told it has a touchscreen. Upstream Godot issue #117342 (virtual
-  keyboard with fullscreen on mobile) is the remaining open suspect.
+  desktop is never told it has a touchscreen. Upstream Godot issue #117342 is the
+  same failure in a browser's Fullscreen API, which this shell never calls; the
+  shell does not request fullscreen, so it is not the web path's problem.
 
 `LineEdit` is the right node either way - `Input.virtual_keyboard_show` and
 `virtual_keyboard_enabled` only matter for custom `Control`s.

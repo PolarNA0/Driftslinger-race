@@ -69,6 +69,13 @@ func _check_size(vp: Vector2i) -> void:
 				_fail("tab '%s' page visible while '%s' is selected" % [other, name])
 		_check_page(name, page, vp)
 
+	# Every text field must sit in a ScrollContainer that follows focus. When the
+	# Android keyboard raises it shrinks the viewport; without follow_focus the
+	# focused LineEdit keeps its old position and ends up behind the keyboard, which
+	# players report as "the keyboard does not show up". Checked across the whole
+	# tree so a new form cannot reintroduce it.
+	_check_text_fields_follow_focus(app, vp)
+
 	# Endless has no track to pick, so the chooser must be hidden in that mode.
 	shell.select("play")
 	app._set_mode("speedrun")
@@ -473,6 +480,28 @@ func _check_page(name: String, page: Control, vp: Vector2i) -> void:
 			_fail("%s: '%s' too wide at %s" % [name, _label_of(b), b.get_global_rect()])
 	if n == 0:
 		_fail("%s: no buttons found" % name)
+
+
+# Every LineEdit must be inside a ScrollContainer with `follow_focus` set. Godot
+# raises the soft keyboard by focusing a hidden EditText, and the window shrinks to
+# make room for it; a scroll container that does not follow focus leaves the field
+# where it was, under the keyboard. Also requires the field itself to be focusable,
+# since a `mouse_filter` or focus-mode mistake makes the tap do nothing at all.
+func _check_text_fields_follow_focus(n: Node, vp: Vector2i) -> void:
+	for c in n.get_children():
+		_check_text_fields_follow_focus(c, vp)
+	if not (n is LineEdit):
+		return
+	var field := n as LineEdit
+	if field.focus_mode == Control.FOCUS_NONE:
+		_fail("text field '%s' is not focusable, so the keyboard can never open" % field.placeholder_text)
+	var scroll := field.get_parent()
+	while scroll != null and not (scroll is ScrollContainer):
+		scroll = scroll.get_parent()
+	if scroll == null:
+		_fail("text field '%s' is not in a ScrollContainer" % field.placeholder_text)
+	elif not (scroll as ScrollContainer).follow_focus:
+		_fail("text field '%s' sits in a ScrollContainer without follow_focus" % field.placeholder_text)
 
 
 # Every button in the editor that is not inside the sheet (the colours / piece panel).

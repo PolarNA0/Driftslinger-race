@@ -296,6 +296,10 @@ func _new_overlay(name: String, title: String = "") -> VBoxContainer:
 	var scroll := ScrollContainer.new()
 	scroll.set_anchors_preset(Control.PRESET_FULL_RECT)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	# When the Android keyboard raises it shrinks the viewport, and without this the
+	# focused LineEdit stays where it was and ends up behind the keyboard - which
+	# reads as "the keyboard does not show up". See "The on-screen keyboard".
+	scroll.follow_focus = true
 	root.add_child(scroll)
 
 	var centre := CenterContainer.new()
@@ -358,9 +362,18 @@ func _build_dialog() -> void:
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	dlg_root.add_child(bg)
 
+	var scroll := ScrollContainer.new()
+	scroll.set_anchors_preset(Control.PRESET_FULL_RECT)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	# The dialog's LineEdit is in here, so it needs the same follow_focus as the
+	# overlays; see the note in `_new_overlay`.
+	scroll.follow_focus = true
+	dlg_root.add_child(scroll)
+
 	var centre := CenterContainer.new()
-	centre.set_anchors_preset(Control.PRESET_FULL_RECT)
-	dlg_root.add_child(centre)
+	centre.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	centre.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.add_child(centre)
 
 	var panel := PanelContainer.new()
 	centre.add_child(panel)
@@ -591,6 +604,8 @@ func _new_tab(name: String) -> VBoxContainer:
 	var scroll := ScrollContainer.new()
 	scroll.set_anchors_preset(Control.PRESET_FULL_RECT)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	# The account tab's LineEdits live in here; see the note in `_new_overlay`.
+	scroll.follow_focus = true
 	page.add_child(scroll)
 
 	# A centred band whose single column is capped at a phone-ish width: content
