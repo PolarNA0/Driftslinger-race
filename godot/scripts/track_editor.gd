@@ -214,8 +214,8 @@ func _build_palette() -> void:
 		c.queue_free()
 	_palette_buttons = {}
 	# Each tile is a picture of the piece, not a word for it: the shape is what a
-	# player is choosing. "Pillar" and "Reattach" are both quarter turns - the
-	# reattach one carries an amber ring, because the pole is the only difference.
+	# player is choosing. "Pillar" and "Reattach" are both quarter turns and so
+	# share a tile shape; the tooltip is what names the difference.
 	var items := [
 		["straight", "Straight"],
 		["90", "Turn 90\u00b0"],
@@ -306,7 +306,12 @@ func _on_cell_tapped(cell: Vector2i) -> void:
 	else:
 		_place_armed(w, start)
 	selected = ops.size() - 1
+	var first := ops.size() == 1
 	_commit()
+	# The first piece turns the blank canvas into a road, and the camera has never
+	# framed anything yet: fit so the piece the player just placed is in view.
+	if first:
+		preview.fit()
 
 
 func _place_armed(w: Vector2, start: Vector2) -> void:
@@ -624,6 +629,11 @@ func _refresh_status() -> void:
 		status_label.text = "Ready \u00b7 %d corners \u00b7 %d pieces \u00b7 %.0f px" % [
 			int(v["corners"]), ops.size(), float(v["length"])]
 		status_label.add_theme_color_override("font_color", UiTheme.INK_DIM)
+	elif ops.is_empty():
+		# A new track is blank, not broken: an empty canvas is the starting state, so
+		# it reads as a hint rather than the red error an invalid track gets.
+		status_label.text = "Pick a piece below, then tap the grid to place it."
+		status_label.add_theme_color_override("font_color", UiTheme.INK_MUTE)
 	else:
 		status_label.text = str(v["error"])
 		status_label.add_theme_color_override("font_color", UiTheme.DANGER)
@@ -652,8 +662,14 @@ func _rebuild() -> void:
 
 func _fit_soon() -> void:
 	await get_tree().process_frame
-	if is_instance_valid(preview) and preview.ok:
+	if not is_instance_valid(preview):
+		return
+	# `rebuild` runs before the map has a size, so the empty-canvas centring is a
+	# no-op there; do it now that the rect is real. A track with a road is fitted.
+	if preview.ok:
 		preview.fit()
+	else:
+		preview.centre_on_road_start()
 
 
 func _entry() -> Dictionary:

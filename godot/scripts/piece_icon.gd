@@ -5,9 +5,10 @@ class_name PieceIcon
 #
 # The palette used to be a row of text buttons ("Straight", "Hairpin 180" ...),
 # which told you the name of a piece but not its shape - so placing a track meant
-# reading labels and guessing. This draws the actual road: the band, its edges, the
-# pillar at the pivot of a corner, and the finish line for the finish piece. Tap it
-# to select that piece, then tap the grid to place it.
+# reading labels and guessing. This draws the road the piece produces and nothing
+# else: the band, and the chequered line for the finish piece. No pillar marker - the
+# tile is a picture of the road, not a diagram of the mechanic. Tap it to select that
+# piece, then tap the grid to place it.
 #
 # Every shape is drawn from the same geometry `Track` builds: a straight is a band,
 # a corner is a band turning about a pivot one radius to the side, which is why the
@@ -50,7 +51,6 @@ func _draw() -> void:
 
 	var band := maxf(4.0, minf(w, h) * 0.20)
 	var m := minf(w, h) * 0.18
-	var pole := ground_color.darkened(0.45)
 	var line := road_color.lightened(0.55)
 
 	match kind:
@@ -68,21 +68,21 @@ func _draw() -> void:
 							var p := b + Vector2(-sq * 0.9, -band * 0.5 + float(r) * sq)
 							draw_rect(Rect2(p, Vector2(sq, sq)), line)
 		"90":
-			_turn(w, h, band, m, pole, deg_to_rad(90.0), 1.0, line)
+			_turn(w, h, band, m, deg_to_rad(90.0))
 		"180":
-			_turn(w, h, band, m, pole, deg_to_rad(180.0), 1.0, line)
+			_turn(w, h, band, m, deg_to_rad(180.0))
 		"270":
-			_turn(w, h, band, m, pole, deg_to_rad(270.0), 1.0, line)
+			_turn(w, h, band, m, deg_to_rad(270.0))
 		"pillar", "reattach":
-			_turn(w, h, band, m, pole, deg_to_rad(90.0), 1.0, line)
-			if kind == "reattach":
-				# An amber ring round the pole: this one reopens if you let go early.
-				draw_arc(_pivot(w, h, m), band * 1.15, 0.0, TAU, 24, UiTheme.ACCENT, 2.0, true)
+			# Both are a quarter turn: the pillar is where the car slings, and the
+			# reattach one lets go of it early. The shape is the same either way, so the
+			# tile shows the shape and the label says which is which.
+			_turn(w, h, band, m, deg_to_rad(90.0))
 
 
 # A corner: a quarter/half/three-quarter arc about a pivot one radius to the side,
-# exactly as `Track.build_ops` places it, with the pole drawn at the pivot.
-func _turn(w: float, h: float, band: float, m: float, pole: Color, phi: float, sign: float, line: Color) -> void:
+# exactly as `Track.build_ops` places it.
+func _turn(w: float, h: float, band: float, m: float, phi: float) -> void:
 	var r := minf(w, h) * 0.5 - m - band * 0.5
 	var c := _pivot(w, h, m)
 	# The arc starts on the left of the pivot and sweeps by `phi`. Drawing it as a
@@ -91,10 +91,9 @@ func _turn(w: float, h: float, band: float, m: float, pole: Color, phi: float, s
 	var pts := PackedVector2Array()
 	for i in range(steps + 1):
 		var t := phi * float(i) / float(steps)
-		pts.append(c + Vector2(-cos(t), sin(t)) * sign * r)
+		pts.append(c + Vector2(-cos(t), sin(t)) * r)
 	for i in range(pts.size() - 1):
 		_bar(pts[i], pts[i + 1], band)
-	draw_circle(c, band * 0.62, pole)
 
 
 func _pivot(w: float, h: float, m: float) -> Vector2:

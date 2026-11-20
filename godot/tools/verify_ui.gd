@@ -246,17 +246,14 @@ func _check_size(vp: Vector2i) -> void:
 				_fail("editor: '%s' out of view at %s" % [_label_of(b), b.get_global_rect()])
 		if not _in_view(app.editor.play_button, vp):
 			_fail("editor: Play button out of view at %s" % app.editor.play_button.get_global_rect())
-		# The map has a real road and a working camera.
+		# A new track is an empty canvas: no pieces, and so no road drawn yet. The map
+		# must still be a usable surface - ground, grid, camera - because that is what
+		# the player places their first piece onto.
 		var pv = app.editor.preview
-		if not pv.ok or pv._road.size() < 2:
-			_fail("editor map has no road to show")
-		else:
-			pv.fit()
-			var mid: Vector2 = pv.world_to_screen(pv._road[pv._road.size() / 2])
-			if not _in_view(app.editor.preview, vp):
-				_fail("editor map out of view")
-			elif mid.x < -1.0 or mid.x > pv.size.x + 1.0 or mid.y < -1.0 or mid.y > pv.size.y + 1.0:
-				_fail("editor camera: Fit did not bring the road into the map (%s)" % mid)
+		if not app.editor.ops.is_empty():
+			_fail("a new track is not empty: %d pieces" % app.editor.ops.size())
+		if pv._road.size() >= 2:
+			_fail("an empty track still draws a road")
 
 		# The core interaction: arm a piece, tap the grid, and the piece is added. Every
 		# palette entry is exercised, because a dead button is silent.
@@ -307,6 +304,15 @@ func _check_size(vp: Vector2i) -> void:
 			_fail("editor: %d finish lines, want exactly 1" % fins)
 		elif not CustomTracks.is_finish(app.editor.ops[app.editor.ops.size() - 1]):
 			_fail("editor: the finish line is not last")
+		# With a real road built, Fit must bring it into the map. The empty canvas has
+		# nothing to fit, so this check moves here instead of being dropped.
+		if not pv.ok or pv._road.size() < 2:
+			_fail("editor map has no road after the palette built one")
+		else:
+			pv.fit()
+			var mid: Vector2 = pv.world_to_screen(pv._road[pv._road.size() / 2])
+			if mid.x < -1.0 or mid.x > pv.size.x + 1.0 or mid.y < -1.0 or mid.y > pv.size.y + 1.0:
+				_fail("editor camera: Fit did not bring the road into the map (%s)" % mid)
 		# Tapping an armed piece again puts the palette down.
 		app.editor._arm("90")
 		app.editor._arm("90")

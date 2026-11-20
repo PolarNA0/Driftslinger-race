@@ -115,10 +115,15 @@ func _pinch(factor: float) -> InputEventMagnifyGesture:
 func _init() -> void:
 	var pass_all := true
 
-	print("== a fresh track builds and drives ==")
-	# The starter road every new track gets.
+	print("== a new track starts empty, and an empty track is refused ==")
+	# A new track is a blank canvas: the player places the first piece. It must
+	# not be drivable (there is no road), but it must also not crash the preview.
 	var starter := CustomTracks.default_ops()
-	pass_all = _drivable(starter, "starter") and pass_all
+	var starter_v := CustomTracks.validate(starter)
+	var empty_ok: bool = starter.is_empty() and not bool(starter_v["ok"])
+	print("  a new track has 0 pieces and is not yet valid: %s" % [
+		"OK" if empty_ok else "FAIL"])
+	pass_all = empty_ok and pass_all
 
 	# The staircase shape the shipped tracks use: alternating quarter turns.
 	var staircase := []
@@ -359,7 +364,7 @@ func _init() -> void:
 	var probe = load("res://scripts/track_editor.gd").new()
 	probe.changed.connect(func(): fire[0] += 1)
 	probe.id = CustomTracks.new_track()["id"]
-	probe.ops = CustomTracks.default_ops()
+	probe.ops = [CustomTracks.make_straight(240.0)]
 	for v in range(10):
 		probe._apply_live(0)
 	var quiet: bool = fire[0] == 0
@@ -370,11 +375,38 @@ func _init() -> void:
 	print("== the preview camera ==")
 	var pv := TrackPreview.new()
 	pv.size = Vector2(360.0, 240.0)
-	pv.rebuild(CustomTracks.default_ops())
+	var cam_ops := [
+		CustomTracks.make_straight(240.0),
+		CustomTracks.make_corner(90),
+		CustomTracks.make_straight(240.0),
+		CustomTracks.make_corner(-90),
+		CustomTracks.make_finish(),
+	]
+	pv.rebuild(cam_ops)
 	pv.palette = CustomTracks.theme_of(ct)
 	var cam_ok: bool = pv.ok and pv._road.size() >= 2
 	print("  the preview builds the road: %s" % ("OK" if cam_ok else "FAIL"))
 	pass_all = cam_ok and pass_all
+	# A track still being built is not valid yet, but the pieces placed so far must
+	# still draw: the canvas shows the road as it grows, not only once it is legal.
+	var part := TrackPreview.new()
+	part.size = Vector2(360.0, 240.0)
+	part.rebuild([CustomTracks.make_straight(240.0)])
+	var partial_ok: bool = not part.ok and part._road.size() >= 2
+	print("  an unfinished track still draws its pieces: %s" % ("OK" if partial_ok else "FAIL"))
+	pass_all = partial_ok and pass_all
+	part.free()
+	# On a blank canvas the first piece grows from the end of the lead-in, which is
+	# where the built road starts. Reading the start from an empty `_track` gave the
+	# origin, so the first straight came out a lead-in longer than the player's tap.
+	var empty_pv := TrackPreview.new()
+	empty_pv.size = Vector2(360.0, 240.0)
+	empty_pv.rebuild([])
+	var start_ok: bool = empty_pv._start_world().distance_to(
+		Vector2(cos(Cfg.BASE_HEADING), sin(Cfg.BASE_HEADING)) * CustomTracks.LEAD_IN) < 0.01
+	print("  the first piece grows from the lead-in end: %s" % ("OK" if start_ok else "FAIL"))
+	pass_all = start_ok and pass_all
+	empty_pv.free()
 	if cam_ok:
 		pv.fit()
 		var w0 := pv.screen_to_world(Vector2(180.0, 120.0))
@@ -426,13 +458,13 @@ func _init() -> void:
 		print("  a real touch drag does pan: %s" % ("OK" if touch_ok else "FAIL"))
 		pass_all = touch_ok and pass_all
 		pv._gui_input(_touch(false, Vector2(120.0, 100.0)))
-		# Pan must move the map exactly as far as the finger, not a multiple of it.
-		# `relative` is scaled by whatever transform the platform applies to the event,
-		# and a build that scales `position` but not `relative` - or that delivers a
-		# drag twice - pans at 2x, 3x or worse on a phone while a scale-1.0 headless
-		# run looks perfect. So assert the distance, not just that something moved.
-		# The drag below carries a `relative` of 30 but a `position` that moved 30 too;
-		# a pan derived from `relative` would move 60 and fail here.
+		# Pan must be a fixed, damped fraction of the finger's travel - never a multiple
+		# of it. `relative` is scaled by whatever transform the platform applies to the
+		# event, and a build that scales `position` but not `relative` - or that
+		# delivers a drag twice - pans at 2x, 3x or worse on a phone while a
+		# scale-1.0 headless run looks perfect. So assert the distance, not just that
+		# something moved. The drag below carries a `relative` of 30 but a `position`
+		# that moved 30 too; a pan derived from `relative` would ignore PAN_GAIN.
 		var p0 := pv._origin
 		pv._gui_input(_touch(true, Vector2(100.0, 100.0)))
 		var d := InputEventScreenDrag.new()
@@ -441,8 +473,9 @@ func _init() -> void:
 		d.relative = Vector2(30.0, 0.0)
 		pv._gui_input(d)
 		var travel := (pv._origin - p0).length()
-		var exact: bool = absf(travel - 30.0) < 1.0
-		print("  a 30px drag pans 30px (not 60): %.1f %s" % [travel, "OK" if exact else "FAIL"])
+		var want: float = 30.0 * TrackPreview.PAN_GAIN
+		var exact: bool = absf(travel - want) < 1.0
+		print("  a 30px drag pans %.1fpx (damped): %.1f %s" % [want, travel, "OK" if exact else "FAIL"])
 		pass_all = exact and pass_all
 		pv._gui_input(_touch(false, Vector2(130.0, 100.0)))
 		# A drag whose `relative` disagrees with its `position` must follow `position`:
@@ -455,7 +488,7 @@ func _init() -> void:
 		bad.position = Vector2(220.0, 200.0)
 		bad.relative = Vector2(60.0, 0.0)
 		pv._gui_input(bad)
-		var follows := absf((pv._origin - p1).length() - 20.0) < 1.0
+		var follows := absf((pv._origin - p1).length() - 20.0 * TrackPreview.PAN_GAIN) < 1.0
 		print("  a lying `relative` is ignored, `position` wins: %s" % ("OK" if follows else "FAIL"))
 		pass_all = follows and pass_all
 		pv._gui_input(_touch(false, Vector2(220.0, 200.0)))
@@ -499,7 +532,7 @@ func _init() -> void:
 		var o_before := pv._origin
 		pv._gui_input(_drag2(Vector2(265.0, 100.0), 1))   # finger 1 moves 5
 		var jump := (pv._origin - o_before).length()
-		var no_jump: bool = absf(jump - 5.0) < 1.5
+		var no_jump: bool = absf(jump - 5.0 * TrackPreview.PAN_GAIN) < 1.5
 		print("  lifting a pinch finger does not jump the map: %.1f px %s" % [
 			jump, "OK" if no_jump else "FAIL"])
 		pass_all = no_jump and pass_all

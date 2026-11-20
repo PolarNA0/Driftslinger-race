@@ -615,6 +615,19 @@ like a shipped one.
   selected piece's controls, the colours and the help live in a sheet that only
   opens when asked for (`_open_piece`, `_open_look`), so the editing surface is
   never a wall of controls.
+- **A new track is an empty canvas, not a starter road.** `CustomTracks.default_ops`
+  returns `[]`, so the player places their own first piece instead of deleting a
+  seeded S-bend. An empty track is refused as drivable ("Tap a piece below, then tap
+  the grid to place it.") but that reads as a hint, not the red error an invalid
+  track gets. The preview still builds the road from whatever ops exist, even while
+  they are not yet valid, so the canvas shows the track as it grows rather than
+  staying blank until it is legal. One trap: with no ops there is no `Track` to ask
+  for the road start, and the first piece must still grow from the **end of the
+  lead-in**, not the world origin - `TrackPreview._start_world` derives it from
+  `Cfg.BASE_HEADING` and `CustomTracks.LEAD_IN`, and `verify_editor.gd` pins it. The
+  map also centres on that point (`centre_on_road_start`, called from `_fit_soon`
+  because `rebuild` runs before the map has a size) so the grid the player taps is
+  the grid the piece lands on.
 - **A tap cannot place a piece at an arbitrary point, because the road is
   continuous.** An op is a length or a turn *relative to where the last op ended*,
   so a piece is always appended to the road's end. The tapped cell therefore sets

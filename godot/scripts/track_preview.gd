@@ -14,7 +14,6 @@ signal piece_picked(index: int)
 
 var ops: Array = []
 var ok := false
-var error := ""
 
 var selected := -1
 
@@ -59,9 +58,11 @@ const WHEEL_STEP := 1.15
 # a cell rather than an arbitrary point.
 const CELL := 80.0
 const TAP_SLOP := 10.0
-# Pan gain. One finger of travel moves the map one design pixel, which is what the
-# finger appears to grab; the map is not a slider and does not need a multiplier.
-const PAN_GAIN := 1.0
+# Pan gain. A finger of travel moves the map a little less than it travels. One-to-one
+# tracks the finger exactly, which on a phone reads as twitchy - a small finger
+# wobble shifts the whole road - so the map is damped to just over half speed. Below
+# ~0.4 it starts to feel like the map is dragging behind the finger.
+const PAN_GAIN := 0.55
 
 
 func _ready() -> void:
@@ -73,17 +74,29 @@ func rebuild(p_ops: Array) -> void:
         ops = p_ops.duplicate(true)
         var v := CustomTracks.validate(ops)
         ok = bool(v["ok"])
-        error = str(v["error"])
         _track = null
         _road = []
         _finish_s = 0.0
         _spans = []
         _poles = []
-        if ok:
+        # Build the road even when the ops are not yet valid: a half-placed track is
+        # exactly what the canvas shows while it is being built, and the geometry of
+        # the pieces placed so far does not depend on the track being complete. An
+        # empty op list has nothing to build, so the canvas stays blank ground.
+        if not ops.is_empty():
                 _track = Track.new(0, CustomTracks.opts(ops))
                 _road = _track.road
                 _finish_s = _track.finish_s
                 _collect()
+        queue_redraw()
+
+
+# Frame the blank canvas on the point the first piece will grow from. The editor
+# calls this after layout, because `rebuild` runs before the map has a real size.
+func centre_on_road_start() -> void:
+        if _road.size() >= 2 or size.x <= 0.0 or size.y <= 0.0:
+                return
+        _origin = size * 0.5 - _start_world() * _zoom
         queue_redraw()
 
 
@@ -372,10 +385,14 @@ func growth_point(count: int) -> Vector2:
         return Vector2(float(p["x"]), float(p["y"]))
 
 
-# The start of the road, where the first piece grows from.
+# The start of the road, where the first piece grows from: the end of the lead-in.
+# An empty track has no built road to ask, but its lead-in is still where the first
+# piece will be appended, so it is derived the way `Track.build_ops` lays it down -
+# from the origin along the base heading. Returning the origin instead put the first
+# piece a whole lead-in away from the point the player tapped.
 func _start_world() -> Vector2:
         if _track == null:
-                return Vector2.ZERO
+                return Vector2(cos(Cfg.BASE_HEADING), sin(Cfg.BASE_HEADING)) * CustomTracks.LEAD_IN
         var p := _track.point_at(CustomTracks.LEAD_IN)
         return Vector2(float(p["x"]), float(p["y"]))
 
@@ -408,10 +425,15 @@ func _draw() -> void:
         draw_rect(Rect2(Vector2.ZERO, size), UiTheme.BG)
         if show_grid:
                 _draw_grid()
-        if not ok or _road.size() < 2:
-                var f := ThemeDB.fallback_font
-                var msg := error if error != "" else "Pick a piece below, then tap the grid."
-                draw_string(f, Vector2(12, h * 0.5), msg, HORIZONTAL_ALIGNMENT_CENTER, w - 24, 13, UiTheme.INK_MUTE)
+        if _road.size() < 2:
+                # Nothing placed yet: the canvas is the ground and the grid, plus a prompt.
+                # Once a piece is down the road draws, valid or not, so the player can see
+                # what they are building.
+                if ops.is_empty():
+                        var f0 := ThemeDB.fallback_font
+                        draw_string(f0, Vector2(12, h * 0.5),
+                        	"Tap a piece below, then tap the grid.",
+                        	HORIZONTAL_ALIGNMENT_CENTER, w - 24, 13, UiTheme.INK_MUTE)
                 return
 
         var colors := CustomTracks.theme_colors(_entry())

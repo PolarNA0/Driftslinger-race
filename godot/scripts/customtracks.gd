@@ -118,17 +118,11 @@ static func _unique_name(list: Array, base: String) -> String:
 	return "%s %d" % [base, n]
 
 
-# A short, playable starter road, so a new track is never an empty page.
+# A new track starts as an empty canvas: no road at all, just the ground and the
+# placement grid. Seeding it with a finished S-bend meant a player's first act was
+# deleting somebody else's track instead of placing their own first piece.
 static func default_ops() -> Array:
-	return [
-		{"t": "L", "len": DEFAULT_LEN},
-		{"t": "A", "deg": 90, "r": DEFAULT_RADIUS, "reattach": false},
-		{"t": "L", "len": DEFAULT_LEN},
-		{"t": "A", "deg": -90, "r": DEFAULT_RADIUS, "reattach": false},
-		{"t": "L", "len": DEFAULT_LEN},
-		{"t": "A", "deg": 90, "r": DEFAULT_RADIUS, "reattach": false},
-		make_finish(),
-	]
+	return []
 
 
 static func new_track() -> Dictionary:
@@ -342,7 +336,7 @@ static func theme_colors(entry: Variant) -> Dictionary:
 # A track the game can actually drive. Returns {ok, error, corners, length}.
 static func validate(ops: Array) -> Dictionary:
 	if ops.size() == 0:
-		return {"ok": false, "error": "Add a piece to start.", "corners": 0, "length": 0.0}
+		return {"ok": false, "error": "Tap a piece below, then tap the grid to place it.", "corners": 0, "length": 0.0}
 	if ops.size() > MAX_PIECES:
 		return {"ok": false, "error": "Too many pieces (max %d)." % MAX_PIECES, "corners": 0, "length": 0.0}
 	var corners := 0
