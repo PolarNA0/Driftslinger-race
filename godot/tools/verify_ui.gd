@@ -205,9 +205,10 @@ func _check_size(vp: Vector2i) -> void:
 	if app.btn_restart_round.visible:
 		_fail("restart button still visible at the menu")
 
-	# The Editor tab opens the track editor, a full-screen overlay. The header and
-	# the camera row are pinned and must fit the viewport; the Build / Look / Help
-	# pages live in a scroll area, so only their width is guaranteed.
+	# The Editor tab opens the track editor, a full-screen overlay: a blank grid with
+	# the piece palette pinned along the bottom. Everything that places a piece is
+	# always on screen - there are no pages to dig through any more - so every palette
+	# button is measured, not just the header.
 	shell.select("editor")
 	await process_frame
 	app._new_custom_track()
@@ -217,17 +218,22 @@ func _check_size(vp: Vector2i) -> void:
 	else:
 		# The overlay must fill the viewport. `set_anchors_preset` on an already-parented
 		# node keeps the current (zero) rect, which collapsed the whole editor - and with
-		# it the map and the control panel - so this is the regression that matters.
+		# it the map - so this is the regression that matters.
 		if app.editor.size.x < vp.x - 2 or app.editor.size.y < vp.y - 2:
 			_fail("editor overlay is %s, want about %s" % [app.editor.size, vp])
 		if app.editor.preview.size.x < 80.0 or app.editor.preview.size.y < 80.0:
 			_fail("editor map is %s, too small to use" % app.editor.preview.size)
-		if app.editor.control_scroll.size.y < 80.0:
-			_fail("editor control panel is %s, too small to use" % app.editor.control_scroll.size)
-		# A drag on the map must actually move the camera, and a tap must select a piece.
+		# A drag on the map must actually move the camera.
 		_drag_pans(app.editor.preview)
 		if not _drag_panned:
 			_fail("editor map: a drag did not pan the camera")
+		if not app.editor.preview.show_grid:
+			_fail("editor map is not showing its grid")
+		# Every palette piece is on screen and reachable: that is the whole point of the
+		# new layout, so a palette button below the fold is the bug coming back.
+		for b in app.editor._palette_buttons.values():
+			if not _in_view(b, vp):
+				_fail("editor palette: '%s' out of view at %s" % [_label_of(b), b.get_global_rect()])
 		for b in _pinned_buttons(app.editor):
 			if not _in_view(b, vp):
 				_fail("editor: '%s' out of view at %s" % [_label_of(b), b.get_global_rect()])
@@ -244,13 +250,69 @@ func _check_size(vp: Vector2i) -> void:
 				_fail("editor map out of view")
 			elif mid.x < -1.0 or mid.x > pv.size.x + 1.0 or mid.y < -1.0 or mid.y > pv.size.y + 1.0:
 				_fail("editor camera: Fit did not bring the road into the map (%s)" % mid)
-		# Each page comes up, and its controls fit the width of the scroll area.
-		for page in ["look", "help", "build"]:
-			app.editor._switch_page(page)
+
+		# The core interaction: arm a piece, tap the grid, and the piece is added. Every
+		# palette entry is exercised, because a dead button is silent.
+		for key in ["straight", "90", "180", "270", "pillar", "reattach"]:
+			var before: int = app.editor.ops.size()
+			app.editor._arm(key)
+			if app.editor._armed != key:
+				_fail("editor: arming '%s' did not stick" % key)
+			# Drive the real path: a tap on the map, not a direct call to the handler.
+			# Calling the handler directly hid a real bug where `_arm` never set
+			# `preview.armed`, so the palette was inert and a real tap did nothing.
+			_tap_cell(app.editor.preview, Vector2i(3, 2))
 			await process_frame
-			for b in _buttons(app.editor.page_box):
-				if not _fits_width(b, vp):
-					_fail("editor %s page: '%s' too wide at %s" % [page, _label_of(b), b.get_global_rect()])
+			if app.editor.ops.size() != before + 1:
+				_fail("editor: tapping the grid with '%s' armed added no piece" % key)
+			else:
+				var added: Dictionary = app.editor.ops[app.editor.ops.size() - 1]
+				if key == "straight" and CustomTracks.is_corner(added):
+					_fail("editor: the straight palette added a corner")
+				if key == "reattach" and not bool(added.get("reattach", false)):
+					_fail("editor: the reattach palette added a normal pillar")
+				if key == "pillar" and bool(added.get("reattach", false)):
+					_fail("editor: the pillar palette added a reattach pillar")
+				if key != "straight" and not CustomTracks.is_corner(added):
+					_fail("editor: the '%s' palette added a straight" % key)
+			app.editor._arm(key)
+		# Tapping an armed piece again puts the palette down.
+		app.editor._arm("90")
+		app.editor._arm("90")
+		if app.editor._armed != "":
+			_fail("editor: tapping an armed palette piece again did not disarm it")
+
+		# Pinch zooms. Driven through the real two-touch path, because the gesture event
+		# the old code relied on is never emitted on a phone.
+		var z0: float = app.editor.preview._zoom
+		var o0: Vector2 = app.editor.preview._origin
+		# The pinch midpoint is the anchor: the world point under it must stay under it.
+		# That tells a real anchored zoom from one that also pans. The origin always moves
+		# when zooming about an anchor, so the origin is not the thing to check.
+		var anchor: Vector2 = app.editor.preview.size * 0.5
+		var world_before: Vector2 = app.editor.preview.screen_to_world(anchor)
+		_two_finger_pinch(app.editor.preview, 1.8)
+		if app.editor.preview._zoom <= z0:
+			_fail("editor map: a two-finger pinch did not zoom in (%.3f -> %.3f)" % [z0, app.editor.preview._zoom])
+		var world_after: Vector2 = app.editor.preview.screen_to_world(anchor)
+		if world_before.distance_to(world_after) > 2.0:
+			_fail("editor map: a pinch slid the map instead of zooming about the fingers")
+		app.editor.preview._zoom = z0
+		app.editor.preview._origin = o0
+
+		# The colour sheet opens, its controls fit, and it closes again.
+		app.editor._open_look()
+		await process_frame
+		if not app.editor.sheet.visible:
+			_fail("editor: the colours sheet did not open")
+		for b in _buttons(app.editor.sheet):
+			if not _fits_width(b, vp):
+				_fail("editor colours: '%s' too wide at %s" % [_label_of(b), b.get_global_rect()])
+		app.editor._close_sheet()
+		await process_frame
+		if app.editor.sheet.visible:
+			_fail("editor: the colours sheet did not close")
+
 	# Close and delete the track the check made, leaving the store as it started.
 	var made_id: int = app.editor.id
 	app.editor._on_close()
@@ -347,6 +409,59 @@ func _drag_pans(pv: Node) -> void:
 	pv.pan_by(before - pv._origin)
 
 
+# Two fingers down, then apart: the real pinch path, because `InputEventMagnifyGesture`
+# is never emitted unless `enable_pan_and_scale_gestures` is on (it is off) and never on
+# the web at all. Both touches start together and separate by `factor`.
+# Tap a grid cell through the map's own input handling, so the test exercises the
+# arm-then-tap path a player uses rather than the handler behind it.
+func _tap_cell(pv: Node, cell: Vector2i) -> void:
+	var pos: Vector2 = pv.world_to_screen(pv.cell_to_world(cell) + Vector2(pv.CELL, pv.CELL) * 0.5)
+	var down := InputEventScreenTouch.new()
+	down.index = 0
+	down.pressed = true
+	down.position = pos
+	pv._gui_input(down)
+	var up := InputEventScreenTouch.new()
+	up.index = 0
+	up.pressed = false
+	up.position = pos
+	pv._gui_input(up)
+
+
+func _two_finger_pinch(pv: Node, factor: float) -> void:
+	var c: Vector2 = pv.size * 0.5
+	var half := 40.0
+	var a := InputEventScreenTouch.new()
+	a.index = 0
+	a.pressed = true
+	a.position = c - Vector2(half, 0.0)
+	pv._gui_input(a)
+	var b := InputEventScreenTouch.new()
+	b.index = 1
+	b.pressed = true
+	b.position = c + Vector2(half, 0.0)
+	pv._gui_input(b)
+	for i in range(4):
+		var t := float(i + 1) / 4.0
+		var d := half * lerpf(1.0, factor, t)
+		var da := InputEventScreenDrag.new()
+		da.index = 0
+		da.position = c - Vector2(d, 0.0)
+		da.relative = Vector2(-(d - half) / 4.0, 0.0)
+		pv._gui_input(da)
+		var db := InputEventScreenDrag.new()
+		db.index = 1
+		db.position = c + Vector2(d, 0.0)
+		db.relative = Vector2((d - half) / 4.0, 0.0)
+		pv._gui_input(db)
+	for idx in [0, 1]:
+		var up := InputEventScreenTouch.new()
+		up.index = idx
+		up.pressed = false
+		up.position = c
+		pv._gui_input(up)
+
+
 # A tab page scrolls vertically (its ScrollContainer disables horizontal scroll),
 # so a control below the fold is reachable by scrolling but a control wider than the
 # viewport is not. That is the bug the old menu had, so width is what is checked.
@@ -360,12 +475,13 @@ func _check_page(name: String, page: Control, vp: Vector2i) -> void:
 		_fail("%s: no buttons found" % name)
 
 
-# Every button in the editor that is not inside the scrolling control area. Those are
-# the ones that must always be reachable (the header and the camera row), so they are
-# what the in-view check measures; the page controls may sit below the fold.
+# Every button in the editor that is not inside the sheet (the colours / piece panel).
+# The sheet is an overlay that scrolls, so its buttons may sit below the fold; the
+# header, the camera row and the palette are always on screen and are what the in-view
+# check measures.
 func _pinned_buttons(editor: Node) -> Array:
 	var out: Array = []
-	var skip: Node = editor.control_scroll
+	var skip: Node = editor.sheet
 	for b in _buttons(editor):
 		if not _in_subtree(b, skip):
 			out.append(b)

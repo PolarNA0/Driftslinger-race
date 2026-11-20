@@ -29,6 +29,21 @@ var _origin := Vector2.ZERO
 var _dragging := false
 var _drag_moved := 0.0
 
+# Two-finger pinch is tracked from the raw touches. Godot's `InputEventMagnifyGesture`
+# only exists when `input_devices/pointing/android/enable_pan_and_scale_gestures` is
+# on, which it is not (and the web build never emits it), so relying on it alone left
+# pinch dead everywhere. Touch events are always delivered, so they drive it.
+var _touches := {}              # touch index -> current position
+var _pinch_dist := 0.0
+var _pinching := false
+var _pinch_anchor := Vector2.ZERO
+
+# Placement mode. While a palette piece is armed, a tap on the grid appends that piece
+# and reports the grid cell it landed on, instead of picking an existing piece.
+signal cell_tapped(cell: Vector2i)
+var armed: Callable = Callable()
+var show_grid := false
+
 # The live session's colours, set by the editor so the map paints the track's own
 # palette. `theme_of` reads them through `_entry`.
 var palette := {"road": "", "ground": ""}
@@ -37,6 +52,10 @@ const PAD := 20.0
 const MIN_ZOOM := 0.05
 const MAX_ZOOM := 6.0
 const WHEEL_STEP := 1.15
+# One grid cell in world pixels. The editor snaps placement to this so a tap lands on
+# a cell rather than an arbitrary point.
+const CELL := 80.0
+const TAP_SLOP := 10.0
 
 
 func _ready() -> void:
@@ -196,30 +215,133 @@ func _gui_input(event: InputEvent) -> void:
                 _drag_moved += mm.relative.length()
                 pan_by(mm.relative)
         elif event is InputEventScreenTouch:
-                var st := event as InputEventScreenTouch
-                if st.pressed:
-                        _dragging = true
-                        _drag_moved = 0.0
-                else:
-                        _dragging = false
-                        if _drag_moved < 8.0:
-                                _tap(st.position)
+                _on_touch(event as InputEventScreenTouch)
         elif event is InputEventScreenDrag:
-                var sd := event as InputEventScreenDrag
-                _drag_moved += sd.relative.length()
-                pan_by(sd.relative)
-        # A phone has no mouse wheel, so pinch is the only natural way to zoom without
-        # the small +/- buttons.
+                _on_touch_drag(event as InputEventScreenDrag)
+        # Kept for desktop trackpads and for a build that turns the gesture on. Phones
+        # go through the two-touch path above, because this event does not exist there.
         elif event is InputEventMagnifyGesture:
                 var mg := event as InputEventMagnifyGesture
                 _zoom_at(mg.position, mg.factor)
                 accept_event()
 
 
+# --- touch: one finger pans, two fingers pinch -------------------------------
+#
+# Panning used to read every touch independently, so two fingers down meant two pans
+# applied at once - a pinch dragged the map sideways at double speed and then fired a
+# stray tap on release. Both are handled here: while a second finger is down the map
+# never pans, and a release never taps unless the finger barely moved and was alone.
+
+func _on_touch(st: InputEventScreenTouch) -> void:
+        if st.pressed:
+                _touches[st.index] = st.position
+                if _touches.size() == 1:
+                        _dragging = true
+                        _drag_moved = 0.0
+                elif _touches.size() == 2:
+                        # A second finger cancels any pan and any pending tap: this is a
+                        # pinch, not a drag and not a click. The anchor is fixed here,
+                        # when both fingers are down, because the midpoint computed from
+                        # one-finger-at-a-time updates jitters as each finger moves.
+                        _pinching = true
+                        _dragging = false
+                        _pinch_dist = _touch_span()
+                        _pinch_anchor = _touch_mid()
+        else:
+                var was_alone := _touches.size() == 1
+                _touches.erase(st.index)
+                if _touches.size() < 2:
+                        _pinching = false
+                        _pinch_dist = 0.0
+                if _touches.is_empty():
+                        _dragging = false
+                        if was_alone and _drag_moved < TAP_SLOP:
+                                _tap(st.position)
+                else:
+                        # The remaining finger continues as a pan from where it is, with
+                        # its travel reset so lifting the pinch finger does not jump.
+                        _dragging = true
+                        _drag_moved = TAP_SLOP
+
+
+func _on_touch_drag(sd: InputEventScreenDrag) -> void:
+        if not _touches.has(sd.index):
+                return
+        _touches[sd.index] = sd.position
+        if _pinching and _touches.size() >= 2:
+                var d := _touch_span()
+                if _pinch_dist > 1.0 and d > 1.0:
+                        _zoom_at(_pinch_anchor, d / _pinch_dist)
+                _pinch_dist = d
+                return
+        if _touches.size() == 1:
+                _drag_moved += sd.relative.length()
+                pan_by(sd.relative)
+
+
+# Distance between the first two fingers, in screen pixels.
+func _touch_span() -> float:
+        var pts := _touches.values()
+        if pts.size() < 2:
+                return 0.0
+        return (pts[0] as Vector2).distance_to(pts[1] as Vector2)
+
+
+# The point between the first two fingers: the pinch anchor, so the spot under the
+# fingers stays put while the zoom changes.
+func _touch_mid() -> Vector2:
+        var pts := _touches.values()
+        if pts.size() < 2:
+                return size * 0.5
+        return ((pts[0] as Vector2) + (pts[1] as Vector2)) * 0.5
+
+
 func _tap(pos: Vector2) -> void:
+        if armed.is_valid():
+                cell_tapped.emit(world_to_cell(screen_to_world(pos)))
+                return
         var i := pick_at(pos)
         if i >= 0:
                 piece_picked.emit(i)
+
+
+# --- grid --------------------------------------------------------------------
+
+func world_to_cell(w: Vector2) -> Vector2i:
+        return Vector2i(floori(w.x / CELL), floori(w.y / CELL))
+
+
+func cell_to_world(c: Vector2i) -> Vector2:
+        return Vector2(float(c.x) * CELL, float(c.y) * CELL)
+
+
+# Where the road ends right now - the point a newly placed piece grows from. The
+# op list is continuous, so this is also the only place a piece can start.
+func op_end_world() -> Vector2:
+        if _road.size() < 2:
+                return Vector2.ZERO
+        return _road[_road.size() - 1]
+
+
+# The grid line nearest a screen point, snapped in world space so it lines up with the
+# road at every zoom.
+func _draw_grid() -> void:
+        var w0 := screen_to_world(Vector2.ZERO)
+        var w1 := screen_to_world(size)
+        var c0 := world_to_cell(w0) - Vector2i.ONE
+        var c1 := world_to_cell(w1) + Vector2i.ONE
+        var line := Color(UiTheme.INK, 0.07)
+        for cx in range(c0.x, c1.x + 1):
+                var x := float(cx) * CELL
+                var a := world_to_screen(Vector2(x, w0.y))
+                var b := world_to_screen(Vector2(x, w1.y))
+                draw_line(a, b, line, 1.0)
+        for cy in range(c0.y, c1.y + 1):
+                var y := float(cy) * CELL
+                var a := world_to_screen(Vector2(w0.x, y))
+                var b := world_to_screen(Vector2(w1.x, y))
+                draw_line(a, b, line, 1.0)
 
 
 # --- draw --------------------------------------------------------------------
@@ -228,9 +350,11 @@ func _draw() -> void:
         var w := size.x
         var h := size.y
         draw_rect(Rect2(Vector2.ZERO, size), UiTheme.BG)
+        if show_grid:
+                _draw_grid()
         if not ok or _road.size() < 2:
                 var f := ThemeDB.fallback_font
-                var msg := error if error != "" else "Add a piece to see the road."
+                var msg := error if error != "" else "Pick a piece below, then tap the grid."
                 draw_string(f, Vector2(12, h * 0.5), msg, HORIZONTAL_ALIGNMENT_CENTER, w - 24, 13, UiTheme.INK_MUTE)
                 return
 

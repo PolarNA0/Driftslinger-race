@@ -59,13 +59,14 @@ build is the only client.
   stored per account, validated, transformed and resolved to `Track` opts. Ids
   start at `ID_BASE` (1000) so they can never collide with a built-in number.
 - `godot/scripts/track_editor.gd` — `TrackEditor`, the full-screen editor
-  overlay: a responsive two-pane layout (map + controls), the Build / Look / Help
-  pages, the piece list with per-piece controls, undo and rename. See "The track
-  editor (the Editor tab)".
+  overlay: a blank grid with the piece palette pinned along the bottom, a sheet
+  for the selected piece's controls and the colours, undo and rename. See "The
+  track editor (the Editor tab)".
 - `godot/scripts/track_preview.gd` — `TrackPreview`, the editor's map: a top-down
   view of the road with a pan/zoom camera (`fit`, `zoom_by`, `pan_by`,
-  `focus_index`) and tap-to-select (`pick_at`). Built from a real `Track`, so the
-  plan matches the drive, and painted with the track's own colours.
+  `focus_index`), a placement grid, two-finger pinch and tap-to-select
+  (`pick_at`). Built from a real `Track`, so the plan matches the drive, and
+  painted with the track's own colours.
 - `godot/scripts/menu_shell.gd` — `MenuShell`, the full-screen menu frame:
   top bar, content sheet, bottom tab bar (see "The menu is a tabbed app
   shell").
@@ -584,17 +585,25 @@ like a shipped one.
   palette is unchanged. `theme_of` always returns a complete, valid pair (a missing
   or malformed value falls back to `DEFAULT_THEME`), so the renderer never guards a
   half-set palette.
-- **The editor is responsive.** `TrackEditor._apply_layout` flips one
-  `BoxContainer`: on a wide window the map is the left pane and the controls the
-  right; on a phone the map is pinned on top and the controls scroll beneath it.
-  The panels are never re-parented, so the map camera and the scroll position
-  survive a resize. The controls are three pages behind a segmented switch - Build,
-  Look, Help - so no page is a wall of controls.
+- **The editor is a blank grid and a palette.** The whole surface is the map with a
+  grid drawn on it; the piece palette is pinned along the bottom. Tap a palette
+  piece to arm it, tap the grid, and the piece is added. That is the entire
+  authoring flow - there are no pages, no piece list and no sliders on screen. The
+  selected piece's controls, the colours and the help live in a sheet that only
+  opens when asked for (`_open_piece`, `_open_look`), so the editing surface is
+  never a wall of controls.
+- **A tap cannot place a piece at an arbitrary point, because the road is
+  continuous.** An op is a length or a turn *relative to where the last op ended*,
+  so a piece is always appended to the road's end. The tapped cell therefore sets
+  how far the next straight runs (its distance from `preview.op_end_world()`), and
+  a turn is aimed at the cell. Moving a piece to a disconnected spot would need a
+  road made of separate ribbons, which is not what the game drives. If the editor
+  is ever asked to "put a piece there", this is the constraint to explain first.
 - **The map is a camera and an editing surface.** `TrackPreview` pans (drag),
   zooms (pinch / wheel / the `+`/`-` buttons), `fit`s the whole road, and
-  `focus_index` centres a piece. A tap (not a drag) picks the piece under the
-  finger and selects it. `verify_editor.gd` checks the camera math, that a
-  piece's midpoint picks that piece, and that Fit brings the road on screen.
+  `focus_index` centres a piece. With no piece armed, a tap (not a drag) picks the
+  piece under the finger and opens it. `verify_editor.gd` checks the camera math,
+  that a piece's midpoint picks that piece, and that Fit brings the road on screen.
 - **A touch drag arrives twice, so handle one family only.** Godot's
   `input_devices/pointing/emulate_mouse_from_touch` is **on** by default (Android
   and iOS need it), so one finger drag is delivered as *both* an
@@ -606,14 +615,28 @@ like a shipped one.
   wheel, drag and click still work on desktop. `verify_editor.gd` drives the real
   `_gui_input` with a touch drag, an emulated mouse drag and a pinch and asserts
   only the first two move the camera as intended (the emulated drag must not pan).
-- **A phone has no mouse wheel, so zoom must also be a pinch.**
-  `InputEventMagnifyGesture` is handled in `TrackPreview._gui_input` (zoom about
-  the pinch point); the `+`/`-` buttons stay as the coarse fallback.
-- **`verify_ui.gd` guards the fit.** It presses New track, asserts every pinned
-  button (header + camera row, i.e. everything outside `control_scroll`) is inside
-  the viewport, opens each page and checks its controls fit the width, checks the
-  map has a road, then drives the custom road to its finish and asserts the finish
-  card is local-only.
+- **Pinch is read from the raw touches, not from `InputEventMagnifyGesture`.**
+  That gesture only exists when
+  `input_devices/pointing/android/enable_pan_and_scale_gestures` is on, which it is
+  not in this project, and the web export never emits it at all - so the old
+  `InputEventMagnifyGesture`-only handler meant **pinch did not work anywhere**,
+  which is what players reported. `TrackPreview` now tracks the touches in
+  `_touches` and derives the pinch itself: one finger pans, two fingers zoom by the
+  ratio of their span. Two rules make it behave: while a second finger is down the
+  map **never pans** (otherwise a pinch drags the map sideways), and a release
+  never taps unless that finger was alone and barely moved. The anchor is captured
+  once, when the second finger lands (`_pinch_anchor`), because a midpoint
+  recomputed from one-finger-at-a-time updates jitters and the zoom then drifts
+  sideways - `verify_ui.gd` asserts the world point under the fingers stays put.
+  `enable_pan_and_scale_gestures` is deliberately left off: turning it on would
+  make Godot emit the gesture *and* keep sending the touches, so the zoom would be
+  applied twice.
+- **`verify_ui.gd` guards the fit.** It presses New track, asserts every palette
+  button and every pinned button (header + camera row) is inside the viewport,
+  drives every palette piece through a grid tap and checks the right op was
+  appended, checks a two-finger pinch zooms about the fingers without sliding the
+  map, opens the colours sheet and checks its controls fit, then drives the custom
+  road to its finish and asserts the finish card is local-only.
 - **`CustomTracks.duplicate_track`, not `duplicate`.** A `static func duplicate`
   collides with the built-in `Resource.duplicate` and GDScript picks the wrong one.
 - **`TrackEditor.palette` / `TrackPreview.palette`, not `theme`.** `theme` is a
@@ -626,8 +649,8 @@ like a shipped one.
   the overlay stayed **0x0** - and because the map and the control panel are its
   children, they collapsed too (the map drew a sliver and a drag missed it, which
   reads as "the camera is static"). The `and_offsets` call sets the offsets as well
-  and the overlay fills the viewport. `verify_ui.gd` now asserts the overlay, the
-  map and the control panel are all a usable size, and drives a real drag through
+  and the overlay fills the viewport. `verify_ui.gd` now asserts the overlay and
+  the map are both a usable size, and drives a real drag through
   `TrackPreview._gui_input` to prove the camera moves.
 
 ## UI look, boot splash and fitting every screen
