@@ -213,6 +213,9 @@ func _build_palette() -> void:
 	for c in palette_bar.get_children():
 		c.queue_free()
 	_palette_buttons = {}
+	# Each tile is a picture of the piece, not a word for it: the shape is what a
+	# player is choosing. "Pillar" and "Reattach" are both quarter turns - the
+	# reattach one carries an amber ring, because the pole is the only difference.
 	var items := [
 		["straight", "Straight"],
 		["90", "Turn 90\u00b0"],
@@ -220,28 +223,52 @@ func _build_palette() -> void:
 		["270", "Loop 270\u00b0"],
 		["pillar", "Pillar"],
 		["reattach", "Reattach"],
+		["finish", "Finish line"],
 	]
 	for it in items:
 		var key: String = it[0]
 		var b := Button.new()
-		b.text = str(it[1])
 		b.toggle_mode = true
-		b.clip_text = true
 		b.focus_mode = Control.FOCUS_NONE
-		b.custom_minimum_size = Vector2(0, 46)
+		b.tooltip_text = str(it[1])
+		b.custom_minimum_size = Vector2(0, 56)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.button_pressed = key == _armed
 		b.pressed.connect(func(): _arm(key))
+		var icon := PieceIcon.new()
+		icon.kind = key
+		icon.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		# Inset so the tile's own edge and pressed border stay visible round the art.
+		icon.offset_left = 6
+		icon.offset_top = 6
+		icon.offset_right = -6
+		icon.offset_bottom = -6
+		b.add_child(icon)
 		_palette_buttons[key] = b
 		palette_bar.add_child(b)
+	_paint_palette()
+
+
+# Tint every tile with the track's own road/ground colours, and mark the armed one,
+# so the palette reads as a preview of what will be added.
+func _paint_palette() -> void:
+	var colors := CustomTracks.theme_colors(_entry())
+	for k in _palette_buttons.keys():
+		var b := _palette_buttons[k] as Button
+		b.button_pressed = k == _armed
+		for c in b.get_children():
+			var icon := c as PieceIcon
+			if icon != null:
+				icon.road_color = colors["road"]
+				icon.ground_color = colors["ground"]
+				icon.selected = k == _armed
 
 
 func _arm(key: String) -> void:
 	# Tapping the armed piece again disarms it, so the palette can be put down
 	# without placing anything.
 	_armed = "" if _armed == key else key
-	for k in _palette_buttons.keys():
-		(_palette_buttons[k] as Button).button_pressed = k == _armed
+	_paint_palette()
 	# The preview routes a tap to `cell_tapped` only while this is valid, which is how
 	# "arm a piece, tap the grid" works. Leaving it unset made the palette inert.
 	preview.armed = (func(): pass) if _armed != "" else Callable()
@@ -253,13 +280,41 @@ func _arm(key: String) -> void:
 func _on_cell_tapped(cell: Vector2i) -> void:
 	if _armed == "" or ops.size() >= CustomTracks.MAX_PIECES:
 		return
+	# The finish closes the track, so it can only be added once and only at the end.
+	# Arming it again just moves the existing one, which is what a player expects from
+	# tapping the finish tile and then a cell.
+	var has_finish := CustomTracks.finish_index(ops) >= 0
 	var w := preview.cell_to_world(cell)
 	_push_undo()
+	if _armed == "finish":
+		# A finish replaces any earlier one and always sits last: the road ends there.
+		var fi := CustomTracks.finish_index(ops)
+		if has_finish:
+			ops.remove_at(fi)
+		var d := w.distance_to(preview.growth_point(ops.size()))
+		ops.append(CustomTracks.make_finish(clampf(d, CustomTracks.MIN_LEN, CustomTracks.MAX_LEN)))
+		selected = ops.size() - 1
+		_commit()
+		return
+	var start := preview.growth_point(CustomTracks.finish_index(ops) if has_finish else ops.size())
+	if has_finish:
+		# A piece cannot go after the finish line, so it lands just before it.
+		var fin: Dictionary = ops[CustomTracks.finish_index(ops)]
+		ops.remove_at(CustomTracks.finish_index(ops))
+		_place_armed(w, start)
+		ops.append(fin)
+	else:
+		_place_armed(w, start)
+	selected = ops.size() - 1
+	_commit()
+
+
+func _place_armed(w: Vector2, start: Vector2) -> void:
 	match _armed:
 		"straight":
 			# The tapped cell sets the length: the distance from where the road ends
 			# now to the cell the player pointed at.
-			var d := w.distance_to(preview.op_end_world())
+			var d := w.distance_to(start)
 			ops.append(CustomTracks.make_straight(clampf(d, CustomTracks.MIN_LEN, CustomTracks.MAX_LEN)))
 		"90":
 			ops.append(CustomTracks.next_corner(ops, 90))
@@ -276,10 +331,7 @@ func _on_cell_tapped(cell: Vector2i) -> void:
 			r["reattach"] = true
 			ops.append(r)
 		_:
-			_undo.pop_back()
-			return
-	selected = ops.size() - 1
-	_commit()
+			pass
 
 
 # --- the sheet ---------------------------------------------------------------
@@ -354,7 +406,12 @@ func _build_inspect(target: VBoxContainer, i: int) -> void:
 	var p: Dictionary = ops[i]
 	target.add_child(_hint(CustomTracks.describe(p)))
 
-	if CustomTracks.is_corner(p):
+	if CustomTracks.is_finish(p):
+		# The finish is a straight with a line across its end, so the only thing to
+		# adjust is how long the run-in to the line is.
+		target.add_child(_slider_row("Length", float(p["len"]), CustomTracks.MIN_LEN,
+			CustomTracks.MAX_LEN, CustomTracks.LEN_STEP, func(v): _set_len(i, v), []))
+	elif CustomTracks.is_corner(p):
 		var deg := absi(int(p["deg"]))
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", 6)
@@ -546,7 +603,11 @@ func _apply_live(i: int) -> void:
 		preview.rebuild(ops)
 		preview.selected = selected
 	_refresh_status()
-	changed.emit()
+	# Deliberately no `changed.emit()` here. It is emitted while a slider is being
+	# dragged, and its listener rebuilds the menu's custom-track list - up to 100
+	# buttons, each re-validated - which at 60fps made the editor seize. Nothing that
+	# list shows (the name, the corner count) changes as a length slider moves, so the
+	# list is refreshed on `_commit` instead, when the edit is finished.
 
 
 func _refresh_status() -> void:
@@ -568,9 +629,11 @@ func _refresh_status() -> void:
 		status_label.add_theme_color_override("font_color", UiTheme.DANGER)
 
 
+# The palette tile's tooltip is its name; the tile itself is a picture, so there is
+# no text on the button to read back.
 func _armed_name() -> String:
 	var b: Variant = _palette_buttons.get(_armed)
-	return (b as Button).text if b != null else _armed
+	return (b as Button).tooltip_text if b != null else _armed
 
 
 func _rebuild() -> void:
@@ -578,8 +641,7 @@ func _rebuild() -> void:
 		return
 	if name_button != null:
 		name_button.text = track_name
-	for k in _palette_buttons.keys():
-		(_palette_buttons[k] as Button).button_pressed = k == _armed
+	_paint_palette()
 	preview.palette = palette
 	preview.selected = selected
 	preview.rebuild(ops)
@@ -902,6 +964,9 @@ func _slider_row(label: String, value: float, lo: float, hi: float, step: float,
 	slider.value_changed.connect(func(v):
 		val.text = "%d" % roundi(v)
 		cb.call(v))
+	# The live callback only repaints (see `_apply_live`); the menu's list is refreshed
+	# once here, when the finger lets go, so dragging a slider cannot rebuild it per frame.
+	slider.drag_ended.connect(func(_changed: bool): changed.emit())
 	box.add_child(slider)
 	return box
 

@@ -69,6 +69,34 @@ func _drag(rel: Vector2, device: int) -> InputEventScreenDrag:
 	return e
 
 
+# A second finger, for the pinch tests. `index` is what the preview tracks touches
+# by, so the two fingers have to be distinguishable.
+func _touch2(pressed: bool, pos: Vector2) -> InputEventScreenTouch:
+	var e := InputEventScreenTouch.new()
+	e.index = 1
+	e.pressed = pressed
+	e.position = pos
+	return e
+
+
+# Lift a specific finger. `_touch` is always index 0, so a test that pinches with two
+# fingers has to say which one came up.
+func _lift(index: int, pos: Vector2) -> InputEventScreenTouch:
+	var e := InputEventScreenTouch.new()
+	e.index = index
+	e.pressed = false
+	e.position = pos
+	return e
+
+
+func _drag2(pos: Vector2, index: int) -> InputEventScreenDrag:
+	var e := InputEventScreenDrag.new()
+	e.index = index
+	e.position = pos
+	e.relative = Vector2.ZERO
+	return e
+
+
 func _mouse_motion(rel: Vector2, device: int) -> InputEventMouseMotion:
 	var e := InputEventMouseMotion.new()
 	e.relative = rel
@@ -97,6 +125,7 @@ func _init() -> void:
 	for i in range(6):
 		staircase.append(CustomTracks.make_straight(230.0))
 		staircase.append(CustomTracks.make_corner(90 if i % 2 == 0 else -90))
+	staircase.append(CustomTracks.make_finish())
 	pass_all = _drivable(staircase, "staircase x6") and pass_all
 
 	# Advanced shapes: a hairpin (180) and a loop (270), each a single arc round a
@@ -110,6 +139,7 @@ func _init() -> void:
 		CustomTracks.make_corner(-270, 55.0),
 		CustomTracks.make_straight(220.0),
 		CustomTracks.make_corner(-90),
+		CustomTracks.make_finish(),
 	], "hairpin + loop") and pass_all
 
 	print("== the default direction never folds the road ==")
@@ -126,6 +156,43 @@ func _init() -> void:
 	print("  next_corner alternates direction over 8 corners: %s" % ("OK" if alternates else "FAIL"))
 	pass_all = alternates and pass_all
 	pass_all = _drivable(_interleave(stacked), "default stack") and pass_all
+
+	print("== the finish line closes the track ==")
+	# A track with corners but no finish has no end, so it cannot be played: the road
+	# would run on for ever. This is the check that makes the finish piece load-bearing
+	# rather than decorative.
+	var no_fin := []
+	for i in range(4):
+		no_fin.append(CustomTracks.make_straight(230.0))
+		no_fin.append(CustomTracks.make_corner(90 if i % 2 == 0 else -90))
+	var nf_v := CustomTracks.validate(no_fin)
+	var nf_ok: bool = not bool(nf_v["ok"]) and str(nf_v["error"]).contains("finish")
+	print("  a track with no finish is refused: %s" % ("OK" if nf_ok else "FAIL"))
+	pass_all = nf_ok and pass_all
+	# Exactly one finish: two would mean two ends.
+	var two := no_fin.duplicate()
+	two.append(CustomTracks.make_finish())
+	two.append(CustomTracks.make_finish())
+	var two_v := CustomTracks.validate(two)
+	var two_ok: bool = not bool(two_v["ok"]) and str(two_v["error"]).contains("finish")
+	print("  two finish lines are refused: %s" % ("OK" if two_ok else "FAIL"))
+	pass_all = two_ok and pass_all
+	# The finish is a closing straight, so it is what the built track's finish distance
+	# comes from - a longer run-in has to move the line further down the road.
+	var short_fin := _interleave([CustomTracks.make_corner(90), CustomTracks.make_corner(-90)])
+	short_fin[short_fin.size() - 1] = CustomTracks.make_finish(180.0)
+	var long_fin := short_fin.duplicate(true)
+	long_fin[long_fin.size() - 1] = CustomTracks.make_finish(520.0)
+	var t_short := Track.new(0, CustomTracks.opts(short_fin))
+	var t_long := Track.new(0, CustomTracks.opts(long_fin))
+	var grows: bool = absf((t_long.finish_s - t_short.finish_s) - 340.0) < 1.0
+	print("  a longer finish moves the line (%.0f -> %.0f): %s" % [
+		t_short.finish_s, t_long.finish_s, "OK" if grows else "FAIL"])
+	pass_all = grows and pass_all
+	# A finish straight is not a corner: it must not add a pole or a sling to the run.
+	var corners_same: bool = t_long.fillets.size() == t_short.fillets.size()
+	print("  the finish adds no corner: %s" % ("OK" if corners_same else "FAIL"))
+	pass_all = corners_same and pass_all
 
 	print("== transforms keep the road drivable ==")
 	pass_all = _drivable(CustomTracks.mirror(staircase), "mirrored") and pass_all
@@ -226,6 +293,7 @@ func _init() -> void:
 	for i in range(6):
 		wide.append(CustomTracks.make_straight(240.0))
 		wide.append(CustomTracks.make_corner(90 if i % 2 == 0 else -90, CustomTracks.MAX_RADIUS))
+	wide.append(CustomTracks.make_finish())
 	var wide_v := CustomTracks.validate(wide)
 	var wide_ok: bool = bool(wide_v["ok"]) and CustomTracks.MAX_RADIUS < Cfg.GRAB_RANGE
 	print("  max radius %d < grab range %d: %s" % [int(CustomTracks.MAX_RADIUS), int(Cfg.GRAB_RANGE), "OK" if wide_ok else "FAIL"])
@@ -246,6 +314,7 @@ func _init() -> void:
 	var many := []
 	for i in range(CustomTracks.MAX_CORNERS + 1):
 		many.append(CustomTracks.make_corner(90 if i % 2 == 0 else -90))
+	many.append(CustomTracks.make_finish())
 	var many_v := CustomTracks.validate(many)
 	var many_ok: bool = not bool(many_v["ok"]) and str(many_v["error"]).contains("Too many corners")
 	print("  more than %d corners is refused: %s" % [CustomTracks.MAX_CORNERS, "OK" if many_ok else "FAIL"])
@@ -279,6 +348,24 @@ func _init() -> void:
 	var colors_ok: bool = colors.has("stripe") and colors.has("pole") and colors["stripe"] != colors["road"]
 	print("  theme_colors derives stripe and pole: %s" % ("OK" if colors_ok else "FAIL"))
 	pass_all = colors_ok and pass_all
+
+	print("== a slider drag does not rebuild the menu list per frame ==")
+	# The editor's live slider callback used to emit `changed` on every value, and its
+	# listener rebuilds the menu's custom-track list (up to 100 buttons, each
+	# re-validated). Dragging a length slider therefore did that work every frame - the
+	# "seizure" - even though nothing the list shows changes during the drag. Assert the
+	# listener is not called per value, and is called once when the drag ends.
+	var fire := [0]
+	var probe = load("res://scripts/track_editor.gd").new()
+	probe.changed.connect(func(): fire[0] += 1)
+	probe.id = CustomTracks.new_track()["id"]
+	probe.ops = CustomTracks.default_ops()
+	for v in range(10):
+		probe._apply_live(0)
+	var quiet: bool = fire[0] == 0
+	print("  10 live slider values rebuild the list 0 times: %d %s" % [fire[0], "OK" if quiet else "FAIL"])
+	pass_all = quiet and pass_all
+	probe.free()
 
 	print("== the preview camera ==")
 	var pv := TrackPreview.new()
@@ -339,12 +426,84 @@ func _init() -> void:
 		print("  a real touch drag does pan: %s" % ("OK" if touch_ok else "FAIL"))
 		pass_all = touch_ok and pass_all
 		pv._gui_input(_touch(false, Vector2(120.0, 100.0)))
+		# Pan must move the map exactly as far as the finger, not a multiple of it.
+		# `relative` is scaled by whatever transform the platform applies to the event,
+		# and a build that scales `position` but not `relative` - or that delivers a
+		# drag twice - pans at 2x, 3x or worse on a phone while a scale-1.0 headless
+		# run looks perfect. So assert the distance, not just that something moved.
+		# The drag below carries a `relative` of 30 but a `position` that moved 30 too;
+		# a pan derived from `relative` would move 60 and fail here.
+		var p0 := pv._origin
+		pv._gui_input(_touch(true, Vector2(100.0, 100.0)))
+		var d := InputEventScreenDrag.new()
+		d.index = 0
+		d.position = Vector2(130.0, 100.0)
+		d.relative = Vector2(30.0, 0.0)
+		pv._gui_input(d)
+		var travel := (pv._origin - p0).length()
+		var exact: bool = absf(travel - 30.0) < 1.0
+		print("  a 30px drag pans 30px (not 60): %.1f %s" % [travel, "OK" if exact else "FAIL"])
+		pass_all = exact and pass_all
+		pv._gui_input(_touch(false, Vector2(130.0, 100.0)))
+		# A drag whose `relative` disagrees with its `position` must follow `position`:
+		# that is the field the viewport definitely transforms, and the one tap picking
+		# trusts, so it is the only field that means the same thing on every platform.
+		var p1 := pv._origin
+		pv._gui_input(_touch(true, Vector2(200.0, 200.0)))
+		var bad := InputEventScreenDrag.new()
+		bad.index = 0
+		bad.position = Vector2(220.0, 200.0)
+		bad.relative = Vector2(60.0, 0.0)
+		pv._gui_input(bad)
+		var follows := absf((pv._origin - p1).length() - 20.0) < 1.0
+		print("  a lying `relative` is ignored, `position` wins: %s" % ("OK" if follows else "FAIL"))
+		pass_all = follows and pass_all
+		pv._gui_input(_touch(false, Vector2(220.0, 200.0)))
 		# Pinch zooms the map, so a phone can zoom without the +/- buttons.
 		var pinch_before := pv._zoom
 		pv._gui_input(_pinch(1.4))
 		var pinch_ok: bool = pv._zoom > pinch_before
 		print("  pinch zoom changes the zoom: %s" % ("OK" if pinch_ok else "FAIL"))
 		pass_all = pinch_ok and pass_all
+		# A pinch must be absolute from the gesture's start: jittering the two fingers
+		# and settling on the same span must land on the same zoom as opening them
+		# straight to it, or the map twitches under a real hand.
+		pv._zoom = 1.0
+		pv._gui_input(_touch(true, Vector2(100.0, 100.0)))
+		pv._gui_input(_touch2(true, Vector2(200.0, 100.0)))
+		for span in [190.0, 210.0, 185.0, 200.0]:
+			pv._gui_input(_drag2(Vector2(100.0 + span, 100.0), 1))
+		var z_jitter := pv._zoom
+		pv._gui_input(_touch(false, Vector2(300.0, 100.0)))
+		pv._gui_input(_touch(false, Vector2(100.0, 100.0)))
+		pv._zoom = 1.0
+		pv._gui_input(_touch(true, Vector2(100.0, 100.0)))
+		pv._gui_input(_touch2(true, Vector2(200.0, 100.0)))
+		pv._gui_input(_drag2(Vector2(300.0, 100.0), 1))
+		var z_direct := pv._zoom
+		pv._gui_input(_touch(false, Vector2(300.0, 100.0)))
+		pv._gui_input(_touch(false, Vector2(100.0, 100.0)))
+		var stable: bool = absf(z_jitter - z_direct) < 0.01 and z_direct > 1.5
+		print("  a jittery pinch lands where a clean one does: %.3f vs %.3f %s" % [
+			z_jitter, z_direct, "OK" if stable else "FAIL"])
+		pass_all = stable and pass_all
+		# Lifting one finger out of a pinch must not jump the map. The remaining finger
+		# pans from where it was last seen, and if the pinch never updated that, the whole
+		# distance it travelled during the pinch lands in one step. Finger 1 is the one
+		# that moves, so finger 1 is the one left down.
+		pv._zoom = 1.0
+		pv._gui_input(_touch(true, Vector2(100.0, 100.0)))
+		pv._gui_input(_touch2(true, Vector2(200.0, 100.0)))
+		pv._gui_input(_drag2(Vector2(260.0, 100.0), 1))   # finger 1 travels 60
+		pv._gui_input(_lift(0, Vector2(100.0, 100.0)))    # finger 0 lifts
+		var o_before := pv._origin
+		pv._gui_input(_drag2(Vector2(265.0, 100.0), 1))   # finger 1 moves 5
+		var jump := (pv._origin - o_before).length()
+		var no_jump: bool = absf(jump - 5.0) < 1.5
+		print("  lifting a pinch finger does not jump the map: %.1f px %s" % [
+			jump, "OK" if no_jump else "FAIL"])
+		pass_all = no_jump and pass_all
+		pv._gui_input(_lift(1, Vector2(265.0, 100.0)))
 	pv.free()
 	Storage.save_custom_tracks([])
 
@@ -373,4 +532,5 @@ func _interleave(corners: Array) -> Array:
 	for c in corners:
 		out.append(CustomTracks.make_straight(210.0))
 		out.append(c)
+	out.append(CustomTracks.make_finish())
 	return out

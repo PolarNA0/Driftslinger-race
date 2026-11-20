@@ -127,6 +127,7 @@ static func default_ops() -> Array:
 		{"t": "A", "deg": -90, "r": DEFAULT_RADIUS, "reattach": false},
 		{"t": "L", "len": DEFAULT_LEN},
 		{"t": "A", "deg": 90, "r": DEFAULT_RADIUS, "reattach": false},
+		make_finish(),
 	]
 
 
@@ -219,12 +220,33 @@ static func make_straight(len: float = DEFAULT_LEN) -> Dictionary:
 	return {"t": "L", "len": clampf(len, MIN_LEN, MAX_LEN)}
 
 
+# The finish line is a straight that ends the track: the car crosses its far end and
+# the run is over. It is an ordinary piece you place on the grid, because that is what
+# it is on the road - a stretch of tarmac with a line across it. Placing it also closes
+# the track, so it is always the last piece and there is exactly one.
+static func make_finish(len: float = FINISH_LEN) -> Dictionary:
+	return {"t": "F", "len": clampf(len, MIN_LEN, MAX_LEN)}
+
+
 static func make_corner(deg: int, radius: float = DEFAULT_RADIUS, reattach: bool = false) -> Dictionary:
 	return {"t": "A", "deg": deg, "r": clampf(radius, MIN_RADIUS, MAX_RADIUS), "reattach": reattach}
 
 
 static func is_corner(p: Dictionary) -> bool:
 	return str(p.get("t", "L")) == "A"
+
+
+# A finish is not a corner and not an ordinary straight: `Track.build_ops` closes the
+# road with it instead of running it as another leg.
+static func is_finish(p: Dictionary) -> bool:
+	return str(p.get("t", "L")) == "F"
+
+
+static func finish_index(ops: Array) -> int:
+	for i in range(ops.size()):
+		if is_finish(ops[i]):
+			return i
+	return -1
 
 
 static func corner_count(ops: Array) -> int:
@@ -236,6 +258,8 @@ static func corner_count(ops: Array) -> int:
 
 
 static func describe(p: Dictionary) -> String:
+	if is_finish(p):
+		return "Finish line \u00b7 %d" % int(p.get("len", FINISH_LEN))
 	if is_corner(p):
 		var deg := int(p.get("deg", 90))
 		var way := "Left" if deg > 0 else "Right"
@@ -323,8 +347,22 @@ static func validate(ops: Array) -> Dictionary:
 		return {"ok": false, "error": "Too many pieces (max %d)." % MAX_PIECES, "corners": 0, "length": 0.0}
 	var corners := 0
 	var length := LEAD_IN
-	for p in ops:
-		if is_corner(p):
+	var finish_at := -1
+	for i in range(ops.size()):
+		var p: Dictionary = ops[i]
+		if is_finish(p):
+			# The finish closes the road, so nothing may follow it: a piece after it
+			# would be drawn past the finish line and never driven.
+			if finish_at >= 0:
+				return {"ok": false, "error": "A track has one finish line.", "corners": corners, "length": length}
+			if i != ops.size() - 1:
+				return {"ok": false, "error": "The finish line goes last.", "corners": corners, "length": length}
+			finish_at = i
+			var fl := float(p.get("len", FINISH_LEN))
+			if fl < MIN_LEN or fl > MAX_LEN:
+				return {"ok": false, "error": "The finish straight must be %d-%d long." % [int(MIN_LEN), int(MAX_LEN)], "corners": corners, "length": length}
+			length += fl
+		elif is_corner(p):
 			var deg := int(p.get("deg", 0))
 			if absi(deg) not in ANGLES:
 				return {"ok": false, "error": "A corner must be 90, 180 or 270 degrees.", "corners": corners, "length": length}
@@ -338,11 +376,12 @@ static func validate(ops: Array) -> Dictionary:
 			if ln < MIN_LEN or ln > MAX_LEN:
 				return {"ok": false, "error": "A straight must be %d-%d long." % [int(MIN_LEN), int(MAX_LEN)], "corners": corners, "length": length}
 			length += ln
-	length += FINISH_LEN
 	if corners < 2:
 		return {"ok": false, "error": "A track needs at least 2 corners.", "corners": corners, "length": length}
 	if corners > MAX_CORNERS:
 		return {"ok": false, "error": "Too many corners (max %d)." % MAX_CORNERS, "corners": corners, "length": length}
+	if finish_at < 0:
+		return {"ok": false, "error": "Add a finish line to end the track.", "corners": corners, "length": length}
 	return {"ok": true, "error": "", "corners": corners, "length": length}
 
 
@@ -352,7 +391,9 @@ static func validate(ops: Array) -> Dictionary:
 static func mirror(ops: Array) -> Array:
 	var out := []
 	for p in ops:
-		if is_corner(p):
+		if is_finish(p):
+			out.append(make_finish(float(p["len"])))
+		elif is_corner(p):
 			out.append(make_corner(-int(p["deg"]), float(p["r"]), bool(p.get("reattach", false))))
 		else:
 			out.append(make_straight(float(p["len"])))
@@ -360,15 +401,23 @@ static func mirror(ops: Array) -> Array:
 
 
 # Reverse: drive the road the other way. Walk the list backwards and flip each
-# corner, which is the exact inverse of the built road.
+# corner, which is the exact inverse of the built road. The finish comes back to the
+# end, where it has to be.
 static func reverse(ops: Array) -> Array:
 	var out := []
+	var fin := 0.0
 	for i in range(ops.size() - 1, -1, -1):
 		var p: Dictionary = ops[i]
-		if is_corner(p):
+		if is_finish(p):
+			# Reversing puts the finish first, but a road ends at its finish line, so
+			# it is held back and appended last instead of being emitted here.
+			fin = float(p["len"])
+		elif is_corner(p):
 			out.append(make_corner(-int(p["deg"]), float(p["r"]), bool(p.get("reattach", false))))
 		else:
 			out.append(make_straight(float(p["len"])))
+	if fin > 0.0:
+		out.append(make_finish(fin))
 	return out
 
 
@@ -381,10 +430,21 @@ static func opts(ops: Array, entry: Variant = null) -> Dictionary:
 		"corners": corner_count(ops),
 		"radius": DEFAULT_RADIUS,
 		"lead_in": LEAD_IN,
-		"finish_len": FINISH_LEN,
+		# The finish piece is the closing straight, so its own length is what the
+		# builder uses; FINISH_LEN is only the default a new piece starts at.
+		"finish_len": finish_len_of(ops),
 		"ops": ops.duplicate(true),
 		"theme": theme_of(entry),
 	}
+
+
+# The length of the track's finish straight, or the default when it has none (an
+# old saved track, which `validate` will report as unfinished).
+static func finish_len_of(ops: Array) -> float:
+	var i := finish_index(ops)
+	if i < 0:
+		return FINISH_LEN
+	return float((ops[i] as Dictionary).get("len", FINISH_LEN))
 
 
 # opts for a stored track id, or an empty dictionary if it is gone.

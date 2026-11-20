@@ -34,9 +34,12 @@ var _drag_moved := 0.0
 # on, which it is not (and the web build never emits it), so relying on it alone left
 # pinch dead everywhere. Touch events are always delivered, so they drive it.
 var _touches := {}              # touch index -> current position
+var _last_pos := {}             # touch index -> position at the previous drag event
 var _pinch_dist := 0.0
 var _pinching := false
-var _pinch_anchor := Vector2.ZERO
+var _pinch_zoom := 1.0          # zoom when the pinch began
+var _pinch_mid := Vector2.ZERO  # midpoint when the pinch began
+var _pinch_world := Vector2.ZERO  # world point under that midpoint
 
 # Placement mode. While a palette piece is armed, a tap on the grid appends that piece
 # and reports the grid cell it landed on, instead of picking an existing piece.
@@ -56,6 +59,9 @@ const WHEEL_STEP := 1.15
 # a cell rather than an arbitrary point.
 const CELL := 80.0
 const TAP_SLOP := 10.0
+# Pan gain. One finger of travel moves the map one design pixel, which is what the
+# finger appears to grab; the map is not a slider and does not need a multiplier.
+const PAN_GAIN := 1.0
 
 
 func _ready() -> void:
@@ -88,7 +94,11 @@ func _collect() -> void:
         for i in range(ops.size()):
                 var p: Dictionary = ops[i]
                 var ln := 0.0
-                if CustomTracks.is_corner(p):
+                if CustomTracks.is_finish(p):
+                        # The finish piece is the closing straight: its span runs to the
+                        # finish line, which is where the builder put it.
+                        ln = maxf(0.0, _finish_s - s)
+                elif CustomTracks.is_corner(p):
                         ln = float(p["r"]) * absf(deg_to_rad(float(p["deg"])))
                         var f: Dictionary = _track.fillets[_poles.size()]
                         _poles.append({"op": i, "x": f["c"].x, "y": f["c"].y})
@@ -236,21 +246,24 @@ func _gui_input(event: InputEvent) -> void:
 func _on_touch(st: InputEventScreenTouch) -> void:
         if st.pressed:
                 _touches[st.index] = st.position
+                _last_pos[st.index] = st.position
                 if _touches.size() == 1:
                         _dragging = true
                         _drag_moved = 0.0
                 elif _touches.size() == 2:
-                        # A second finger cancels any pan and any pending tap: this is a
-                        # pinch, not a drag and not a click. The anchor is fixed here,
-                        # when both fingers are down, because the midpoint computed from
-                        # one-finger-at-a-time updates jitters as each finger moves.
+                        # A second finger turns this into a pinch: no pan, no tap. The
+                        # gesture is measured from the state at this moment and never
+                        # accumulated, so a wobble cannot drift the map.
                         _pinching = true
                         _dragging = false
                         _pinch_dist = _touch_span()
-                        _pinch_anchor = _touch_mid()
+                        _pinch_zoom = _zoom
+                        _pinch_mid = _touch_mid()
+                        _pinch_world = screen_to_world(_pinch_mid)
         else:
                 var was_alone := _touches.size() == 1
                 _touches.erase(st.index)
+                _last_pos.erase(st.index)
                 if _touches.size() < 2:
                         _pinching = false
                         _pinch_dist = 0.0
@@ -265,19 +278,41 @@ func _on_touch(st: InputEventScreenTouch) -> void:
                         _drag_moved = TAP_SLOP
 
 
+# Pan is measured from the finger's own position, not from the event's `relative`.
+# `relative` is scaled by whatever transform the platform applied to the event, and a
+# build that scales `position` but not `relative` (or that delivers a drag twice) pans
+# at a multiple of the finger's travel - the "WAY too sensitive" map. `position` is the
+# field tap picking already trusts, so a pan derived from it moves exactly as far as
+# the finger did, on every platform.
 func _on_touch_drag(sd: InputEventScreenDrag) -> void:
         if not _touches.has(sd.index):
                 return
         _touches[sd.index] = sd.position
         if _pinching and _touches.size() >= 2:
-                var d := _touch_span()
-                if _pinch_dist > 1.0 and d > 1.0:
-                        _zoom_at(_pinch_anchor, d / _pinch_dist)
-                _pinch_dist = d
+                var span := _touch_span()
+                if _pinch_dist > 1.0 and span > 1.0:
+                        # Absolute from the gesture's start: zoom = start * span ratio.
+                        # Accumulating per-event ratios compounds rounding and makes the
+                        # map twitch as the fingers wobble.
+                        _zoom = clampf(_pinch_zoom * (span / _pinch_dist), MIN_ZOOM, MAX_ZOOM)
+                        # Keep the world point that was under the midpoint under the
+                        # midpoint, wherever the fingers have moved to.
+                        var mid := _touch_mid()
+                        _origin = mid - _pinch_world * _zoom
+                        queue_redraw()
+                # Track the fingers through the pinch too. Lifting one of them leaves the
+                # other panning, and it pans from `_last_pos`; a stale entry there is the
+                # whole distance the finger travelled during the pinch, which lands as a
+                # jump the instant the second finger comes up.
+                for k in _touches.keys():
+                        _last_pos[k] = _touches[k]
                 return
         if _touches.size() == 1:
-                _drag_moved += sd.relative.length()
-                pan_by(sd.relative)
+                var last: Vector2 = _last_pos.get(sd.index, sd.position)
+                var delta := sd.position - last
+                _drag_moved += delta.length()
+                pan_by(delta * PAN_GAIN)
+        _last_pos[sd.index] = sd.position
 
 
 # Distance between the first two fingers, in screen pixels.
@@ -322,6 +357,27 @@ func op_end_world() -> Vector2:
         if _road.size() < 2:
                 return Vector2.ZERO
         return _road[_road.size() - 1]
+
+
+# Where a piece appended after the first `count` pieces would start. A piece goes in
+# front of the finish line, so the growth point is the end of the piece before it, not
+# the end of the road.
+func growth_point(count: int) -> Vector2:
+        if _track == null or count <= 0:
+                return _start_world()
+        var s := CustomTracks.LEAD_IN
+        for i in range(mini(count, _spans.size())):
+                s = float(_spans[i]["s1"])
+        var p := _track.point_at(s)
+        return Vector2(float(p["x"]), float(p["y"]))
+
+
+# The start of the road, where the first piece grows from.
+func _start_world() -> Vector2:
+        if _track == null:
+                return Vector2.ZERO
+        var p := _track.point_at(CustomTracks.LEAD_IN)
+        return Vector2(float(p["x"]), float(p["y"]))
 
 
 # The grid line nearest a screen point, snapped in world space so it lines up with the
@@ -373,7 +429,7 @@ func _draw() -> void:
 
         _draw_pieces(colors)
         _mark(0.0, Color8(90, 226, 120))
-        _mark(_finish_s, Color8(244, 244, 244))
+        _finish_bar()
 
 
 func _entry() -> Dictionary:
@@ -429,3 +485,43 @@ func _mark(s: float, c: Color) -> void:
                 return
         var p := _track.point_at(s)
         draw_circle(world_to_screen(Vector2(float(p["x"]), float(p["y"]))), clampf(6.0 * _zoom, 3.0, 9.0), c)
+
+
+# The finish line: a chequered bar across the road, which is what the player drives
+# over. Two rows of alternating squares read as a finish line at any zoom.
+func _finish_bar() -> void:
+        if _track == null or _road.size() < 2:
+                return
+        var p := _track.point_at(_finish_s)
+        var at := Vector2(float(p["x"]), float(p["y"]))
+        var n := _road_normal(_finish_s) * Cfg.ROAD_HALF_WIDTH
+        var a := world_to_screen(at - n)
+        var b := world_to_screen(at + n)
+        var d := b - a
+        var l := d.length()
+        if l < 1.0:
+                return
+        var u := d / l
+        var v := Vector2(-u.y, u.x)
+        var cells := 8
+        var step := l / float(cells)
+        var depth := clampf(Cfg.ROAD_HALF_WIDTH * _zoom * 0.45, 3.0, 14.0)
+        for row in range(2):
+                for i in range(cells):
+                        var col := Color8(250, 250, 250) if (i + row) % 2 == 0 else Color8(26, 26, 26)
+                        var o := a + u * (step * float(i)) + v * (depth * float(row))
+                        draw_colored_polygon(PackedVector2Array([
+                                o, o + u * step, o + u * step + v * depth, o + v * depth]), col)
+
+
+# The road's unit normal at a road distance, for drawing across the ribbon.
+func _road_normal(s: float) -> Vector2:
+        if _track == null:
+                return Vector2.UP
+        var a := _track.point_at(maxf(0.0, s - 4.0))
+        var b := _track.point_at(minf(_track.length, s + 4.0))
+        var d := Vector2(float(b["x"]) - float(a["x"]), float(b["y"]) - float(a["y"]))
+        if d.length() < 0.001:
+                return Vector2.UP
+        d = d.normalized()
+        return Vector2(-d.y, d.x)

@@ -86,6 +86,12 @@ func build_ops() -> void:
 	push_line(cur, b, lead_in)
 	cur = b
 	for op in ops:
+		if op["t"] == "F":
+			# The finish piece *is* the closing straight: run it as one and put the
+			# finish line at its end, exactly as `build_finish` does for a staircase
+			# track. Anything after it is not built (validate rejects it anyway).
+			finish_len = float(op.get("len", finish_len))
+			break
 		if op["t"] == "A":
 			var th := deg_to_rad(float(op["deg"]))
 			var s: float = sign(th)
@@ -137,10 +143,16 @@ func _assert_straight(len: float, vertex: int) -> void:
 # Close a finite track: a straight on from the last corner's exit, with the
 # finish line at its end.
 func build_finish(heading_override: Variant = null) -> void:
-	var last: Dictionary = fillets[fillets.size() - 1]
-	var a2: float = last["a2"]
-	var last_sign: float = last["sign"]
-	var h := atan2(last_sign * cos(a2), last_sign * -sin(a2)) if heading_override == null else float(heading_override)
+	# A finish-only track (a straight and a line) has no corner to take the exit
+	# heading from, so it runs on along the heading it already has.
+	var h := heading
+	if not fillets.is_empty():
+		var last: Dictionary = fillets[fillets.size() - 1]
+		var a2: float = last["a2"]
+		var last_sign: float = last["sign"]
+		h = atan2(last_sign * cos(a2), last_sign * -sin(a2)) if heading_override == null else float(heading_override)
+	elif heading_override != null:
+		h = float(heading_override)
 	var a := cur
 	var len := finish_len
 	if not is_nan(target_time):

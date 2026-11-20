@@ -470,6 +470,18 @@ lines and comparing every fillet.
   instead of pushing the column past the viewport. `tools/verify_ui.gd` builds
   the real menu at phone and desktop sizes and fails if any control's
   `get_global_rect()` leaves the viewport - run it after any menu change.
+- **The editor's live slider callback must not emit `changed`.** `_apply_live`
+  repaints the map and the status line; it deliberately does *not* emit
+  `changed`. That signal's listener rebuilds the menu's custom-track list - up
+  to 100 buttons, each re-validated - and `value_changed` fires on every slider
+  step, so emitting there rebuilt the whole list every frame while a length
+  slider was dragged. On a phone that read as the editor seizing. Nothing the
+  list shows (the name, the corner count) changes during a length drag, so the
+  list is refreshed when the drag ends (`HSlider.drag_ended` emits `changed`)
+  and on `_commit`. `verify_editor.gd` asserts 10 live slider values cause 0
+  list rebuilds.
+
+
 ## The menu is a tabbed app shell
 
 The menu is not a card floating over the road. `godot/scripts/menu_shell.gd`
@@ -635,13 +647,32 @@ like a shipped one.
   `_touches` and derives the pinch itself: one finger pans, two fingers zoom by the
   ratio of their span. Two rules make it behave: while a second finger is down the
   map **never pans** (otherwise a pinch drags the map sideways), and a release
-  never taps unless that finger was alone and barely moved. The anchor is captured
-  once, when the second finger lands (`_pinch_anchor`), because a midpoint
-  recomputed from one-finger-at-a-time updates jitters and the zoom then drifts
-  sideways - `verify_ui.gd` asserts the world point under the fingers stays put.
+  never taps unless that finger was alone and barely moved. The gesture is captured
+  once, when the second finger lands (`_pinch_zoom`, `_pinch_mid`, `_pinch_world`),
+  and every drag recomputes the zoom absolutely from that start - `zoom =
+  _pinch_zoom * span / _pinch_dist` - then puts `_pinch_world` back under the
+  midpoint. Accumulating a ratio per event compounds rounding and makes the map
+  twitch as the fingers wobble; `verify_editor.gd` asserts a jittery pinch lands on
+  the same zoom as a clean one.
   `enable_pan_and_scale_gestures` is deliberately left off: turning it on would
   make Godot emit the gesture *and* keep sending the touches, so the zoom would be
   applied twice.
+- **Pan is measured from the finger's `position`, never from the drag's
+  `relative`.** `relative` is scaled by whatever transform the platform applies to
+  the event, so a build that scales `position` but not `relative` - or that
+  delivers a drag twice - pans at a multiple of the finger's travel. That is the
+  "pan is WAY too sensitive" report, and it is invisible in a headless run, where
+  the scale is 1.0. `position` is the field tap picking already trusts, so a pan
+  derived from it moves exactly as far as the finger did on every platform. The
+  delta is taken against `_last_pos`, a per-finger record of the previous position
+  (`PAN_GAIN` is 1.0; the map is not a slider and needs no multiplier).
+  `verify_editor.gd` asserts a 30px drag moves the camera 30px, not 60, and that a
+  drag whose `relative` disagrees with its `position` follows `position`.
+- **`_last_pos` must be updated on the pinch path too.** Lifting one finger leaves
+  the other panning from `_last_pos`, so if the pinch never recorded where the
+  fingers had got to, the whole distance they travelled during the pinch lands in
+  one step the instant the second finger comes up - a 65px jump in the test. The
+  pinch branch writes `_last_pos` for every finger before returning.
 - **`verify_ui.gd` guards the fit.** It presses New track, asserts every palette
   button and every pinned button (header + camera row) is inside the viewport,
   drives every palette piece through a grid tap and checks the right op was

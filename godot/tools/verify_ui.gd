@@ -260,8 +260,9 @@ func _check_size(vp: Vector2i) -> void:
 
 		# The core interaction: arm a piece, tap the grid, and the piece is added. Every
 		# palette entry is exercised, because a dead button is silent.
-		for key in ["straight", "90", "180", "270", "pillar", "reattach"]:
+		for key in ["straight", "90", "180", "270", "pillar", "reattach", "finish"]:
 			var before: int = app.editor.ops.size()
+			var had_finish := CustomTracks.finish_index(app.editor.ops) >= 0
 			app.editor._arm(key)
 			if app.editor._armed != key:
 				_fail("editor: arming '%s' did not stick" % key)
@@ -270,19 +271,42 @@ func _check_size(vp: Vector2i) -> void:
 			# `preview.armed`, so the palette was inert and a real tap did nothing.
 			_tap_cell(app.editor.preview, Vector2i(3, 2))
 			await process_frame
-			if app.editor.ops.size() != before + 1:
-				_fail("editor: tapping the grid with '%s' armed added no piece" % key)
+			# The finish closes the track, so re-placing it moves the existing one rather
+			# than adding a second; every other piece adds one in front of it.
+			var want := before
+			if key != "finish" or not had_finish:
+				want = before + 1
+			if app.editor.ops.size() != want:
+				_fail("editor: tapping the grid with '%s' armed gave %d pieces, want %d"
+					% [key, app.editor.ops.size(), want])
 			else:
-				var added: Dictionary = app.editor.ops[app.editor.ops.size() - 1]
-				if key == "straight" and CustomTracks.is_corner(added):
+				# The added piece is the one before the finish, not the last element,
+				# because the finish always closes the road.
+				var idx: int = app.editor.ops.size() - 1
+				if key != "finish" and CustomTracks.finish_index(app.editor.ops) >= 0:
+					idx = CustomTracks.finish_index(app.editor.ops) - 1
+				var added: Dictionary = app.editor.ops[idx]
+				if key == "finish":
+					if not CustomTracks.is_finish(added):
+						_fail("editor: the finish palette did not add a finish")
+				elif key == "straight" and CustomTracks.is_corner(added):
 					_fail("editor: the straight palette added a corner")
-				if key == "reattach" and not bool(added.get("reattach", false)):
+				elif key == "reattach" and not bool(added.get("reattach", false)):
 					_fail("editor: the reattach palette added a normal pillar")
-				if key == "pillar" and bool(added.get("reattach", false)):
+				elif key == "pillar" and bool(added.get("reattach", false)):
 					_fail("editor: the pillar palette added a reattach pillar")
-				if key != "straight" and not CustomTracks.is_corner(added):
+				elif key != "straight" and not CustomTracks.is_corner(added):
 					_fail("editor: the '%s' palette added a straight" % key)
 			app.editor._arm(key)
+		# Exactly one finish, ever, and it is last: that is what makes the road finite.
+		var fins := 0
+		for p in app.editor.ops:
+			if CustomTracks.is_finish(p):
+				fins += 1
+		if fins != 1:
+			_fail("editor: %d finish lines, want exactly 1" % fins)
+		elif not CustomTracks.is_finish(app.editor.ops[app.editor.ops.size() - 1]):
+			_fail("editor: the finish line is not last")
 		# Tapping an armed piece again puts the palette down.
 		app.editor._arm("90")
 		app.editor._arm("90")
@@ -555,6 +579,9 @@ func _label_of(b: Button) -> String:
 	for c in b.get_children():
 		if c is Label:
 			return (c as Label).text
+	# A picture tile has no text at all: its tooltip is the only name it carries.
+	if b.tooltip_text != "":
+		return b.tooltip_text
 	return b.name
 
 
