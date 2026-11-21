@@ -54,3 +54,8 @@ $$;
 
 revoke execute on function public.set_tracker_config(text, text, text, text, text) from public, anon;
 grant  execute on function public.set_tracker_config(text, text, text, text, text) to authenticated;
+
+-- PostgREST caches the table shape and the function signature. Without this it
+-- keeps serving the old three-argument RPC and rejects a select of the new
+-- columns until the next restart.
+notify pgrst, 'reload schema';
