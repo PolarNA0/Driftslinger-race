@@ -88,7 +88,7 @@ func _ready() -> void:
 	visible = false
 
 	var bg := ColorRect.new()
-	bg.color = Color(0.03, 0.04, 0.08, 0.98)
+	bg.color = UiTheme.BG
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(bg)
 
@@ -141,7 +141,7 @@ func _build_header(col: VBoxContainer) -> void:
 	var back := Button.new()
 	back.theme_type_variation = "IconButton"
 	back.focus_mode = Control.FOCUS_NONE
-	back.custom_minimum_size = Vector2(40, 40)
+	back.custom_minimum_size = Vector2(44, 44)
 	back.pressed.connect(_on_close)
 	_icon_into(back, "back", UiTheme.INK_DIM)
 	row.add_child(back)
@@ -162,7 +162,7 @@ func _build_header(col: VBoxContainer) -> void:
 	undo_button = Button.new()
 	undo_button.theme_type_variation = "IconButton"
 	undo_button.focus_mode = Control.FOCUS_NONE
-	undo_button.custom_minimum_size = Vector2(40, 40)
+	undo_button.custom_minimum_size = Vector2(44, 44)
 	undo_button.tooltip_text = "Undo"
 	undo_button.pressed.connect(_undo_last)
 	_icon_into(undo_button, "undo", UiTheme.INK_DIM)
@@ -171,7 +171,7 @@ func _build_header(col: VBoxContainer) -> void:
 	var look := Button.new()
 	look.theme_type_variation = "IconButton"
 	look.focus_mode = Control.FOCUS_NONE
-	look.custom_minimum_size = Vector2(40, 40)
+	look.custom_minimum_size = Vector2(44, 44)
 	look.tooltip_text = "Colours"
 	look.pressed.connect(func(): _open_look())
 	_icon_into(look, "settings", UiTheme.INK_DIM)
@@ -181,7 +181,7 @@ func _build_header(col: VBoxContainer) -> void:
 	play_button.theme_type_variation = "PrimaryButton"
 	play_button.text = "Play"
 	play_button.focus_mode = Control.FOCUS_NONE
-	play_button.custom_minimum_size = Vector2(80, 40)
+	play_button.custom_minimum_size = Vector2(88, 44)
 	play_button.pressed.connect(func(): play_requested.emit())
 	row.add_child(play_button)
 

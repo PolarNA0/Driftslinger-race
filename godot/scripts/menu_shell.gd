@@ -15,7 +15,7 @@ class_name MenuShell
 signal tab_changed(name: String)
 signal settings_pressed()
 
-const TAB_BAR_H := 62.0
+const TAB_BAR_H := 64.0
 const TOP_BAR_H := 56.0
 
 var top_bar: PanelContainer
@@ -71,7 +71,7 @@ func _build_top() -> void:
 
 	var margin := MarginContainer.new()
 	for side in ["left", "right"]:
-		margin.add_theme_constant_override("margin_" + side, 14)
+		margin.add_theme_constant_override("margin_" + side, 16)
 	top_bar.add_child(margin)
 
 	var row := HBoxContainer.new()
@@ -88,12 +88,14 @@ func _build_top() -> void:
 	titles.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(titles)
 	_title = Label.new()
-	_title.add_theme_font_size_override("font_size", 19)
+	_title.add_theme_font_size_override("font_size", 22)
+	_title.add_theme_font_override("font", UiTheme.font_weight(700))
 	_title.add_theme_color_override("font_color", UiTheme.INK)
 	titles.add_child(_title)
 	_subtitle = Label.new()
-	_subtitle.add_theme_font_size_override("font_size", 12)
+	_subtitle.add_theme_font_size_override("font_size", 11)
 	_subtitle.add_theme_color_override("font_color", UiTheme.INK_MUTE)
+	_subtitle.add_theme_font_override("font", UiTheme.font_weight(400))
 	titles.add_child(_subtitle)
 
 	_top_right = HBoxContainer.new()
@@ -135,7 +137,7 @@ func _build_tab_bar() -> void:
 	tab_bar.add_child(margin)
 
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 4)
+	row.add_theme_constant_override("separation", 2)
 	margin.add_child(row)
 
 	# Garage on the left, Play in the middle, Account on the right - the order a
@@ -157,7 +159,7 @@ func _tab_button(icon_kind: String, label: String, cb: Callable) -> Button:
 	b.custom_minimum_size = Vector2(0, TAB_BAR_H - 12)
 	b.pressed.connect(cb)
 	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 2)
+	box.add_theme_constant_override("separation", 1)
 	box.alignment = BoxContainer.ALIGNMENT_CENTER
 	box.set_anchors_preset(Control.PRESET_FULL_RECT)
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -172,8 +174,9 @@ func _tab_button(icon_kind: String, label: String, cb: Callable) -> Button:
 	box.add_child(ic)
 	var l := Label.new()
 	l.text = label
-	l.add_theme_font_size_override("font_size", 12)
+	l.add_theme_font_size_override("font_size", 11)
 	l.add_theme_color_override("font_color", UiTheme.TAB_IDLE)
+	l.add_theme_font_override("font", UiTheme.font_weight(600))
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	box.add_child(l)
@@ -189,17 +192,17 @@ func icon_button(icon_kind: String, cb: Callable) -> Button:
 	var b := Button.new()
 	b.theme_type_variation = "IconButton"
 	b.focus_mode = Control.FOCUS_NONE
-	b.custom_minimum_size = Vector2(40, 40)
+	b.custom_minimum_size = Vector2(44, 44)
 	b.pressed.connect(cb)
 	var ic := UiIcon.new()
 	ic.kind = icon_kind
 	ic.color = UiTheme.INK_DIM
 	ic.thickness = 2.0
 	ic.set_anchors_preset(Control.PRESET_FULL_RECT)
-	ic.offset_left = 9
-	ic.offset_right = -9
-	ic.offset_top = 9
-	ic.offset_bottom = -9
+	ic.offset_left = 11
+	ic.offset_right = -11
+	ic.offset_top = 11
+	ic.offset_bottom = -11
 	ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	b.add_child(ic)
 	return b

@@ -61,6 +61,13 @@ var ghost_car: Car = null
 var ghost_steps: Variant = null
 var ghost_index := 0
 
+# Reference curves for the HUD's live pace delta. Each curve is built once from a
+# real replay: `pace_s` maps road position -> time, `pace_t` maps elapsed time ->
+# metres. The delta is measured at the same road position (speedrun) or the same
+# time (endless), so it starts at zero instead of counting down from the record.
+var pace_s := {}
+var pace_t := {}
+
 
 func _ready() -> void:
 	renderer = Renderer2D.new()
@@ -132,6 +139,87 @@ func clear_ghost() -> void:
 	if renderer != null:
 		renderer.ghost_car = null
 		renderer.ghost_visible = false
+
+
+# Build a reference curve from a recorded button sequence. `name` is "pb" or
+# "wr"; an empty or invalid replay clears that curve. This is a replay, not a
+# second live car: it costs one simulation at run start and gives an exact
+# time-at-position lookup for the HUD.
+func set_pace(name: String, p_seed: int, steps_text: String) -> void:
+	clear_pace(name)
+	if steps_text == "":
+		return
+	var opts := _opts_for(p_seed)
+	var t := Track.new(p_seed, opts) if not opts.is_empty() else Track.new(p_seed)
+	var c := Car.new()
+	c.reset(t)
+	var steps := Replay.decode_steps(steps_text)
+	var s_pts: Array = []
+	var t_pts: Array = []
+	for i in range(mini(steps.size(), 7200)):
+		c.step(FIXED_DT, bool(steps[i]))
+		s_pts.append(Vector2(c.s, c.time))
+		t_pts.append(Vector2(c.time, c.distance() / Cfg.PX_PER_METRE))
+		if c.finished or not c.alive:
+			break
+	if not c.finished or s_pts.is_empty():
+		return
+	pace_s[name] = s_pts
+	pace_t[name] = t_pts
+
+
+func clear_pace(name: String) -> void:
+	pace_s.erase(name)
+	pace_t.erase(name)
+
+
+func clear_paces() -> void:
+	pace_s.clear()
+	pace_t.clear()
+
+
+# The reference time at the player's current road position. Returns null when
+# there is no usable replay for this mark, so the HUD hides the chip instead of
+# falling back to a final-time countdown.
+func pace_time_at(name: String, s: float) -> Variant:
+	if not pace_s.has(name):
+		return null
+	var pts: Array = pace_s[name]
+	if pts.is_empty():
+		return null
+	if s <= 0.0:
+		return 0.0
+	if s <= (pts[0] as Vector2).x:
+		return (pts[0] as Vector2).y
+	for i in range(1, pts.size()):
+		var b: Vector2 = pts[i]
+		if b.x >= s:
+			var a: Vector2 = pts[i - 1]
+			var span := b.x - a.x
+			var f := (s - a.x) / span if span > 0.0001 else 0.0
+			return lerpf(a.y, b.y, f)
+	return (pts[pts.size() - 1] as Vector2).y
+
+
+# The reference distance at the player's elapsed time, for the endless HUD.
+func pace_distance_at(name: String, elapsed: float) -> Variant:
+	if not pace_t.has(name):
+		return null
+	var pts: Array = pace_t[name]
+	if pts.is_empty():
+		return null
+	if elapsed <= 0.0:
+		return 0.0
+	if elapsed <= (pts[0] as Vector2).x:
+		return (pts[0] as Vector2).y
+	for i in range(1, pts.size()):
+		var b: Vector2 = pts[i]
+		if b.x >= elapsed:
+			var a: Vector2 = pts[i - 1]
+			var span := b.x - a.x
+			var f := (elapsed - a.x) / span if span > 0.0001 else 0.0
+			return lerpf(a.y, b.y, f)
+	return (pts[pts.size() - 1] as Vector2).y
 
 
 # The opts for a seed: the player's own track when App can supply one, otherwise the

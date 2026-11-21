@@ -528,7 +528,7 @@ func _init() -> void:
 	var grid_ok := true
 	for preset in CustomTracks.THEME_PRESETS:
 		var g := Color(str(preset["ground"]))
-		var line := Color(0.0, 0.0, 0.0, 0.22) if g.get_luminance() > 0.45 else Color(UiTheme.INK, 0.16)
+		var line := Color(0.0, 0.0, 0.0, 0.22) if g.get_luminance() > 0.45 else Color(UiTheme.HUD_INK, 0.20)
 		var over := g.lerp(line, line.a)
 		var delta: float = absf(over.get_luminance() - g.get_luminance())
 		if delta < 0.05:

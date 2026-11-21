@@ -22,6 +22,7 @@ var tab_cols := []                   # the scroll columns inside tab pages, for 
 var mode_bar: HBoxContainer
 var play_track_label: Label
 var play_best_label: Label
+var play_cta_label: Label
 var medals_label: Label
 var track_section: VBoxContainer     # the track chooser, hidden in endless
 var car_preview: TextureRect
@@ -80,7 +81,6 @@ var hud_dist: Label
 var hud_sub: Label
 var hud_pb_delta: Label
 var hud_wr_delta: Label
-var hud_progress: ProgressBar
 var hint_label: Label
 var run_pb_time: Variant = null
 var run_pb_dist: Variant = null
@@ -93,6 +93,7 @@ var watch_label: Label
 
 var overlays := {}             # name -> Control (full-rect root)
 var overlay_cards := []        # the card columns, so a resize can re-widen them
+var overlay_panels := []       # the sheet panels, so a resize can centre them
 var mode_buttons := {}         # "speedrun"/"endless" -> Button
 var ghost_buttons := {}        # "off"/"self" -> Button
 var track_buttons := []        # one per track, in order
@@ -268,6 +269,7 @@ func _capture_after(secs: float) -> void:
 func _label(text: String, size: int) -> Label:
 	var l := Label.new()
 	l.text = text
+	l.add_theme_font_override("font", UiTheme.font_for_size(size))
 	l.add_theme_font_size_override("font_size", size)
 	return l
 
@@ -286,7 +288,7 @@ func _button(text: String, cb: Callable) -> Button:
 	return b
 
 
-# A primary action (Play, Try again): drawn in the warm accent, so the thing a
+# A primary action (Race, Try again): drawn in the signal accent, so the thing a
 # player most likely wants is the thing that stands out.
 func _primary_button(text: String, cb: Callable) -> Button:
 	var b := _button(text, cb)
@@ -348,7 +350,7 @@ func _col(sep: int = 10) -> VBoxContainer:
 # scrolls instead of running its bottom controls off the display where they cannot
 # be pressed. That was the bug with the old menu: the card wanted 851px on an
 # 820px-tall viewport and the account buttons below the fold were unreachable.
-func _new_overlay(name: String, title: String = "") -> VBoxContainer:
+func _new_overlay(name: String, title: String = "", height_frac: float = 0.82) -> VBoxContainer:
 	var root := Control.new()
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.visible = false
@@ -360,29 +362,51 @@ func _new_overlay(name: String, title: String = "") -> VBoxContainer:
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.add_child(bg)
 
+	# A bottom sheet, not a floating dialog: it is reachable with a thumb, has a
+	# drag handle, and scrolls internally when the content is tall.
+	var panel := PanelContainer.new()
+	panel.theme_type_variation = "Sheet"
+	panel.anchor_left = 0.0
+	panel.anchor_right = 1.0
+	panel.anchor_top = 1.0 - height_frac
+	panel.anchor_bottom = 1.0
+	panel.offset_left = 12
+	panel.offset_right = -12
+	panel.offset_top = 0
+	panel.offset_bottom = 0
+	root.add_child(panel)
+	overlay_panels.append(panel)
+
+	var margin := MarginContainer.new()
+	for side in ["left", "right", "top", "bottom"]:
+		margin.add_theme_constant_override("margin_" + side, 18)
+	panel.add_child(margin)
+
+	var outer := _col(10)
+	margin.add_child(outer)
+	var handle := ColorRect.new()
+	handle.color = UiTheme.SURFACE_EDGE
+	handle.custom_minimum_size = Vector2(36, 4)
+	handle.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	handle.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	outer.add_child(handle)
+
 	var scroll := ScrollContainer.new()
-	scroll.set_anchors_preset(Control.PRESET_FULL_RECT)
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	# When the Android keyboard raises it shrinks the viewport, and without this the
 	# focused LineEdit stays where it was and ends up behind the keyboard - which
 	# reads as "the keyboard does not show up". See "The on-screen keyboard".
 	scroll.follow_focus = true
-	root.add_child(scroll)
+	outer.add_child(scroll)
 
-	var centre := CenterContainer.new()
-	centre.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	centre.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.add_child(centre)
-
-	var panel := PanelContainer.new()
-	centre.add_child(panel)
-	var margin := MarginContainer.new()
-	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 16)
-	panel.add_child(margin)
+	var inner := MarginContainer.new()
+	inner.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(inner)
 	var col := _col(10)
-	col.custom_minimum_size = Vector2(320, 0)
-	margin.add_child(col)
+	col.custom_minimum_size = Vector2(280, 0)
+	inner.add_child(col)
 	overlay_cards.append(col)
 	if title != "":
 		col.add_child(_card_title(title))
@@ -396,12 +420,16 @@ func _new_overlay(name: String, title: String = "") -> VBoxContainer:
 func _layout_cards() -> void:
 	var vw := get_viewport_rect().size.x
 	# Modal cards keep a phone-ish width so a dialog reads as a dialog.
-	var w := clampf(vw * 0.46, 320.0, 520.0)
+	var w := clampf(vw * 0.46, 280.0, 520.0)
 	for c in overlay_cards:
 		c.custom_minimum_size = Vector2(w, 0)
+	for p in overlay_panels:
+		var left := maxf(12.0, (vw - w) * 0.5)
+		p.offset_left = left
+		p.offset_right = -left
 	# Tab content is a full-width column on a phone and a capped centred column on a
 	# desktop, so a wide window does not stretch controls edge to edge.
-	var tw := clampf(vw - 28.0, 320.0, 720.0)
+	var tw := clampf(vw - 28.0, 280.0, 720.0)
 	for c in tab_cols:
 		c.custom_minimum_size = Vector2(tw, 0)
 
@@ -512,7 +540,8 @@ func _close_dialog() -> void:
 # Accent-colour a heading label (used for the cards whose heading text changes at
 # runtime: the account card and the run-end tags).
 func _style_title(l: Label) -> Label:
-	l.add_theme_color_override("font_color", UiTheme.ACCENT)
+	l.add_theme_color_override("font_color", UiTheme.INK)
+	l.add_theme_font_override("font", UiTheme.font_weight(700))
 	l.custom_minimum_size = Vector2(0, 36)
 	return l
 
@@ -557,45 +586,55 @@ func _player_name() -> String:
 # HUD
 # =============================================================================
 
+func _hud_shadow(l: Label, strength: int = 3) -> void:
+	l.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.55))
+	l.add_theme_constant_override("shadow_offset_x", 0)
+	l.add_theme_constant_override("shadow_offset_y", 1)
+	l.add_theme_constant_override("shadow_outline_size", strength)
+
+
 func _hud_mark(text: String) -> Label:
-	var l := _label(text, 14)
-	l.add_theme_color_override("font_color", UiTheme.INK_DIM)
-	l.add_theme_constant_override("outline_size", 5)
-	l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
+	var l := _label(text, 12)
+	l.add_theme_font_override("font", UiTheme.font_weight(600))
+	l.add_theme_color_override("font_color", UiTheme.HUD_DIM)
+	_hud_shadow(l)
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return l
 
 
 func _build_hud() -> void:
-	var top := _col(2)
+	var top := _col(1)
 	top.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	top.offset_left = 18
-	top.offset_right = -96
-	top.offset_top = 14
+	top.offset_left = 20
+	top.offset_right = -92
+	top.offset_top = 16
 	top.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui_root.add_child(top)
 
-	hud_mode = _label("SPEEDRUN", 13)
-	hud_mode.add_theme_color_override("font_color", UiTheme.ACCENT)
-	hud_mode.add_theme_constant_override("outline_size", 5)
-	hud_mode.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.65))
+	hud_mode = _label("SPEEDRUN", 10)
+	hud_mode.add_theme_font_override("font", UiTheme.font_weight(600))
+	hud_mode.add_theme_color_override("font_color", UiTheme.HUD_DIM)
+	_hud_shadow(hud_mode)
 	hud_mode.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top.add_child(hud_mode)
 
-	hud_dist = _label("0.000s", 44)
+	hud_dist = _label("0.000s", 32)
+	hud_dist.add_theme_font_override("font", UiTheme.font_weight(700))
+	hud_dist.add_theme_color_override("font_color", UiTheme.HUD_INK)
+	_hud_shadow(hud_dist, 4)
 	hud_dist.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud_dist.add_theme_constant_override("outline_size", 6)
-	hud_dist.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.65))
 	top.add_child(hud_dist)
 
-	hud_sub = _label("best --", 20)
-	hud_sub.add_theme_color_override("font_color", Color(1, 1, 1, 0.82))
-	hud_sub.add_theme_constant_override("outline_size", 5)
-	hud_sub.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
+	hud_sub = _label("best --", 12)
+	hud_sub.add_theme_color_override("font_color", UiTheme.HUD_DIM)
+	_hud_shadow(hud_sub)
 	hud_sub.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top.add_child(hud_sub)
 
-	var marks := _row(12)
+	# The deltas are a live comparison, not a second score, so they sit directly
+	# under the clock as one small cluster instead of a dashboard row.
+	var marks := _row(10)
+	marks.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	marks.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top.add_child(marks)
 	hud_pb_delta = _hud_mark("PB --")
@@ -603,37 +642,20 @@ func _build_hud() -> void:
 	hud_wr_delta = _hud_mark("WR --")
 	marks.add_child(hud_wr_delta)
 
-	hud_progress = ProgressBar.new()
-	hud_progress.show_percentage = false
-	hud_progress.max_value = 1.0
-	hud_progress.value = 0.0
-	hud_progress.custom_minimum_size = Vector2(0, 7)
-	hud_progress.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var bar_bg := StyleBoxFlat.new()
-	bar_bg.bg_color = Color(1, 1, 1, 0.16)
-	bar_bg.set_corner_radius_all(3)
-	var bar_fill := StyleBoxFlat.new()
-	bar_fill.bg_color = UiTheme.ACCENT
-	bar_fill.set_corner_radius_all(3)
-	hud_progress.add_theme_stylebox_override("background", bar_bg)
-	hud_progress.add_theme_stylebox_override("fill", bar_fill)
-	top.add_child(hud_progress)
-
 	# Name the input the player actually has: a phone taps the screen, a desktop
 	# holds the mouse or Space. A touch-first hint on a laptop reads as "I need a
 	# touchscreen".
 	var hint_text := "Hold anywhere to swing" if DisplayServer.is_touchscreen_available() else "Hold click or Space to swing"
-	hint_label = _label(hint_text, 22)
-	hint_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.95))
-	hint_label.add_theme_constant_override("outline_size", 6)
-	hint_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
+	hint_label = _label(hint_text, 18)
+	hint_label.add_theme_color_override("font_color", UiTheme.HUD_INK)
+	_hud_shadow(hint_label, 4)
 	hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint_label.set_anchors_preset(Control.PRESET_CENTER)
 	hint_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui_root.add_child(hint_label)
 
 	btn_pause = _ghost_button("II", _on_pause)
-	_anchor(btn_pause, Control.PRESET_TOP_RIGHT, 18, 64)
+	_anchor(btn_pause, Control.PRESET_TOP_RIGHT, 16, 44)
 	btn_restart_round = _round_icon_button(_on_restart_round)
 	btn_restart_round.visible = false
 
@@ -646,11 +668,11 @@ func _build_hud() -> void:
 	ui_root.add_child(watch_badge)
 	var wb := _row(8)
 	watch_badge.add_child(wb)
-	watch_label = _label("", 16)
+	watch_label = _label("", 15)
 	watch_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	wb.add_child(watch_label)
 	wb.add_child(_button("Exit", _to_menu))
-	wb.add_child(_button("\u00d7", func(): watch_badge.visible = false))
+	wb.add_child(_button("×", func(): watch_badge.visible = false))
 
 
 # Pin a square button to a top corner. `inset` is the gap from the corner; on the
@@ -723,7 +745,7 @@ func _new_tab(name: String) -> VBoxContainer:
 	band.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(band)
 	var col := _col(12)
-	col.custom_minimum_size = Vector2(320, 0)
+	col.custom_minimum_size = Vector2(280, 0)
 	col.size_flags_horizontal = Control.SIZE_FILL
 	band.add_child(col)
 	tab_cols.append(col)
@@ -759,51 +781,52 @@ func _build_play_tab() -> void:
 	mode_buttons["speedrun"] = _segment(mode_bar, "clock", "Tracks", func(): _set_mode("speedrun"))
 	mode_buttons["endless"] = _segment(mode_bar, "infinity", "Endless", func(): _set_mode("endless"))
 
-	# Today's challenge is its own card: one track and one modifier, the same for
-	# everyone. It is local-only, so it sits beside the normal track chooser
-	# rather than replacing it.
+	# Today's challenge is one compact row: the track and modifier on the left, the
+	# action on the right. It is local-only, so it sits above the normal chooser.
 	daily_section = _col(6)
 	col.add_child(daily_section)
-	daily_section.add_child(_section("Daily challenge"))
+	daily_section.add_child(_section("Daily"))
 	var daily_card := PanelContainer.new()
 	daily_card.theme_type_variation = "SubCard"
 	daily_section.add_child(daily_card)
-	var dc := _col(4)
-	daily_card.add_child(dc)
-	daily_title = _label("", 18)
-	dc.add_child(daily_title)
+	var dh := _row(12)
+	daily_card.add_child(dh)
+	var dtext := _col(2)
+	dtext.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	dh.add_child(dtext)
+	daily_title = _label("", 17)
+	dtext.add_child(daily_title)
 	daily_sub = _label("", 12)
 	daily_sub.add_theme_color_override("font_color", UiTheme.INK_DIM)
 	daily_sub.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	dc.add_child(daily_sub)
-	daily_button = _ghost_button("Play daily", _play_daily)
-	daily_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	dc.add_child(daily_button)
+	dtext.add_child(daily_sub)
+	daily_button = _primary_button("Play", _play_daily)
+	daily_button.custom_minimum_size = Vector2(88, 44)
+	dh.add_child(daily_button)
 
-	# The track chooser only applies to a time attack: endless is one open road,
-	# so the whole section is hidden in that mode rather than shown and ignored.
-	track_section = _col(6)
+	# The track chooser only applies to a time attack: endless is one open road, so
+	# the whole section is hidden in that mode rather than shown and ignored.
+	track_section = _col(8)
 	col.add_child(track_section)
-	track_section.add_child(_section("Track"))
-	var track_card := PanelContainer.new()
-	track_card.theme_type_variation = "SubCard"
-	track_section.add_child(track_card)
-	var tc := _col(4)
-	track_card.add_child(tc)
+	var thead := _row(10)
+	track_section.add_child(thead)
+	var tinfo := _col(0)
+	tinfo.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	thead.add_child(tinfo)
 	play_track_label = _label("Track 1", 20)
-	tc.add_child(play_track_label)
-	play_best_label = _label("best --", 13)
+	tinfo.add_child(play_track_label)
+	play_best_label = _label("best --", 12)
 	play_best_label.add_theme_color_override("font_color", UiTheme.INK_DIM)
-	tc.add_child(play_best_label)
-	var tgrid := _col(4)
-	tc.add_child(tgrid)
-	_build_track_list(tgrid)
-	medals_label = _label("", 12)
-	medals_label.add_theme_color_override("font_color", UiTheme.INK_DIM)
+	tinfo.add_child(play_best_label)
+	medals_label = _label("", 11)
+	medals_label.add_theme_color_override("font_color", UiTheme.INK_MUTE)
 	medals_label.clip_text = true
-	tc.add_child(medals_label)
-
-	col.add_child(_primary_button("Play", func(): _start_run(menu_seed)))
+	medals_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	medals_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	thead.add_child(medals_label)
+	var tgrid := _col(0)
+	track_section.add_child(tgrid)
+	_build_track_list(tgrid)
 
 	# The ghost picker is two chips, so it lives inline on the Play tab.
 	col.add_child(_section("Ghost"))
@@ -824,6 +847,35 @@ func _build_play_tab() -> void:
 	custom_list = _col(6)
 	custom_section.add_child(custom_list)
 	_refresh_custom_list()
+
+	# The race action stays at the bottom of the Play tab, above the tab bar, so a
+	# long track grid never buries it. The scroll column gets a spacer so the last
+	# card can still be scrolled clear of the footer.
+	var spacer := Control.new()
+	spacer.custom_minimum_size = Vector2(0, 128)
+	col.add_child(spacer)
+	var page: Control = tab_pages["play"]
+	var cta_wrap := HBoxContainer.new()
+	cta_wrap.alignment = BoxContainer.ALIGNMENT_CENTER
+	cta_wrap.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	cta_wrap.offset_left = 16
+	cta_wrap.offset_right = -16
+	cta_wrap.offset_top = -112
+	cta_wrap.offset_bottom = -12
+	page.add_child(cta_wrap)
+	var cta := PanelContainer.new()
+	cta.custom_minimum_size = Vector2(360, 0)
+	cta.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	cta_wrap.add_child(cta)
+	var cc := _col(4)
+	cta.add_child(cc)
+	play_cta_label = _label("", 11)
+	play_cta_label.add_theme_color_override("font_color", UiTheme.INK_MUTE)
+	play_cta_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	cc.add_child(play_cta_label)
+	var race := _primary_button("Race", func(): _start_run(menu_seed))
+	race.custom_minimum_size = Vector2(0, 48)
+	cc.add_child(race)
 
 
 # --- Editor tab -------------------------------------------------------------
@@ -1024,11 +1076,11 @@ func _build_garage_tab() -> void:
 	var pc := _col(8)
 	preview.add_child(pc)
 	car_preview = TextureRect.new()
-	car_preview.custom_minimum_size = Vector2(0, 130)
+	car_preview.custom_minimum_size = Vector2(0, 96)
 	car_preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	car_preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	pc.add_child(car_preview)
-	car_name_label = _label("", 20)
+	car_name_label = _label("", 18)
 	car_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	pc.add_child(car_name_label)
 	var note := _label("Every car drives the same - pick the one you like.", 12)
@@ -1037,10 +1089,8 @@ func _build_garage_tab() -> void:
 	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	pc.add_child(note)
 
-	col.add_child(_section("Your cars"))
-	var car_row := _row(6)
-	col.add_child(car_row)
-	_build_car_list(car_row)
+	col.add_child(_section("Cars"))
+	_build_car_list(col)
 	_refresh_car_preview()
 
 
@@ -1066,65 +1116,85 @@ func _refresh_account_page() -> void:
 	acct_overview.visible = true
 	acct_form.visible = false
 	var who := Account.current_account()
-	var card := PanelContainer.new()
-	card.theme_type_variation = "SubCard"
-	acct_overview.add_child(card)
-	var c2 := _col(8)
-	card.add_child(c2)
+	var runs := Storage.all_runs()
+	var pbs := 0
+	for s in Tracks.MENU_TRACKS:
+		if Storage.get_best_time(s) != null:
+			pbs += 1
+
+	var hero := PanelContainer.new()
+	hero.theme_type_variation = "SubCard"
+	acct_overview.add_child(hero)
+	var hc := _row(14)
+	hero.add_child(hc)
+	var avatar := Label.new()
+	avatar.text = _initials(who) if who != "" else "G"
+	avatar.custom_minimum_size = Vector2(48, 48)
+	avatar.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	avatar.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	avatar.add_theme_font_override("font", UiTheme.font_weight(700))
+	avatar.add_theme_font_size_override("font_size", 18)
+	avatar.add_theme_color_override("font_color", UiTheme.ACCENT_TEXT)
+	var av := StyleBoxFlat.new()
+	av.bg_color = UiTheme.ACCENT
+	av.set_corner_radius_all(24)
+	avatar.add_theme_stylebox_override("normal", av)
+	hc.add_child(avatar)
+	var names := _col(2)
+	names.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hc.add_child(names)
+	names.add_child(_label(who if who != "" else "Guest", 20))
+	var sub := _label("Signed in" if who != "" else "Your times stay on this device", 12)
+	sub.add_theme_color_override("font_color", UiTheme.INK_MUTE)
+	names.add_child(sub)
 	if who != "":
-		var row := _row(10)
-		c2.add_child(row)
-		var ic := UiIcon.new()
-		ic.kind = "account"
-		ic.color = UiTheme.ACCENT
-		ic.custom_minimum_size = Vector2(34, 34)
-		row.add_child(ic)
-		var names := _col(0)
-		row.add_child(names)
-		var t := _label(who, 20)
-		names.add_child(t)
-		var s := _label("Signed in", 12)
-		s.add_theme_color_override("font_color", UiTheme.INK_MUTE)
-		names.add_child(s)
-		c2.add_child(_button("Sign out", func():
+		hc.add_child(_ghost_button("Sign out", func():
 			Account.logout()
 			_refresh_account_page()
 			_refresh_track_list()))
 	else:
-		var t := _label("You are playing as a guest.", 16)
-		c2.add_child(t)
-		var s := _label("Sign in to put your times on the board.", 13)
-		s.add_theme_color_override("font_color", UiTheme.INK_DIM)
-		s.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		c2.add_child(s)
-		c2.add_child(_primary_button("Sign in", func(): _open_account("login")))
-		c2.add_child(_button("Create an account", func(): _open_account("register")))
+		hc.add_child(_primary_button("Sign in", func(): _open_account("login")))
 
-	var hist := PanelContainer.new()
-	hist.theme_type_variation = "SubCard"
-	acct_overview.add_child(hist)
-	var hc := _col(6)
-	hist.add_child(hc)
-	hc.add_child(_section("Your runs"))
-	var runs := Storage.all_runs()
-	if runs.size() == 0:
-		hc.add_child(_label("No finished runs yet.", 14))
-	else:
-		hc.add_child(_label("%d finished runs" % runs.size(), 14))
-		hc.add_child(_button("Open history", _show_history))
+	var stats := _row(10)
+	acct_overview.add_child(stats)
+	stats.add_child(_stat_card("Personal bests", "%d / %d" % [pbs, Tracks.MENU_TRACKS.size()]))
+	stats.add_child(_stat_card("Finished runs", str(runs.size())))
+
+	acct_overview.add_child(_section("Account"))
+	if who == "":
+		acct_overview.add_child(_button("Create an account", func(): _open_account("register")))
+	acct_overview.add_child(_button("Open history", _show_history))
+
+
+func _initials(name: String) -> String:
+	var parts := name.strip_edges().split(" ", false)
+	if parts.is_empty():
+		return "?"
+	if parts.size() == 1:
+		return parts[0].substr(0, 1).to_upper()
+	return (parts[0].substr(0, 1) + parts[parts.size() - 1].substr(0, 1)).to_upper()
+
+
+func _stat_card(title: String, value: String) -> Control:
+	var p := PanelContainer.new()
+	p.theme_type_variation = "SubCard"
+	p.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var c := _col(2)
+	p.add_child(c)
+	c.add_child(_label(value, 22))
+	var t := _label(title.to_upper(), 10)
+	t.add_theme_font_override("font", UiTheme.font_weight(600))
+	t.add_theme_color_override("font_color", UiTheme.INK_MUTE)
+	c.add_child(t)
+	return p
 
 
 # --- Settings ---------------------------------------------------------------
 
 func _build_settings_page() -> void:
-	settings_col = _new_overlay("settings", "Settings")
-	var card := PanelContainer.new()
-	card.theme_type_variation = "SubCard"
-	settings_col.add_child(card)
-	var c := _col(8)
-	card.add_child(c)
-	_settings_controls(c)
-	settings_col.add_child(_button("Done", _to_menu))
+	settings_col = _new_overlay("settings", "Settings", 0.94)
+	_settings_controls(settings_col)
+	settings_col.add_child(_primary_button("Done", _to_menu))
 	# The build version, so a bug report can name the build.
 	var ver := _label("Sling Drift  v%s" % VERSION, 12)
 	ver.add_theme_color_override("font_color", UiTheme.INK_MUTE)
@@ -1380,17 +1450,19 @@ func _action_button(icon_kind: String, text: String, cb: Callable) -> Button:
 
 
 func _section(text: String) -> Label:
-	var l := _label(text.to_upper(), 13)
-	l.add_theme_color_override("font_color", UiTheme.ACCENT)
+	var l := _label(text.to_upper(), 11)
+	l.add_theme_font_override("font", UiTheme.font_weight(600))
+	l.add_theme_color_override("font_color", UiTheme.INK_MUTE)
 	return l
 
 
 func _build_car_list(parent: Node) -> void:
 	car_buttons.clear()
 	var grid := GridContainer.new()
-	grid.columns = Renderer2D.CAR_MODELS.size()
-	grid.add_theme_constant_override("h_separation", 6)
-	grid.add_theme_constant_override("v_separation", 6)
+	grid.columns = 2
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	grid.add_theme_constant_override("h_separation", 10)
+	grid.add_theme_constant_override("v_separation", 10)
 	parent.add_child(grid)
 	for i in range(Renderer2D.CAR_MODELS.size()):
 		var idx := i
@@ -1398,19 +1470,26 @@ func _build_car_list(parent: Node) -> void:
 		var b := Button.new()
 		b.toggle_mode = true
 		b.theme_type_variation = "ToggleButton"
-		b.custom_minimum_size = Vector2(46, 58)
+		b.custom_minimum_size = Vector2(0, 120)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.tooltip_text = str(model["name"])
+		var box := _col(2)
+		box.set_anchors_preset(Control.PRESET_FULL_RECT)
+		box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		b.add_child(box)
 		var tex := TextureRect.new()
 		tex.texture = load(str(model["tex"]))
-		tex.set_anchors_preset(Control.PRESET_FULL_RECT)
-		tex.offset_left = 9
-		tex.offset_right = -9
-		tex.offset_top = 9
-		tex.offset_bottom = -9
+		tex.custom_minimum_size = Vector2(0, 76)
+		tex.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		tex.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		tex.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		b.add_child(tex)
+		box.add_child(tex)
+		var name := _label(str(model["name"]), 12)
+		name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		name.clip_text = true
+		name.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		box.add_child(name)
 		b.pressed.connect(func():
 			car_skin = idx
 			Storage.set_pref("carSkin", idx)
@@ -1435,73 +1514,68 @@ func _refresh_car_preview() -> void:
 	car_name_label.text = str(model["name"])
 
 
-# A grid of track chips: the number with the player's best time under it, the way
-# the old JS client's `Track 3<small>10.14</small>` read. Five columns rather than
-# seven because a chip has to fit both a two-digit number and a "10.142" best - at
-# seven columns a chip has 28px of content and the time needs 32px, so it clipped.
-# Thirteen tracks over five columns is three rows, which still fits the tab.
+# A two-column grid of track cards. Each card carries a real mini-map, the track
+# number and the player's best, so the chooser reads as a set of roads rather than
+# a wall of numbers. Two columns leave enough width for a "10.142s" best on a phone;
+# the grid scrolls, so thirteen tracks do not have to fit on one screen.
 func _build_track_list(parent: Node) -> void:
 	track_buttons.clear()
 	track_pb_labels.clear()
 	track_medals.clear()
 	var grid := GridContainer.new()
-	grid.columns = 5
+	grid.columns = 2
 	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	grid.add_theme_constant_override("h_separation", 6)
-	grid.add_theme_constant_override("v_separation", 6)
+	grid.add_theme_constant_override("h_separation", 10)
+	grid.add_theme_constant_override("v_separation", 10)
 	parent.add_child(grid)
 	for s in Tracks.MENU_TRACKS:
 		var b := Button.new()
 		b.toggle_mode = true
-		b.theme_type_variation = "GridChip"
+		b.theme_type_variation = "TrackCard"
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.custom_minimum_size = Vector2(0, 54)
+		b.custom_minimum_size = Vector2(0, 104)
 		b.set_meta("track", s)
 		b.pressed.connect(func():
 			menu_seed = s
 			Storage.set_pref("track", s)
 			_refresh_track_list())
-		# A Button draws no text of its own here; the number and the best are child
-		# Labels so they can differ in size and colour. IGNORE keeps the taps going to
-		# the button underneath.
-		var box := _col(0)
+		var box := _col(2)
 		box.set_anchors_preset(Control.PRESET_FULL_RECT)
-		box.alignment = BoxContainer.ALIGNMENT_CENTER
 		box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		b.add_child(box)
-		var num := _label(str(s), 16)
-		num.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		num.clip_text = true
+		var map := TrackMap.new()
+		map.custom_minimum_size = Vector2(0, 62)
+		map.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		map.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		map.set_track(Track.new(s, Tracks.track_opts(s)))
+		box.add_child(map)
+		var foot := _row(6)
+		foot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		box.add_child(foot)
+		var num := _label(str(s), 14)
 		num.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		box.add_child(num)
-		var pb := _label("--", 10)
-		pb.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		foot.add_child(num)
+		var pb := _label("--", 11)
+		pb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		pb.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		pb.clip_text = true
 		pb.add_theme_color_override("font_color", UiTheme.INK_DIM)
 		pb.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		box.add_child(pb)
+		foot.add_child(pb)
 		var medal := MedalIcon.new()
-		medal.anchor_left = 1.0
-		medal.anchor_right = 1.0
-		medal.offset_left = -12.0
-		medal.offset_right = -4.0
-		medal.offset_top = 5.0
-		medal.offset_bottom = 13.0
-		b.add_child(medal)
+		medal.custom_minimum_size = Vector2(10, 10)
+		medal.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		foot.add_child(medal)
 		grid.add_child(b)
 		track_buttons.append(b)
 		track_pb_labels[s] = pb
 		track_medals[s] = medal
 
 
-# The per-track best under each chip, so the grid answers "which have I run?"
-# without opening every track. Only the built-in chips are in the grid; custom
-# tracks have their own list.
-#
-# The colours follow the chip's own state. The theme paints a selected chip in the
-# gold accent and swaps the button's text to ACCENT_TEXT for contrast, but a child
-# Label does not inherit that: left alone, the number stayed near-white and the
-# best stayed INK_DIM, both about 1.4:1 against gold - invisible.
+# The per-track best on each card, so the grid answers "which have I run?" without
+# opening every track. Only the built-in cards are in the grid; custom tracks have
+# their own list. The selected card keeps ink labels on a white card with an accent
+# border, so contrast never depends on the selection.
 func _refresh_track_bests() -> void:
 	for b in track_buttons:
 		var s := int(b.get_meta("track"))
@@ -1519,11 +1593,11 @@ func _refresh_track_bests() -> void:
 
 
 func _paint_chip(b: Button, pb: Label) -> void:
+	# The selected card is a white card with an accent border, so the labels stay
+	# ink/dim on white. Do not paint them with the accent: the accent is the border.
 	var num: Label = pb.get_parent().get_child(0)
-	var on := b.button_pressed
-	num.add_theme_color_override("font_color", UiTheme.ACCENT_TEXT if on else UiTheme.INK)
-	pb.add_theme_color_override("font_color",
-		Color(UiTheme.ACCENT_TEXT, 0.8) if on else UiTheme.INK_DIM)
+	num.add_theme_color_override("font_color", UiTheme.INK)
+	pb.add_theme_color_override("font_color", UiTheme.INK_DIM)
 
 
 func _show_tracks() -> void:
@@ -1545,10 +1619,14 @@ func _refresh_track_list() -> void:
 	if menu_mode == "speedrun":
 		var best: Variant = Storage.get_best_time(menu_seed)
 		play_best_label.text = "best --" if best == null else "best %s" % _fmt_time(float(best))
+		if play_cta_label != null:
+			play_cta_label.text = "%s  ·  %s" % [play_track_label.text, play_best_label.text]
 	else:
 		# Endless is one shared road, so the record is this player's best distance on it.
 		var best_d := float(Storage.get_record(Game.ENDLESS_SEED)["dist"])
 		play_best_label.text = "best --" if best_d <= 0.0 else "best %s" % _fmt_dist(best_d)
+		if play_cta_label != null:
+			play_cta_label.text = "Endless  ·  %s" % play_best_label.text
 	_refresh_custom_list()
 
 
@@ -2403,9 +2481,7 @@ func _on_tick() -> void:
 			if watching != null else "replay \u00b7 Track %d" % game.seed_num
 		hud_pb_delta.visible = false
 		hud_wr_delta.visible = false
-		hud_progress.visible = false
 		return
-	hud_progress.visible = game.mode == "speedrun"
 	if game.mode == "speedrun":
 		hud_mode.text = "CUSTOM \u00b7 SPEEDRUN" if CustomTracks.has(game.seed_num) else "SPEEDRUN \u00b7 TRACK %d" % game.seed_num
 		hud_dist.text = _fmt_time(game.run_time())
@@ -2413,8 +2489,6 @@ func _on_tick() -> void:
 		var corners := game.track.fillets.size() if game.track != null else 0
 		var extra := " \u00b7 corner %d/%d" % [clampi(game.car.corner, 0, corners), corners]
 		hud_sub.text = ("best --" if best == null else "best %s" % _fmt_time(float(best))) + extra + _speed_tag()
-		if game.track != null and game.track.finish_s > 0.0:
-			hud_progress.value = clampf(game.car.s / game.track.finish_s, 0.0, 1.0)
 	else:
 		hud_mode.text = "ENDLESS"
 		hud_dist.text = _fmt_dist(game.metres())
@@ -2444,7 +2518,6 @@ func _hud_reset() -> void:
 			if watching != null else "replay \u00b7 %s" % _seed_name(game.seed_num)
 		hud_pb_delta.visible = false
 		hud_wr_delta.visible = false
-		hud_progress.visible = false
 	elif game.mode == "speedrun":
 		if Daily.is_daily(game.seed_num):
 			var mod := str(Daily.challenge_for_seed(game.seed_num)["modifier"])
@@ -2456,19 +2529,17 @@ func _hud_reset() -> void:
 		hud_dist.text = "0.000s"
 		var best: Variant = Storage.get_best_time(game.seed_num)
 		hud_sub.text = "best --" if best == null else "best %s" % _fmt_time(float(best))
-		hud_progress.visible = true
-		hud_progress.value = 0.0
 	else:
 		hud_mode.text = "ENDLESS"
 		hud_dist.text = "0 m"
 		hud_sub.text = "best %s" % _fmt_dist(float(Storage.get_record(game.seed_num)["dist"]))
-		hud_progress.visible = false
 	_update_hud_marks()
 
 
 # The marks a run is measured against. Read once at the start of a run rather
 # than every tick: Storage reads a file, and a HUD must not do I/O at 120 Hz.
 func _refresh_run_marks() -> void:
+	game.clear_paces()
 	run_pb_time = Storage.get_best_time(game.seed_num)
 	var dist := float(Storage.get_record(game.seed_num)["dist"])
 	run_pb_dist = dist if dist > 0.0 else null
@@ -2477,6 +2548,14 @@ func _refresh_run_marks() -> void:
 		var wr = Leaderboard.world_record(reals)
 		run_wr_time = wr["time"] if wr != null else null
 		run_wr_dist = null
+		# Build the reference curves from the actual replays. A mark without a
+		# replay gets no curve, so its HUD chip is hidden rather than falling back
+		# to the old final-time countdown.
+		var pb_rep: Variant = Storage.get_replay(game.seed_num)
+		if pb_rep != null:
+			game.set_pace("pb", game.seed_num, str(pb_rep["steps"]))
+		if wr != null and wr["steps"] != null:
+			game.set_pace("wr", game.seed_num, str(wr["steps"]))
 	else:
 		run_wr_time = null
 		var best := 0.0
@@ -2490,23 +2569,33 @@ func _update_hud_marks() -> void:
 		hud_pb_delta.visible = false
 		hud_wr_delta.visible = false
 		return
-	var speedrun := game.mode == "speedrun"
-	if speedrun:
-		_set_delta(hud_pb_delta, "PB", game.run_time(), run_pb_time, true, "s")
-		_set_delta(hud_wr_delta, "WR", game.run_time(), run_wr_time, true, "s")
-		hud_pb_delta.visible = run_pb_time != null
-		hud_wr_delta.visible = run_wr_time != null
+	if game.mode == "speedrun":
+		# Compare at the same road position, so the chip starts at 0.000 and
+		# answers "was that sling good?" instead of counting down to the record.
+		var pb_ref: Variant = game.pace_time_at("pb", game.car.s)
+		var wr_ref: Variant = game.pace_time_at("wr", game.car.s)
+		if pb_ref != null:
+			_set_delta(hud_pb_delta, "PB", game.run_time(), pb_ref, true, "s", true)
+		if wr_ref != null:
+			_set_delta(hud_wr_delta, "WR", game.run_time(), wr_ref, true, "s", true)
+		hud_pb_delta.visible = pb_ref != null
+		hud_wr_delta.visible = wr_ref != null
 	else:
-		_set_delta(hud_pb_delta, "PB", game.metres(), run_pb_dist, false, "m")
-		_set_delta(hud_wr_delta, "WR", game.metres(), run_wr_dist, false, "m")
-		hud_pb_delta.visible = run_pb_dist != null
-		hud_wr_delta.visible = run_wr_dist != null
+		# Endless is scored by distance, so compare at the same elapsed time.
+		var pb_d: Variant = game.pace_distance_at("pb", game.run_time())
+		var wr_d: Variant = game.pace_distance_at("wr", game.run_time())
+		if pb_d != null:
+			_set_delta(hud_pb_delta, "PB", game.metres(), pb_d, false, "m", true)
+		if wr_d != null:
+			_set_delta(hud_wr_delta, "WR", game.metres(), wr_d, false, "m", true)
+		hud_pb_delta.visible = pb_d != null
+		hud_wr_delta.visible = wr_d != null
 
 
-func _set_delta(l: Label, prefix: String, now: float, ref: Variant, lower_is_better: bool, unit: String) -> void:
+func _set_delta(l: Label, prefix: String, now: float, ref: Variant, lower_is_better: bool, unit: String, hud: bool = false) -> void:
 	if ref == null:
 		l.text = "%s --" % prefix
-		l.add_theme_color_override("font_color", UiTheme.INK_MUTE)
+		l.add_theme_color_override("font_color", UiTheme.HUD_MUTE if hud else UiTheme.INK_MUTE)
 		return
 	var d := now - float(ref)
 	var ahead := d < 0.0 if lower_is_better else d > 0.0
@@ -2514,7 +2603,10 @@ func _set_delta(l: Label, prefix: String, now: float, ref: Variant, lower_is_bet
 	var mag := absf(d)
 	var body := ("%.3fs" % mag) if unit == "s" else ("%d m" % roundi(mag))
 	l.text = "%s %s%s" % [prefix, sign, body]
-	var col := UiTheme.GOOD if ahead else (UiTheme.DANGER if absf(d) > 0.0005 else UiTheme.INK_DIM)
+	var good := UiTheme.HUD_GOOD if hud else UiTheme.GOOD
+	var bad := UiTheme.HUD_BAD if hud else UiTheme.DANGER
+	var neutral := UiTheme.HUD_DIM if hud else UiTheme.INK_DIM
+	var col := good if ahead else (bad if absf(d) > 0.0005 else neutral)
 	l.add_theme_color_override("font_color", col)
 
 

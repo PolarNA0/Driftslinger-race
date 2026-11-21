@@ -55,7 +55,7 @@ push; adding features before fixing that is how a good codebase loses a weekend.
 | Docs | `godot/README.md` still says endless leaderboards "should be added soon" and the track list lives behind a "Tracks button"; both are false. | `godot/README.md` vs `AGENTS.md` "The menu is a tabbed app shell". |
 | Security | **Any authenticated user can overwrite `tracker_config.webhook_url` and the message templates.** The old client-side `0404` gate is gone, but the RLS policy still trusts any signed-in user. | `supabase/migrations/0002_tracker.sql`: `tracker_write ... for update to authenticated using (true) with check (true)`. |
 | Board integrity | Endless scores are client-reported distances, not replayed. A modified client can post any number under the cap. | `supabase/functions/run/index.ts` endless branch; `AGENTS.md` acknowledges it. |
-| Game feel | **Closed in Phase 1.** Audio, haptics, a first-run tutorial, PB/WR deltas, a progress bar, a real settings screen and focus pause now ship. | `godot/scripts/audio.gd`, `haptics.gd`, `app.gd` HUD/settings/tutorial; `verify_audio.gd`, `verify_hud.gd`. |
+| Game feel | **Closed in Phase 1.** Audio, haptics, a first-run tutorial, live PB/WR pace deltas, a real settings screen and focus pause now ship. | `godot/scripts/audio.gd`, `haptics.gd`, `app.gd` HUD/settings/tutorial; `verify_audio.gd`, `verify_hud.gd`. |
 | Retention | No medals, daily challenge, achievements, streaks, or unlocks. A finished track is just a time. | No matching code or UI. |
 | Reach | Portrait-only, no PWA/offline install, no localization, no accessibility settings. | `project.godot` orientation `1`; `progressive_web_app/enabled=false`; no `tr()` usage. |
 | Durability | Saves are written by truncating the target file in place. A crash mid-write can lose PBs and custom tracks. | `Storage._write` / `Account._write_session` open `WRITE` directly. |
@@ -368,7 +368,7 @@ first-run gate is `tutorial_done` plus a headless guard.
 
 - A live delta to your PB during a run (green/red), and a finish card that says
   `-0.043s PB` or `+0.120s`.
-- A live WR delta next to the PB delta, plus a speedrun progress bar.
+- A live WR delta next to the PB delta, compared at the same road position.
 - A short screen flash and camera shake on a crash, a softer flash on a finish,
   and a subtle zoom pulse on a slingshot.
 - Reduced-motion pref disables shake, flash and pulses.
@@ -433,10 +433,12 @@ sizes.
 
 **Shipped:** the HUD names the mode and track (`SPEEDRUN · TRACK 3`, `ENDLESS`,
 `CUSTOM · SPEEDRUN`, `REPLAY`), shows the best, the current corner count, the
-speed multiplier when it is not 1.0, a PB delta, a WR delta, and a speedrun
-progress bar. `verify_hud.gd` covers the delta text and colours, the progress
-bar, the mode text and the endless metres. The HUD stays at the top of the
-screen, out of the thumb zone.
+speed multiplier when it is not 1.0, and live PB/WR pace deltas. The deltas are
+measured at the same road position (or the same elapsed time in endless), so
+they start at zero and answer whether the last sling was good. The full-width
+progress bar was removed: the road is the progress bar. `verify_hud.gd` covers
+the delta text and colours, the live pace curves, the mode text and the endless
+metres. The HUD stays at the top of the screen, out of the thumb zone.
 
 **Phase 1 exit gate:** a new player can be taught, can hear the game, can pause
 and resume, and the settings persist across a restart. **Met.**
@@ -686,7 +688,7 @@ The client is safe before then: local daily play and the queue keep working.
   its daily bests.
 - All 16 verifiers, `make test`, web export and APK stay green.
 
-### C4c. HUD: live pace delta and no progress bar — S
+### C4c. HUD: live pace delta and no progress bar — S — [x]
 
 Two pieces of direct player feedback, both independent of the visual redesign
 and small enough to ship first.
@@ -712,6 +714,14 @@ and small enough to ship first.
   both deltas read `0.000`/`--` at `s=0`; a reference 0.2s slower at a known
   `s` reads `+0.200`; a faster one reads negative; endless reads zero at `t=0`;
   a missing replay hides the chip. Update the existing progress-bar assertions.
+
+**Shipped:** `Game.set_pace` builds a `s -> time` and `t -> metres` curve from
+a real replay; `pace_time_at` / `pace_distance_at` interpolate it. The HUD calls
+them in `_update_hud_marks`, so PB and WR read `0.000` at the start and move
+only when the player is actually ahead or behind at that point. The 7px bar is
+gone; `verify_hud.gd` checks no `ProgressBar` remains in the tree. The HUD is
+now a top-left mode/time/best cluster, top-centre deltas, and a top-right pause
+button.
 
 **Acceptance:** a run starts with a neutral `0.000` delta, the delta reflects
 the line at the player's current road position, the huge yellow bar is gone,

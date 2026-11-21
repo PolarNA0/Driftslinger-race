@@ -1,15 +1,49 @@
 # UI redesign: Clean
 
-Status: **proposal**. Nothing in this document has been implemented yet. The
-crash-shake bug found during the audit is fixed separately (`75006b5`).
+Status: **implemented (first pass)**. The clean system, the Play/Garage layout,
+the editor chrome and the HUD fixes shipped together. Bottom sheets, `UiMotion`,
+dynamic type and the optional dark menu are still open.
 
-The bottom tab system stays. Everything else - colour, type, surfaces, page
-layout, overlays, HUD - is open.
+The bottom tab system stays. The direction below is the shipped one; the
+sections that are still a plan are called out in "Implementation status".
 
 The direction is deliberately **clean**: one neutral family, one accent, one
 sans-serif, flat surfaces, generous space, no decoration that does not carry
 information. The road and the car are the only things that should look like a
 game; the menu should look like a well-made tool.
+
+## Implementation status
+
+**Shipped in this pass**
+
+- `godot/scripts/theme.gd` is the clean system: near-white page, white cards,
+  one hairline, near-black ink and one signal-red accent. The old navy/gold
+  palette is gone.
+- Inter is bundled under `godot/assets/fonts/` (400/500/600/700, OFL) and is the
+  theme's default font. Labels pick a weight from their size
+  (`UiTheme.font_for_size`), so a screen has a display/title/body hierarchy.
+- The shell is a 56px top bar and a 64px tab bar; the active tab gets a 3px
+  accent rule and an accent icon/label.
+- The Play tab is a 2-column grid of track cards, each with a real mini-map
+  (`TrackMap` builds a `Track` and draws its centreline), the number and the PB.
+  The selected card is a white card with a 2px accent border. The daily row is a
+  compact card with the action on the right, and a sticky Race footer sits above
+  the tab bar so a long grid never buries the action.
+- Garage is a 2-column car card grid with the selected car marked by the same
+  2px accent border.
+- The HUD has no progress bar. PB/WR are live pace deltas measured at the same
+  road position (`Game.set_pace` / `pace_time_at`), so they start at `0.000`;
+  endless compares distance at the same elapsed time.
+- The editor keeps its map-first surface but uses the clean light chrome.
+
+**Still open**
+
+- Bottom sheets for pause/finish/crash/board/history (overlays are still
+  centred cards, restyled by the theme).
+- `UiMotion` press/tab/sheet timing and reduced-motion animation.
+- Dynamic type / 1.3x text-scale checks.
+- Optional Clean Dark menu (the HUD is already dark).
+- Account stats and the daily board sheet.
 
 ## 1. Why this, why now
 

@@ -78,6 +78,9 @@ build is the only client.
   `focus_index`), a placement grid, two-finger pinch and tap-to-select
   (`pick_at`). Built from a real `Track`, so the plan matches the drive, and
   painted with the track's own colours.
+- `godot/scripts/track_map.gd` — `TrackMap`, the small read-only centreline map on
+  each Play track card. It builds a real `Track` and fits its road to the card, so
+  the shape on the button is the shape the car drives.
 - `godot/scripts/menu_shell.gd` — `MenuShell`, the full-screen menu frame:
   top bar, content sheet, bottom tab bar (see "The menu is a tabbed app
   shell").
@@ -156,7 +159,7 @@ godot --headless --path godot --script res://tools/verify_cars.gd     # every ca
 godot --headless --path godot --script res://tools/verify_keys.gd     # restart/play keybinds
 godot --headless --path godot --script res://tools/verify_medals.gd   # per-track medal thresholds
 godot --headless --path godot --script res://tools/verify_audio.gd    # audio assets, loop flags, haptics
-godot --headless --path godot --script res://tools/verify_hud.gd      # HUD deltas, progress bar, settings
+godot --headless --path godot --script res://tools/verify_hud.gd      # HUD live pace deltas, settings
 godot --headless --path godot --script res://tools/verify_storage.gd  # atomic saves
 
 # Physics + server verifier (JavaScript, must stay green)
@@ -550,9 +553,11 @@ tab pages and populates them; the shell owns no game state.
 - **Four tabs, plus Settings in the top bar.** Garage, Editor, Play, Account
   across the bottom; the gear in the top-right opens Settings as a modal card (it
   holds the key bindings and the build version). The old "Tracks" button is gone -
-  the track chooser lives on the Play tab as a grid of numbers, with the selected
-  track and its best above it, and the player's own tracks in a "My tracks" picker
-  underneath. A daily-challenge card sits above the chooser. Editor is a
+  the track chooser lives on the Play tab as a 2-column grid of cards, each with
+  a mini-map, the track number and its best; the selected track and best sit above
+  it, and the player's own tracks in a "My tracks" picker underneath. A
+  daily-challenge card sits above the chooser, and a sticky Race footer above the
+  tab bar keeps the action reachable however far the grid scrolls. Editor is a
   making-things tab, so it sits next to Garage.
 - **Endless hides the track chooser and the daily card.** Endless is one open
   road, so the whole track section (`track_section`) and the daily section
@@ -594,24 +599,19 @@ tab pages and populates them; the shell owns no game state.
 - **Buttons that carry a label must be able to shrink.** Grid and segment
   buttons set `clip_text` and `SIZE_EXPAND_FILL`; without it a button reserves
   its full text width as a minimum and pushes the column past the viewport.
-- **`clip_text` hides the last digit if the chip is too narrow.** The track list
-  is a `GridContainer` of `GridChip` toggles, each carrying the number and the
-  player's best time as two child `Label`s. The column count is what decides
-  whether those fit: at 7 columns a phone chip has ~28px of content and a
-  "10.142s" best needs 32px, so every real PB clipped. It is **5 columns** now,
-  which gives 44px and still fits thirteen tracks in three rows with the Play
-  button at y=404 of 820. `verify_ui.gd` measures both labels against the chip's
-  content width - against a *seeded* realistic time, not the `--` of a fresh
-  install - and fails if either clips, because the failure is silent: the button
-  still works, it just shows the wrong text.
-- **A child `Label` does not inherit a button's `font_pressed_color`.** The
-  selected track chip is painted in the gold accent, and the theme swaps the
-  *button's* text to `ACCENT_TEXT` for contrast. Labels added as children keep
-  their own colour, so a near-white number and an `INK_DIM` best sat at 1.36:1
-  and 1.47:1 against the gold - invisible. `_refresh_track_bests` recolours both
-  lines from the chip's own `button_pressed`, and `verify_ui.gd` measures the
-  selected chip's labels against the accent and fails under 4.5:1. Any new
-  button-with-labels needs the same treatment.
+- **The track chooser is a 2-column card grid.** Each card is a `TrackCard`
+  toggle carrying a `TrackMap`, the track number and the player's best. Two
+  columns leave enough width for a "10.142s" best on a phone; the grid scrolls,
+  so thirteen tracks do not have to fit on one screen. `verify_ui.gd` measures
+  every label against the card's content width - against a *seeded* realistic
+  time, not the `--` of a fresh install - and fails if either clips, because the
+  failure is silent: the button still works, it just shows the wrong text.
+- **The selected track card is a border, not a fill.** A selected card keeps a
+  white background, ink/dim labels and a 2px `ACCENT` border. The labels are
+  child `Label`s, so they do not inherit the button's `font_pressed_color`;
+  `_refresh_track_bests` paints them ink/dim and `verify_ui.gd` checks both the
+  border and the label contrast against the card. Any new button-with-labels
+  needs the same treatment.
 - **The version line is on Settings**, not under the Play button.
 
 ## The daily challenge
@@ -834,13 +834,13 @@ like a shipped one.
 
 ## UI look, boot splash and fitting every screen
 
-- **A selected segment is tinted, not painted solid gold.** The mode and ghost
-  toggles are full-width 48px chips; with a solid `ACCENT` fill, three of them on
-  the Play tab read as banners, not controls ("what does that huge yellow bar
-  do?"). `ToggleButton`'s pressed style is now a 16% accent tint with an accent
-  border, and `_segment` repaints its child icon and label on `toggled` because
-  the theme's `font_pressed_color` does not reach a child `Label`. The solid gold
-  fill is kept for `GridChip` (the small track/car chips) and the primary button.
+- **A selected segment is a bordered white chip, not a solid fill.** The mode
+  and ghost toggles are full-width 48px chips; with a solid accent fill, three of
+  them on the Play tab read as banners, not controls ("what does that huge yellow
+  bar do?"). `ToggleButton`'s pressed style is now a white chip with a 2px accent
+  border and accent text, and `_segment` repaints its child icon and label on
+  `toggled` because the theme's `font_pressed_color` does not reach a child
+  `Label`.
 - **Medals are derived, never stored.** `Medals.medal_for(track, time)` recomputes
   the award from the player's best, so a threshold change re-colours history
   instead of leaving stale awards behind. Gold is 3% over the track's
@@ -848,13 +848,25 @@ like a shipped one.
   gold at exactly target was unearnable. A custom track has no target and no
   medal. `verify_medals.gd` drives a clean line on every shipped track and fails
   if it does not earn gold.
-- **All UI colour comes from `godot/scripts/theme.gd` (`UiTheme`).** `App._ready`
-  applies one built `Theme` to the whole UI tree, so nothing falls back to the
-  engine's default grey. The palette is deep-navy panels with a warm-gold accent
-  (the accent does not collide with any road theme, one of which is near-white).
-  `app.gd` reaches into it for the few colours it sets per-label
-  (`UiTheme.INK_DIM`, `UiTheme.DANGER`, ...) — do not hard-code a new colour in
-  `app.gd`, add it to `UiTheme`.
+- **All UI colour and type comes from `godot/scripts/theme.gd` (`UiTheme`).**
+  `App._ready` applies one built `Theme` to the whole UI tree, so nothing falls
+  back to the engine's default grey. The palette is a near-white page, white
+  cards, near-black ink and one signal-red accent (`#C13526`); the HUD is the
+  only dark surface. Inter is bundled in `godot/assets/fonts/` (OFL) and is the
+  default font; `_label` picks a weight from its size
+  (`UiTheme.font_for_size`). `app.gd` reaches into `UiTheme` for the few colours
+  it sets per-label (`UiTheme.INK_DIM`, `UiTheme.HUD_GOOD`, ...) — do not
+  hard-code a new colour in `app.gd`, add it to `UiTheme`.
+- **The HUD has no progress bar, and its deltas are live pace deltas.** The
+  road is the progress bar, so the old 7px full-width bar is gone. PB and WR are
+  compared at the same road position, not against the final record: `Game.set_pace`
+  replays a stored PB/WR button sequence once into an `s -> time` curve (and a
+  `t -> metres` curve for endless), and `pace_time_at` / `pace_distance_at`
+  interpolate it. At `s=0` both times are zero, so the chip reads `0.000`; a slow
+  first sling reads positive, a fast one negative. A mark without a replay hides
+  its chip rather than falling back to a countdown. `verify_hud.gd` pins the
+  start-at-zero rule, a known 0.2s split, the colours and the absence of a
+  `ProgressBar`.
 - **The boot splash is the game's, not Godot's.** `project.godot`
   (`boot_splash/image`) points at a square `assets/ui/boot_splash.png`; a square
   reads on both portrait and landscape. `godot/web/shell.html` is the custom web

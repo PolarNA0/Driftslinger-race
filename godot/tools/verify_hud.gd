@@ -1,7 +1,7 @@
 extends SceneTree
 
 # Headless check of the run HUD and the settings screen: the PB/WR delta text and
-# colours, the speedrun progress bar, the focus-out pause, and the audio /
+# colours, the live pace delta, the focus-out pause, and the audio /
 # feedback controls actually reaching their owners.
 
 var failures := 0
@@ -11,6 +11,25 @@ func _check(label: String, cond: bool) -> void:
         print("  %-56s %s" % [label, "ok " if cond else "FAIL"])
         if not cond:
                 failures += 1
+
+
+func _clean_steps(seed: int) -> String:
+        var t := Track.new(seed, Tracks.track_opts(seed))
+        var car := Car.new()
+        car.reset(t)
+        var steps := []
+        var i := 0
+        while car.alive and not car.finished and i < 200000:
+                var held := false
+                if car.attached:
+                        held = car.remaining() > 0.0
+                else:
+                        var f: Dictionary = t.fillets[car.corner]
+                        held = U.dist(f["c"].x, f["c"].y, car.x, car.y) <= Cfg.GRAB_RANGE
+                steps.append(held)
+                car.step(1.0 / 120.0, held)
+                i += 1
+        return Replay.encode_steps(steps)
 
 
 func _initialize() -> void:
@@ -43,21 +62,41 @@ func _initialize() -> void:
         print("-- speedrun HUD --")
         app.game.load_track(1, "speedrun")
         app._hud_reset()
-        app.game.car.s = app.game.track.finish_s * 0.5
+        var ref_steps := _clean_steps(1)
+        app.game.set_pace("pb", 1, ref_steps)
+        _check("pace starts at zero", float(app.game.pace_time_at("pb", 0.0)) == 0.0)
+        var mid_s: float = app.game.track.finish_s * 0.5
+        var ref_t: Variant = app.game.pace_time_at("pb", mid_s)
+        _check("a pace time exists at mid-track", ref_t != null)
+        app.game.car.s = mid_s
+        app.game.car.time = float(ref_t) + 0.2
+        app._update_hud_marks()
+        _check("live PB delta is behind at the same position", app.hud_pb_delta.text == "PB +0.200s")
+        _check("a live behind delta is red", app.hud_pb_delta.get_theme_color("font_color") == UiTheme.HUD_BAD)
+        app.game.car.time = float(ref_t) - 0.2
+        app._update_hud_marks()
+        _check("live PB delta is ahead at the same position", app.hud_pb_delta.text == "PB -0.200s")
+        _check("a live ahead delta is green", app.hud_pb_delta.get_theme_color("font_color") == UiTheme.HUD_GOOD)
+        app.game.clear_pace("pb")
+        app._update_hud_marks()
+        _check("no replay hides the PB delta", not app.hud_pb_delta.visible)
+        _check("the huge progress bar is gone", app.find_children("*", "ProgressBar", true, false).is_empty())
+        app.game.load_track(1, "speedrun")
+        app._hud_reset()
         app._on_tick()
         _check("mode says speedrun", app.hud_mode.text.begins_with("SPEEDRUN"))
-        _check("progress bar is shown", app.hud_progress.visible)
-        _check("progress is half the road", absf(app.hud_progress.value - 0.5) < 0.02)
-        app.game.car.s = app.game.track.finish_s
-        app._on_tick()
-        _check("progress reaches one at the line", app.hud_progress.value >= 0.999)
 
         print("-- endless HUD --")
         app.game.load_track(1, "endless")
         app._hud_reset()
         _check("mode says endless", app.hud_mode.text == "ENDLESS")
-        _check("endless hides the progress bar", not app.hud_progress.visible)
         _check("endless score is metres", app.hud_dist.text.ends_with(" m"))
+        # The endless comparison is distance at the same elapsed time. A synthetic
+        # curve proves the interpolation without needing a full endless replay.
+        app.game.pace_t["pb"] = [Vector2(0.0, 0.0), Vector2(1.0, 10.0)]
+        app.game.car.time = 0.5
+        _check("endless pace is half the reference distance", absf(float(app.game.pace_distance_at("pb", 0.5)) - 5.0) < 0.001)
+        _check("endless delta starts at zero", float(app.game.pace_distance_at("pb", 0.0)) == 0.0)
 
         print("-- feedback --")
         app.game.reduced_motion = true

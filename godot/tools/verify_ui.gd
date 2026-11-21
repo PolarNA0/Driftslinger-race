@@ -88,12 +88,9 @@ func _check_size(vp: Vector2i) -> void:
 		_fail("daily button out of view at %s" % app.daily_button.get_global_rect())
 	if not app.daily_title.text.contains("Track"):
 		_fail("daily card did not name its track (got '%s')" % app.daily_title.text)
-	# Every track chip must fit its number AND its best time. Both are `clip_text`,
-	# so a chip narrower than its label silently drops the last digit ("27" reads as
-	# "2", and a best of "10.142s" loses its tail) - which is exactly what the 7-wide
-	# grid did at phone width.
-	# A fresh install shows "--", which is the shortest possible best, so seed a
-	# realistic time first or this check would pass while every real PB clipped.
+	# Every track card carries a real mini-map and its number + best. Both labels
+	# are `clip_text`, so a card narrower than its content silently drops the last
+	# digit; seed a realistic time first or the check only sees "--".
 	var seed_track: int = Tracks.MENU_TRACKS[0]
 	var snapshot: Variant = Storage._read("times.v1", {})
 	Storage.save_best_time(seed_track, 10.1416)
@@ -102,46 +99,54 @@ func _check_size(vp: Vector2i) -> void:
 	for b in app.track_buttons:
 		if not b.is_visible_in_tree():
 			continue
-		var box: Node = b.get_child(0)
-		for l in box.get_children():
-			var lbl := l as Label
-			if lbl == null:
-				continue
+		if _find_child(b, TrackMap) == null:
+			_fail("track card '%s' has no mini-map" % b.get_meta("track"))
+		var sb: StyleBox = b.get_theme_stylebox("normal")
+		var avail: float = b.size.x - float(sb.content_margin_left) - float(sb.content_margin_right)
+		for lbl in _labels(b):
 			var fs: int = lbl.get_theme_font_size("font_size")
 			var f: Font = lbl.get_theme_font("font")
 			var tw := f.get_string_size(lbl.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-			var sb: StyleBox = b.get_theme_stylebox("normal")
-			var avail: float = b.size.x - float(sb.content_margin_left) - float(sb.content_margin_right)
 			if tw > avail + 0.5:
-				_fail("track chip '%s' clips '%s': text %.1f > %.1f avail" % [
+				_fail("track card '%s' clips '%s': text %.1f > %.1f avail" % [
 					b.get_meta("track"), lbl.text, tw, avail])
-	# The seeded time must actually have reached the chip, or the check above proves
+	# The Race action is a sticky footer above the tab bar, so a long track grid
+	# cannot bury the one button the tab exists for.
+	if app.play_cta_label == null:
+		_fail("Play tab has no Race footer")
+	elif app.play_cta_label.text == "":
+		_fail("Race footer did not name the selected track")
+	else:
+		var cta: Control = app.play_cta_label.get_parent().get_parent()
+		if not _in_view(cta, vp):
+			_fail("Race footer out of view at %s" % cta.get_global_rect())
+		if cta.get_global_rect().end.y > shell.content.get_global_rect().end.y + 1.0:
+			_fail("Race footer overlaps the tab bar")
+	# The seeded time must actually have reached the card, or the check above proves
 	# nothing about a real PB.
 	var seeded: Label = app.track_pb_labels[seed_track]
 	if not seeded.text.contains("10.14"):
-		_fail("track chip did not show the seeded best (got '%s')" % seeded.text)
-	# The selected chip is painted in the gold accent. A child Label does not pick up
-	# the theme's `font_pressed_color`, so both lines have to be recoloured by hand or
-	# they sit near-white on gold at about 1.4:1 and disappear.
+		_fail("track card did not show the seeded best (got '%s')" % seeded.text)
+	# The selected card is a white card with a 2px accent border, and its labels
+	# stay ink on white. Check both the border and the contrast, because a child
+	# Label does not inherit the button's font_pressed_color.
 	var selected: Button = null
 	for b in app.track_buttons:
 		if b.button_pressed:
 			selected = b
 			break
 	if selected == null:
-		_fail("no track chip is selected")
+		_fail("no track card is selected")
 	else:
-		var sbox: Node = selected.get_child(0)
-		var sbg: Color = (selected.get_theme_stylebox("pressed") as StyleBoxFlat).bg_color
-		for l in sbox.get_children():
-			var sl := l as Label
-			if sl == null:
-				continue
-			var sc := sl.get_theme_color("font_color")
+		var spb := selected.get_theme_stylebox("pressed") as StyleBoxFlat
+		if spb == null or spb.border_width_left < 2 or spb.border_color != UiTheme.ACCENT:
+			_fail("selected track card has no 2px accent border")
+		for sl in _labels(selected):
+			var sc: Color = sl.get_theme_color("font_color")
 			sc.a = 1.0
-			var cr := _contrast(sc, sbg)
+			var cr := _contrast(sc, spb.bg_color if spb != null else UiTheme.SURFACE)
 			if cr < 4.5:
-				_fail("selected chip label '%s' is %.2f:1 on the accent" % [sl.text, cr])
+				_fail("selected track card label '%s' is %.2f:1 on the card" % [sl.text, cr])
 	Storage._write("times.v1", snapshot)
 	app._refresh_track_list()
 	await process_frame
@@ -578,6 +583,25 @@ func _two_finger_pinch(pv: Node, factor: float) -> void:
 # A tab page scrolls vertically (its ScrollContainer disables horizontal scroll),
 # so a control below the fold is reachable by scrolling but a control wider than the
 # viewport is not. That is the bug the old menu had, so width is what is checked.
+func _labels(n: Node) -> Array:
+	var out: Array = []
+	for c in n.get_children():
+		if c is Label:
+			out.append(c)
+		out.append_array(_labels(c))
+	return out
+
+
+func _find_child(n: Node, type: Variant) -> Node:
+	for c in n.get_children():
+		if is_instance_of(c, type):
+			return c
+		var found := _find_child(c, type)
+		if found != null:
+			return found
+	return null
+
+
 func _check_page(name: String, page: Control, vp: Vector2i) -> void:
 	var n := 0
 	for b in _buttons(page):

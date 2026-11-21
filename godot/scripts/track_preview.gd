@@ -424,7 +424,7 @@ func _draw_grid(under: Color) -> void:
         var c0 := world_to_cell(w0) - Vector2i.ONE
         var c1 := world_to_cell(w1) + Vector2i.ONE
         var light_ground := under.get_luminance() > 0.45
-        var line := Color(0.0, 0.0, 0.0, 0.22) if light_ground else Color(UiTheme.INK, 0.16)
+        var line := Color(0.0, 0.0, 0.0, 0.22) if light_ground else Color(UiTheme.HUD_INK, 0.20)
         for cx in range(c0.x, c1.x + 1):
                 var x := float(cx) * CELL
                 var a := world_to_screen(Vector2(x, w0.y))
