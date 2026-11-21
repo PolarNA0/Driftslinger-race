@@ -111,6 +111,7 @@ check('0007 adds the endless tracker columns', existsSync(join(root, 'supabase/m
 // honest.
 const readme = read('README.md');
 check('README points at ROADMAP.md', readme.includes('ROADMAP.md'));
+check('README points at UI_REDESIGN.md', readme.includes('UI_REDESIGN.md'));
 check('README points at PHYSICS.md', readme.includes('PHYSICS.md'));
 
 console.log(failures === 0 ? 'DOCS PASS' : `DOCS FAIL (${failures})`);

@@ -544,9 +544,178 @@ the same UTC date. It is local-only; there is no server board.
   mirroring flips every corner and keeps the length, no-reattach strips every
   pillar, and two dates store separate bests and attempts.
 
-**Not done:** a `daily_runs` table and a board. That is deliberate until the
-mode proves popular; adding it would mean deciding whether a modified run is
-comparable across dates at all.
+**Not done:** a `daily_runs` table and a board. The next section is that board.
+
+### C4b. Daily leaderboards — L
+
+A board per UTC date, verified and watchable, with the local daily still working
+offline. The client never sends a time: it sends the date and the button steps,
+and the server derives the challenge and replays the run.
+
+**The one hard rule: the server derives the challenge from the date.** If the
+client sent `track` or `modifier`, a player could pick an easier road for the
+date. The payload is `{ mode: 'daily', date, steps }`; `track` and `modifier` are
+outputs, never inputs. The date must be today in UTC (with a documented
+midnight edge), so an old daily cannot be farmed after the fact.
+
+**1. Make the challenge portable first.** `Daily.challenge_for` currently uses
+Godot's `String.hash()`. That is fine on one client but not something to
+reimplement in JavaScript. Switch it to a small explicit **FNV-1a 32-bit** hash
+over the UTF-8 bytes of `"slingdrift-daily-v2:" + date`, and pin a handful of
+date -> `{track, modifier, seed}` goldens. Do this now: the daily is new, no
+server rows exist yet, and changing the hash later would leave local daily bests
+attached to a different road. Keep the date seed (`BASE + day index`) unchanged
+so the per-seed stores still work.
+
+**2. Port the challenge and the modifiers to the server's physics.**
+- `physics/daily.js`: `seedFor(date)`, `challengeFor(date)`, `optsFor(challenge)`
+  with the same `MENU_TRACKS` order as `godot/scripts/tracks.gd` (1-5, 21-28).
+- `physics/track.js`: add `shapeSeed`, `mirror` and `noReattach` to `Track`,
+  defaulting off. Mirror flips the staircase `turnSign` and negates op-list arc
+  angles; `noReattach` forces every fillet's `reattach` false. This is the same
+  change already in `godot/scripts/track.gd`; keep the two in step.
+- `physics/verify.js`: add `replayRunOn(seed, opts, steps)` (or make
+  `replayRun` accept an opts object) so the daily road can be replayed.
+- `tools/sync-physics.mjs` vendors `daily.js` too. `tools/test.mjs` proves the
+  JS challenge matches the Godot goldens and every daily variant finishes.
+
+**3. Schema: `supabase/migrations/0008_daily.sql`.** A separate table, not a
+`runs` row: a daily row is one per player per **date**, ranked lowest-first,
+and its `track` is derived. Reusing `runs` would need a nullable mode/date and
+would collide with its `(user_id, track)` uniqueness.
+
+```sql
+create table public.daily_runs (
+  id         bigint generated always as identity primary key,
+  date       date not null,
+  user_id    uuid not null references public.profiles (id) on delete cascade,
+  track      int  not null,
+  modifier   text not null check (modifier in ('none','mirror','no_reattach')),
+  ticks      int  not null check (ticks > 0),
+  steps      text not null check (steps ~ '^[01]+$' and length(steps) <= 7200),
+  created_at timestamptz not null default now()
+);
+create unique index daily_runs_one_best_per_user_date
+  on public.daily_runs (user_id, date);
+create index daily_runs_date_ticks_idx
+  on public.daily_runs (date, ticks, created_at);
+```
+
+A `daily_leaderboard` view joins `profiles`, ranks with
+`rank() over (partition by date order by ticks asc, created_at asc)` and exposes
+`date, track, modifier, user_id, username, ticks, seconds, created_at, rank`.
+`security_invoker = true`, select granted to `anon`/`authenticated`. RLS is on
+with a public select policy and **no insert/update policy** - exactly the
+`runs` pattern. `submit_daily_run(p_user, p_date, p_track, p_modifier, p_ticks,
+p_steps)` is `security definer`, keeps the lower tick count (equal ticks keep
+the earlier row), returns `{improved, ticks, rank, total}`, and is revoked from
+`public`/`anon`/`authenticated`, granted only to `service_role`. End with
+`notify pgrst, 'reload schema';`.
+
+**4. Edge functions.** Reuse `run` with `mode: 'daily'`:
+- Validate the token, the date shape and `date == todayUtc()`.
+- Derive `ch = challengeFor(date)`; ignore any client `track`/`modifier`.
+- `replayRunOn(seedFor(date), optsFor(ch), steps)`; reject a crash or a
+  never-finished run with 422.
+- `submit_daily_run` with the derived track/modifier and the replayed ticks.
+- Return `{ ok, mode: 'daily', date, track, modifier, time, rank, total,
+  improved }`.
+- No tracker announcement in v1; a daily #1 is date-scoped and ephemeral.
+
+Reuse `board` with `?mode=daily&date=YYYY-MM-DD`:
+- Read `daily_leaderboard` for the ranking and `daily_runs` for `steps`, joined
+  on `user_id` (one row per player per date).
+- Return `{ mode: 'daily', date, track, modifier, rows, total, you }`, where a
+  row is `{ rank, name, time, steps, watchable, you }`. Allow past dates to be
+  read (history), but the client v1 only asks for today.
+- If the view is empty, still return the derived `track`/`modifier` so the
+  sheet can label the challenge.
+
+**5. Client.**
+- `Api.enqueue_daily(date, steps, name)`: one queue entry per date, keeping the
+  best local time; send `{ mode: 'daily', date, steps }`; never send `time`.
+- `Api.fetch_daily_board(date)` and `Api.fetch_my_daily()` (for a fresh device:
+  `daily_runs?user_id=eq...&select=date,ticks`, merged into local bests).
+- `App`: the daily card shows `World #N` when the board has your row, otherwise
+  `Unranked`/`Sign in to rank`; a "Daily board" sheet lists the top 50 with
+  watch buttons; `_watch_daily_steps(date, steps, time)` replays with
+  `Daily.seed_for(date)` so the daily track and modifier are loaded.
+- The run still saves locally first. If the migration/function is absent, the
+  queue retries and the card falls back to local-only; no play is blocked.
+- Guest runs queue; after sign-in `flush` uploads them and `_sync_my_runs`
+  pulls the account's daily bests back down.
+
+**Anti-cheat checklist.**
+- Server derives `track`/`modifier` from `date`; client values are ignored.
+- Only today's UTC date is accepted; old dates are rejected.
+- The server replays the steps on the exact daily opts (`shape_seed`, mirror,
+  no-reattach) and stores the replay's ticks, never a client time.
+- A crash/never-finished run is 422; steps are `^[01]+$`, capped at 7200.
+- `daily_runs` has no client write policy; `submit_daily_run` is service-role
+  only.
+- One row per player per date, best kept; ties share a rank.
+
+**Tests.**
+- `tools/test.mjs`: FNV goldens; `challengeFor` order matches
+  `PLAYABLE_TRACKS`; every daily variant finishes; mirror/no-reattach geometry;
+  a forged client `track`/`modifier` is ignored; an old date is rejected; a
+  clean daily run round-trips through the verifier.
+- `godot/tools/verify_daily.gd`: the same FNV goldens as JS; local bests and
+  attempts per date (already there).
+- `supabase/tests/daily_rls.sql`: anon cannot insert/update; select works;
+  `submit_daily_run` is not executable by anon; best-kept and rank ties.
+- `verify_ui`: daily board sheet fit, rank row, watch button, local-only
+  fallback.
+- `tools/docs-check.mjs`: `0008` exists, `daily.js` is vendored, AGENTS/README
+  describe the board.
+
+**Rollout.** Add `0008_daily.sql` and the `run`/`board` deploy to
+`DEPLOY_PENDING.md` (the owner has no Supabase access). Verify with
+`curl ".../functions/v1/board?mode=daily&date=$(date -u +%F)"` after deploy.
+The client is safe before then: local daily play and the queue keep working.
+
+**Acceptance.**
+- Two devices on the same date get the same track and modifier, and the server
+  agrees (golden).
+- A valid clean daily uploads, ranks, and is watchable; its replay loads the
+  daily road.
+- A forged time has no effect; a client-chosen track/modifier is ignored; an
+  old date is rejected.
+- A crash is not uploaded; a worse run does not replace a better one.
+- Offline and guest runs queue and upload after sign-in; a fresh device pulls
+  its daily bests.
+- All 16 verifiers, `make test`, web export and APK stay green.
+
+### C4c. HUD: live pace delta and no progress bar — S
+
+Two pieces of direct player feedback, both independent of the visual redesign
+and small enough to ship first.
+
+- **Remove the 7px full-width gold progress bar.** The road is the progress
+  bar. If progress is wanted, draw a 1px hairline at the very top edge with a
+  4px car dot at 40% opacity, behind a Settings toggle that defaults off. The
+  HUD must not put a filled bar across the play area.
+- **Replace the countdown delta with a live pace delta.** Today the chip is
+  `elapsed - final_best`, so it starts around `-10.4s` and rises to zero; it
+  says nothing about the first sling. Build a reference curve `s -> time` from
+  the PB replay (`Storage.get_replay`) and/or the WR row's `steps` (replay it
+  once at load), then show `player.time - reference.time_at(player.car.s)`.
+  At the start both are at `s=0`, so the chip reads `0.000`; a slow first sling
+  makes it positive (behind), a fast one negative (ahead). Hide a chip when its
+  replay is unavailable rather than falling back to the countdown. For endless,
+  compare the reference's distance at the same elapsed time, so the same
+  "starts at zero" rule holds.
+- **Where it lives.** A `Game.set_pace(steps)` / `Game.pace_time_at(s)` pair
+  (testable, reusable for a ghost) and `App._update_hud_marks` reading it. No
+  physics change; `physics/` and the parity goldens are untouched.
+- **Tests.** `verify_hud.gd` asserts: the bar is gone (or hidden by default);
+  both deltas read `0.000`/`--` at `s=0`; a reference 0.2s slower at a known
+  `s` reads `+0.200`; a faster one reads negative; endless reads zero at `t=0`;
+  a missing replay hides the chip. Update the existing progress-bar assertions.
+
+**Acceptance:** a run starts with a neutral `0.000` delta, the delta reflects
+the line at the player's current road position, the huge yellow bar is gone,
+and `verify_hud` proves all of it.
 
 ### C5. Custom-track sharing — M
 

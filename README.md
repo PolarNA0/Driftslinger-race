@@ -63,6 +63,7 @@ re-simulates every stored run.
 | `AGENTS.md` | Working notes for this repo: architecture, gotchas, rules. |
 | `PHYSICS.md` | The checklist for any change to the physics the board verifies. |
 | `ROADMAP.md` | The forward plan, with acceptance tests and shipped notes. |
+| `UI_REDESIGN.md` | The proposed UI redesign: research, tokens, screen specs and phases. |
 | `Makefile` | `make check`, `verify`, `web`, `apk`, `setup`. |
 | `toolchain.json` | The pinned Godot, Node and Supabase CLI versions. `node tools/toolchain.mjs --check` enforces it. |
 

@@ -15,6 +15,9 @@ Commit finished work and **push straight to `main`** - do not ask, do not open a
 PR, do not sit on a branch. `origin/main` is the one line of development. If a
 push is rejected, pull/rebase and push again rather than opening a PR.
 
+The proposed UI redesign is in `UI_REDESIGN.md`; the daily-board plan is C4b in
+`ROADMAP.md`. Both are proposals, not shipped behaviour.
+
 ## One build, and one piece of JavaScript
 
 **The Godot build (`godot/`) is the game.** The web build served to players and
