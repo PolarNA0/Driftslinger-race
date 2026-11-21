@@ -10,6 +10,13 @@ push; adding features before fixing that is how a good codebase loses a weekend.
 
 ---
 
+> **Pending deploy:** `DEPLOY_PENDING.md` lists work that is on `main` but not
+> live. It is the endless-tracker migration plus the `run` function deploy,
+> blocked on the empty `SUPABASE_ACCESS_TOKEN` repository secret. Do it first if
+> you have project access, then delete the file.
+
+---
+
 ## 1. How to read this
 
 - **IDs** (`P0-1`, `B3`, …) are stable; refer to them in issues and commits.

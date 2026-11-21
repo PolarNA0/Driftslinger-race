@@ -83,6 +83,14 @@ for (const [doc, base] of [
   }
 }
 
+// While a deploy is pending, the handoff note must be reachable from the two
+// files an agent reads first. Once it is applied and the file is deleted, this
+// check disappears with it.
+if (existsSync(join(root, 'DEPLOY_PENDING.md'))) {
+  check('AGENTS.md points at DEPLOY_PENDING.md', read('AGENTS.md').includes('DEPLOY_PENDING.md'));
+  check('ROADMAP.md points at DEPLOY_PENDING.md', read('ROADMAP.md').includes('DEPLOY_PENDING.md'));
+}
+
 // The endless tracker is server-only: no Godot verifier can see it. Check the
 // pieces that have to agree, so a refactor cannot silently drop the announcement.
 const runFn = read('supabase/functions/run/index.ts');

@@ -5,6 +5,10 @@ round a pillar, let go to fly straight to the next one. Leave the road and the
 run ends. Two modes: **speedrun** (a finite ~10s track, scored by time) and
 **endless** (an infinite road, scored by distance in metres).
 
+> **Pending deploy:** `DEPLOY_PENDING.md` lists work that is on `main` but not
+> live (the endless-tracker migration and the `run` function deploy). If you have
+> Supabase access, do it before starting anything else, then delete the file.
+
 ## Working on this repo
 
 Commit finished work and **push straight to `main`** - do not ask, do not open a
