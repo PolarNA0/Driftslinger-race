@@ -39,7 +39,6 @@ var car: Car
 var cam_x := 0.0
 var cam_y := 0.0
 var cam_angle := 0.0
-var shake := 0.0
 
 var mode := "endless"
 var seed_num := 1
@@ -247,22 +246,19 @@ func _follow(delta: float) -> void:
 	cam_angle += U.ang_diff(cam_angle, car.angle) * minf(1.0, 6.0 * delta)
 	cam_x += (tx - cam_x) * minf(1.0, 12.0 * delta)
 	cam_y += (ty - cam_y) * minf(1.0, 12.0 * delta)
-	if shake > 0.0:
-		shake = maxf(0.0, shake - delta * 60.0)
 	renderer.cam_x = cam_x
 	renderer.cam_y = cam_y
 	renderer.cam_angle = cam_angle
-	renderer.shake = shake
 
 
 func kick(amount: float) -> void:
 	if reduced_motion:
 		return
-	shake = maxf(shake, amount)
-	# `_follow` only runs while the physics is live, so a crash kick has to reach
-	# the renderer here or the shake it asks for is never drawn.
+	# The renderer owns the decay, in `_process`, so a crash kick still fades
+	# after `_die` stops the physics. Decaying it here only while `_follow` ran
+	# left a crashed run shaking forever.
 	if renderer != null:
-		renderer.shake = shake
+		renderer.shake = maxf(renderer.shake, amount)
 
 
 func _die() -> void:

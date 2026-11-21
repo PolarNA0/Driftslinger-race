@@ -2153,6 +2153,8 @@ func _build_pause() -> void:
 
 func _to_menu() -> void:
 	_end_watching()
+	if game.renderer != null:
+		game.renderer.clear_fx()
 	audio.pause_all(false)
 	audio.music("music_menu")
 	game.set_physics_process(false)
@@ -2168,6 +2170,8 @@ func _to_menu() -> void:
 func _start_run(seed: int) -> void:
 	_end_watching()
 	_hide_overlays()
+	if game.renderer != null:
+		game.renderer.clear_fx()
 	audio.pause_all(false)
 	audio.music("music_race")
 	game.load_track(seed, menu_mode)

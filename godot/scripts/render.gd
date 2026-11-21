@@ -101,6 +101,16 @@ func flash_hit(amount: float) -> void:
 	flash = maxf(flash, amount)
 
 
+# Drop every transient effect. The menu is drawn over the road, so a crash shake
+# that was still decaying must not follow the player into Settings.
+func clear_fx() -> void:
+	shake = 0.0
+	flash = 0.0
+	pulse = 0.0
+	_shake_off = Vector2.ZERO
+	queue_redraw()
+
+
 func zoom_pulse(amount: float) -> void:
 	pulse = maxf(pulse, amount)
 
@@ -111,6 +121,8 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	if shake > 0.0:
+		shake = maxf(0.0, shake - delta * 60.0)
 	if flash > 0.0:
 		flash = maxf(0.0, flash - delta * 2.8)
 	if pulse > 0.0:

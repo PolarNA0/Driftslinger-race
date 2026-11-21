@@ -65,8 +65,17 @@ func _initialize() -> void:
         app.game.kick(18.0)
         _check("reduce motion suppresses shake", app.game.renderer.shake == 0.0)
         app.game.reduced_motion = false
+        app.game.renderer.clear_fx()
         app.game.kick(18.0)
         _check("a crash reaches the renderer", app.game.renderer.shake > 0.0)
+        # `_die` stops the physics, so the shake has to decay in the renderer's
+        # own `_process`. This used to stay at full strength forever.
+        for i in range(30):
+                app.game.renderer._process(1.0 / 60.0)
+        _check("the shake fades without a physics tick", app.game.renderer.shake == 0.0)
+        app.game.renderer.shake = 9.0
+        app.game.renderer.clear_fx()
+        _check("clear_fx stops the shake", app.game.renderer.shake == 0.0)
         app.game.renderer.flash = 0.0
         app.game.renderer.flash_hit(0.3)
         _check("a crash flashes the screen", app.game.renderer.flash > 0.0)
