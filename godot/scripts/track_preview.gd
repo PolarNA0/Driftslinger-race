@@ -372,6 +372,21 @@ func op_end_world() -> Vector2:
         return _road[_road.size() - 1]
 
 
+# The direction the road is travelling where a new piece would attach. Used to aim a
+# turn at the cell the player tapped: without it a corner ignored the tap completely
+# and only alternated direction with the previous corner, so placement felt like it
+# snapped to the last piece instead of going where it was pointed.
+func op_end_heading() -> Vector2:
+        if _road.size() < 2:
+                return Vector2(cos(Cfg.BASE_HEADING), sin(Cfg.BASE_HEADING))
+        var a: Vector2 = _road[_road.size() - 2]
+        var b: Vector2 = _road[_road.size() - 1]
+        var d := b - a
+        if d.length() < 0.0001:
+                return Vector2(cos(Cfg.BASE_HEADING), sin(Cfg.BASE_HEADING))
+        return d.normalized()
+
+
 # Where a piece appended after the first `count` pieces would start. A piece goes in
 # front of the finish line, so the growth point is the end of the piece before it, not
 # the end of the road.
@@ -423,9 +438,9 @@ func _draw() -> void:
         var w := size.x
         var h := size.y
         draw_rect(Rect2(Vector2.ZERO, size), UiTheme.BG)
-        if show_grid:
-                _draw_grid()
         if _road.size() < 2:
+                if show_grid:
+                        _draw_grid()
                 # Nothing placed yet: the canvas is the ground and the grid, plus a prompt.
                 # Once a piece is down the road draws, valid or not, so the player can see
                 # what they are building.
@@ -441,9 +456,13 @@ func _draw() -> void:
         var road: Color = colors["road"]
         var stripe: Color = colors["stripe"]
 
-        # Ground: a generous rect in the track's background colour, so the palette is
-        # visible while editing.
+        # Ground first, then the grid on top of it. The grid used to be drawn before
+        # this rect, so the moment the first piece landed the ground painted straight
+        # over it and the grid vanished - exactly when the player needs it to line the
+        # next piece up against the one before.
         draw_rect(Rect2(Vector2.ZERO, size), ground)
+        if show_grid:
+                _draw_grid()
 
         var hw := maxf(1.0, Cfg.ROAD_HALF_WIDTH * _zoom)
         _band(road, hw)
@@ -458,24 +477,47 @@ func _entry() -> Dictionary:
         return {"road": str(palette.get("road", "")), "ground": str(palette.get("ground", ""))}
 
 
+# One unit normal per road sample: the average of the directions of the segments
+# meeting there. Neighbouring quads then share an edge exactly.
+func _vertex_normals() -> Array:
+        var out := []
+        var n := _road.size()
+        for i in range(n):
+                var d := Vector2.ZERO
+                if i > 0:
+                        d += (_road[i] - _road[i - 1]).normalized()
+                if i < n - 1:
+                        d += (_road[i + 1] - _road[i]).normalized()
+                if d.length() < 0.0001:
+                        d = Vector2.RIGHT
+                d = d.normalized()
+                # `d` is the tangent; the normal is it turned a quarter turn.
+                out.append(Vector2(-d.y, d.x))
+        return out
+
+
+# Fill a band of half-width `hw` either side of the centreline.
+#
+# Offsets come from a per-VERTEX normal, not a per-segment one. With a per-segment
+# normal the two quads either side of a sample meet at different angles, which on an
+# arc leaves a wedge of ground showing at every sample: the road reads as a row of
+# little dashes instead of a solid band (measured 9.4px per seam at 2.6x zoom).
+# Averaging the adjacent segments' normals makes neighbouring quads share an edge,
+# which is what `Renderer2D._band` does for the real road.
 func _band(fill: Color, hw: float) -> void:
+        var nrm := _vertex_normals()
         var pts := PackedVector2Array()
         for i in range(_road.size() - 1):
-                var a: Vector2 = _road[i]
-                var b: Vector2 = _road[i + 1]
-                var d := b - a
-                var l := d.length()
-                if l == 0.0:
-                        l = 1.0
-                var n := Vector2(-d.y / l, d.x / l) * hw
-                var pa := world_to_screen(a)
-                var pb := world_to_screen(b)
-                pts.append(pa + n)
-                pts.append(pb + n)
-                pts.append(pb - n)
-                pts.append(pa + n)
-                pts.append(pb - n)
-                pts.append(pa - n)
+                var pa := world_to_screen(_road[i])
+                var pb := world_to_screen(_road[i + 1])
+                var n0: Vector2 = nrm[i] * hw
+                var n1: Vector2 = nrm[i + 1] * hw
+                pts.append(pa + n0)
+                pts.append(pb + n1)
+                pts.append(pb - n1)
+                pts.append(pa + n0)
+                pts.append(pb - n1)
+                pts.append(pa - n0)
         var cols := PackedColorArray()
         cols.resize(pts.size())
         cols.fill(fill)
@@ -496,10 +538,14 @@ func _draw_pieces(colors: Dictionary) -> void:
                         draw_string(f, mid + Vector2(-4, 4), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, UiTheme.INK)
         for p in _poles:
                 var c := world_to_screen(Vector2(float(p["x"]), float(p["y"])))
-                var r := clampf(7.0 * _zoom, 2.0, 9.0)
+                # A pole has to be findable at any zoom, so it keeps a floor on its radius
+                # and carries a dark rim: on a bright ground a plain disc reads as a hole
+                # in the tarmac rather than as the thing the car slings around.
+                var r := clampf(9.0 * _zoom, 5.0, 14.0)
+                draw_circle(c, r + 2.0, Color(0.0, 0.0, 0.0, 0.55))
                 draw_circle(c, r, pole)
                 if int(p["op"]) == selected:
-                        draw_arc(c, r + 3.0, 0.0, TAU, 24, UiTheme.ACCENT, 2.0, true)
+                        draw_arc(c, r + 5.0, 0.0, TAU, 24, UiTheme.ACCENT, 2.0, true)
 
 
 func _mark(s: float, c: Color) -> void:

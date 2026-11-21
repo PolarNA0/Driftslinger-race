@@ -1613,7 +1613,6 @@ func _submit_account() -> void:
 	await _after_sign_in()
 	_to_menu()
 	shell.select("account")
-	shell.select("account")
 
 
 # Pick the public name for an account that signed in without one.

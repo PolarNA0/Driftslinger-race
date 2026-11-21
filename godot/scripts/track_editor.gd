@@ -205,24 +205,27 @@ func _build_camera_row() -> Control:
 
 # --- palette -----------------------------------------------------------------
 
-# The pieces, in the order they read: a straight, the three turns, then the two
-# pillars. A "pillar" is a corner - the thing the car slings around - and the
-# reattach one is the same corner with `reattach` set, so both are quarter turns that
-# differ only in whether the pole stays live after an early release.
+# The pieces, in the order they read: a straight, the three turns, then the
+# reattach turn. Every turn carries a pillar - the pole the car slings around sits
+# at the centre of the arc - so a turn and a pillar are one piece, not two.
 func _build_palette() -> void:
 	for c in palette_bar.get_children():
 		c.queue_free()
 	_palette_buttons = {}
 	# Each tile is a picture of the piece, not a word for it: the shape is what a
-	# player is choosing. "Pillar" and "Reattach" are both quarter turns and so
-	# share a tile shape; the tooltip is what names the difference.
+	# player is choosing.
+	#
+	# There is no separate "pillar" tile. A pillar IS the turn: the pole the car
+	# slings around sits at the centre of the arc. The old tile built the identical
+	# op to "90", so choosing a curve and choosing a pillar did the same thing,
+	# which read as both of them placing at once. The reattach turn is a real
+	# difference - its pole stays live after an early release.
 	var items := [
 		["straight", "Straight"],
 		["90", "Turn 90\u00b0"],
 		["180", "Hairpin 180\u00b0"],
 		["270", "Loop 270\u00b0"],
-		["pillar", "Pillar"],
-		["reattach", "Reattach"],
+		["reattach", "Reattach turn"],
 		["finish", "Finish line"],
 	]
 	for it in items:
@@ -306,12 +309,11 @@ func _on_cell_tapped(cell: Vector2i) -> void:
 	else:
 		_place_armed(w, start)
 	selected = ops.size() - 1
-	var first := ops.size() == 1
 	_commit()
-	# The first piece turns the blank canvas into a road, and the camera has never
-	# framed anything yet: fit so the piece the player just placed is in view.
-	if first:
-		preview.fit()
+	# Deliberately no `fit()` here. Re-framing the whole track after a placement
+	# moves the view out from under the pointer, so the piece appears to snap to
+	# somewhere other than where it was tapped. The camera stays where the player
+	# put it; `Fit` is a button for when they do want the whole track in view.
 
 
 func _place_armed(w: Vector2, start: Vector2) -> void:
@@ -322,21 +324,39 @@ func _place_armed(w: Vector2, start: Vector2) -> void:
 			var d := w.distance_to(start)
 			ops.append(CustomTracks.make_straight(clampf(d, CustomTracks.MIN_LEN, CustomTracks.MAX_LEN)))
 		"90":
-			ops.append(CustomTracks.next_corner(ops, 90))
+			ops.append(_aimed_corner(w, start, 90, false))
 		"180":
-			ops.append(CustomTracks.next_corner(ops, 180))
+			ops.append(_aimed_corner(w, start, 180, false))
 		"270":
-			ops.append(CustomTracks.next_corner(ops, 270))
-		"pillar":
-			var p := CustomTracks.next_corner(ops, 90)
-			p["reattach"] = false
-			ops.append(p)
+			ops.append(_aimed_corner(w, start, 270, false))
 		"reattach":
-			var r := CustomTracks.next_corner(ops, 90)
-			r["reattach"] = true
-			ops.append(r)
+			ops.append(_aimed_corner(w, start, 90, true))
 		_:
 			pass
+
+
+# A turn goes where the player pointed, not wherever the previous corner happened
+# to leave the road. The tapped cell decides the side: project it onto the road
+# end's left normal and turn toward the side it falls on. A tap straight down the
+# road has no side, so it falls back to `next_corner`, which alternates with the
+# previous corner - the rule a staircase track needs.
+func _aimed_corner(w: Vector2, start: Vector2, deg: int, reattach: bool) -> Dictionary:
+	var turn := 0
+	var to := w - start
+	if to.length() > 1.0:
+		var h := preview.op_end_heading()
+		# Left of the heading is the heading turned -90 degrees.
+		var left := Vector2(h.y, -h.x)
+		var side := to.normalized().dot(left)
+		if absf(side) > 0.2:
+			turn = 1 if side > 0.0 else -1
+	var c: Dictionary
+	if turn == 0:
+		c = CustomTracks.next_corner(ops, deg)
+	else:
+		c = CustomTracks.make_corner(turn * absi(deg))
+	c["reattach"] = reattach
+	return c
 
 
 # --- the sheet ---------------------------------------------------------------

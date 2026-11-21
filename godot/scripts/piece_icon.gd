@@ -73,10 +73,9 @@ func _draw() -> void:
 			_turn(w, h, band, m, deg_to_rad(180.0))
 		"270":
 			_turn(w, h, band, m, deg_to_rad(270.0))
-		"pillar", "reattach":
-			# Both are a quarter turn: the pillar is where the car slings, and the
-			# reattach one lets go of it early. The shape is the same either way, so the
-			# tile shows the shape and the label says which is which.
+		"reattach":
+			# A quarter turn whose pole stays catchable after an early release. The shape
+			# is the same as a plain turn; the label says which is which.
 			_turn(w, h, band, m, deg_to_rad(90.0))
 
 

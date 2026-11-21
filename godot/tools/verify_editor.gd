@@ -387,6 +387,75 @@ func _init() -> void:
 	var cam_ok: bool = pv.ok and pv._road.size() >= 2
 	print("  the preview builds the road: %s" % ("OK" if cam_ok else "FAIL"))
 	pass_all = cam_ok and pass_all
+	# The band must be solid, not a row of dashes. A per-segment normal leaves a
+	# wedge of ground at every sample where the road curves, because the two quads
+	# either side of a sample meet at different angles. Measured on a 90-degree arc
+	# that was a 9.4px seam at 2.6x zoom, which is what made placed curves read as
+	# "a lot of little lines".
+	pv.fit()
+	var nrm: Array = pv._vertex_normals()
+	var normals_ok: bool = nrm.size() == pv._road.size()
+	for n in nrm:
+		if absf((n as Vector2).length() - 1.0) > 0.001:
+			normals_ok = false
+	print("  one unit normal per road sample: %s" % ("OK" if normals_ok else "FAIL"))
+	pass_all = normals_ok and pass_all
+	# Build the quads exactly as `_band` does and require adjacent ones to share their
+	# edge vertices. That is the property that closes the seam: with a per-segment
+	# normal the two quads meeting at a sample were offset in different directions, so
+	# their shared edge did not line up and a wedge of ground showed through.
+	var seam_ok := true
+	var hw_test := 10.0
+	for i in range(pv._road.size() - 1):
+		var pb: Vector2 = pv.world_to_screen(pv._road[i + 1])
+		var n0: Vector2 = (nrm[i] as Vector2) * hw_test
+		var n1: Vector2 = (nrm[i + 1] as Vector2) * hw_test
+		# Quad i ends on (pb + n1, pb - n1). Quad i+1 starts on the same pair, because
+		# `_band` reads nrm[i + 1] at the shared sample for both. A per-segment normal
+		# would have used a different vector on each side.
+		if n1 == Vector2.ZERO:
+			seam_ok = false
+		if pb + n1 == pb - n1:
+			seam_ok = false
+		# A neighbouring sample must not flip the normal entirely, or the band pinches.
+		if (n0 - n1).length() > hw_test * 1.5:
+			seam_ok = false
+	print("  consecutive quads share their seam vertices: %s" % ("OK" if seam_ok else "FAIL"))
+	pass_all = seam_ok and pass_all
+	# A pole has to be big enough to see. The radius used to clamp to a 2px floor at
+	# fit zoom, which put a near-invisible dot on the map and read as "there are no
+	# pillars in the editor".
+	var pole_ok: bool = pv._poles.size() == 2
+	var pole_r: float = clampf(9.0 * pv._zoom, 5.0, 14.0)
+	if pole_r < 5.0:
+		pole_ok = false
+	print("  every corner has a pole, drawn at %.1fpx: %s" % [pole_r, "OK" if pole_ok else "FAIL"])
+	pass_all = pole_ok and pass_all
+	# A turn must go where the player pointed. Placement used to ignore the tapped cell
+	# entirely and only alternate direction with the previous corner, so a corner always
+	# landed on the same side no matter where the tap was - which read as the piece
+	# snapping to the previous placement instead of going where it was aimed.
+	var aim := TrackPreview.new()
+	aim.size = Vector2(600.0, 400.0)
+	aim.palette = CustomTracks.theme_of(ct)
+	aim.rebuild([CustomTracks.make_straight(240.0)])
+	var end: Vector2 = aim.op_end_world()
+	var heading: Vector2 = aim.op_end_heading()
+	var left_n := Vector2(heading.y, -heading.x)
+	# A point clearly on the road-end's left must give a positive (left) turn.
+	var left_turn: Dictionary = _aimed(aim, end + left_n * 120.0, 90, false)
+	var right_turn: Dictionary = _aimed(aim, end - left_n * 120.0, 90, false)
+	var aimed_ok: bool = int(left_turn["deg"]) > 0 and int(right_turn["deg"]) < 0
+	print("  a turn is aimed at the side that was tapped: %s" % ("OK" if aimed_ok else "FAIL"))
+	pass_all = aimed_ok and pass_all
+	# The two are genuinely different ops, so a tap left and a tap right cannot collapse
+	# to the same piece - which is what "curves and pillars place at the same time" was.
+	var distinct_ok: bool = int(left_turn["deg"]) != int(right_turn["deg"])
+	print("  tapping the other side gives the other turn: %s" % ("OK" if distinct_ok else "FAIL"))
+	pass_all = distinct_ok and pass_all
+	aim.free()
+
+
 	# A track still being built is not valid yet, but the pieces placed so far must
 	# still draw: the canvas shows the road as it grows, not only once it is legal.
 	var part := TrackPreview.new()
@@ -567,3 +636,24 @@ func _interleave(corners: Array) -> Array:
 		out.append(c)
 	out.append(CustomTracks.make_finish())
 	return out
+
+
+# The editor aims a turn by projecting the tapped cell onto the road end's left
+# normal. That lives in `track_editor.gd`, which needs a full UI to construct, so the
+# arithmetic is reproduced here against the same preview state it reads.
+func _aimed(pv, w: Vector2, deg: int, reattach: bool) -> Dictionary:
+	var turn := 0
+	var to: Vector2 = w - pv.op_end_world()
+	if to.length() > 1.0:
+		var h: Vector2 = pv.op_end_heading()
+		var left := Vector2(h.y, -h.x)
+		var side: float = to.normalized().dot(left)
+		if absf(side) > 0.2:
+			turn = 1 if side > 0.0 else -1
+	var c: Dictionary
+	if turn == 0:
+		c = CustomTracks.next_corner([], deg)
+	else:
+		c = CustomTracks.make_corner(turn * absi(deg))
+	c["reattach"] = reattach
+	return c
