@@ -1705,6 +1705,7 @@ func _build_board() -> void:
 
 	var scroll := ScrollContainer.new()
 	scroll.custom_minimum_size = Vector2(0, 300)
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	col.add_child(scroll)
 	lb_rows = _col(2)
 	lb_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1837,6 +1838,7 @@ func _build_history() -> void:
 	col.add_child(hist_sub)
 	var scroll := ScrollContainer.new()
 	scroll.custom_minimum_size = Vector2(0, 320)
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	col.add_child(scroll)
 	hist_rows = _col(2)
 	hist_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -2102,7 +2104,7 @@ func _load_reals(seed: int, mode: String = "speedrun") -> void:
 # =============================================================================
 
 func _build_dead() -> void:
-	var col := _new_overlay("dead")
+	var col := _new_overlay("dead", "", 0.52)
 	dead_tag = _style_title(_label("Crashed", 26))
 	col.add_child(dead_tag)
 	dead_dist = _label("", 30)
@@ -2115,7 +2117,7 @@ func _build_dead() -> void:
 
 
 func _build_finish() -> void:
-	var col := _new_overlay("finish")
+	var col := _new_overlay("finish", "", 0.68)
 	finish_tag = _style_title(_label("Finished", 26))
 	col.add_child(finish_tag)
 	finish_time = _label("", 30)
@@ -2148,7 +2150,7 @@ func _build_finish() -> void:
 
 
 func _build_replay_done() -> void:
-	var col := _new_overlay("replay_done")
+	var col := _new_overlay("replay_done", "", 0.42)
 	replay_tag = _style_title(_label("Replay", 26))
 	col.add_child(replay_tag)
 	replay_sub = _label("", 16)
@@ -2168,7 +2170,7 @@ func _build_replay_done() -> void:
 # The first-run lesson. It is deliberately short: one idea per card row, and the
 # primary button drops straight into a run so the player learns by doing.
 func _build_tutorial() -> void:
-	var col := _new_overlay("tutorial", "How to play")
+	var col := _new_overlay("tutorial", "How to play", 0.74)
 	var lead := _label("One button. Hold it to grab the next pole and swing round it; let go to fly to the next one. Leave the road and the run ends.", 15)
 	lead.add_theme_color_override("font_color", UiTheme.INK_DIM)
 	lead.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -2215,7 +2217,7 @@ func _tutorial_back() -> void:
 
 
 func _build_pause() -> void:
-	var col := _new_overlay("pause", "Paused")
+	var col := _new_overlay("pause", "Paused", 0.45)
 	col.add_child(_primary_button("Resume", func():
 		_hide_overlays()
 		audio.pause_all(false)
