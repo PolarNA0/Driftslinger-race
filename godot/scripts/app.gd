@@ -2525,11 +2525,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		_bind_key(event.keycode)
 		get_viewport().set_input_as_handled()
 		return
-	# The reset key restarts the run in progress. It only fires with no overlay up and
-	# not on a replay, so a crash/finish card (which has its own button) is not
-	# yanked away. Keyboard-only: on a phone the round restart button does this.
+	# The reset key restarts the run in progress, and the run that just ended:
+	# the crash and finish cards are where a desktop player expects R to retry,
+	# and the card's own button does the same thing. It still refuses a replay
+	# and every other overlay, so it cannot yank away a menu. Keyboard-only: on
+	# a phone the round restart button does this.
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == reset_key:
-		if overlay == "" and game.state == "running" and not game.is_replay():
+		var over := overlay == "dead" or overlay == "finish"
+		if not game.is_replay() and ((overlay == "" and game.state == "running") or over):
 			_start_run(game.seed_num)
 		get_viewport().set_input_as_handled()
 		return

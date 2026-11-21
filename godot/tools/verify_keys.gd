@@ -62,6 +62,28 @@ func _initialize() -> void:
 	_check("R does not touch a replay", app.game.car.time == before)
 	app.game.mode = "speedrun"
 
+	# R retries from the crash and finish cards: the key does what the card's
+	# "Run it again" button does. A menu overlay is still refused.
+	app._start_run(1)
+	await process_frame
+	app._show_only("dead")
+	app._unhandled_input(_key(KEY_R, true))
+	_check("R restarts from the crash card", app.game.car.time == 0.0 and app.overlay == "")
+	app._start_run(1)
+	await process_frame
+	app._show_only("finish")
+	app._unhandled_input(_key(KEY_R, true))
+	_check("R restarts from the finish card", app.game.car.time == 0.0 and app.overlay == "")
+	app._start_run(1)
+	await process_frame
+	for i in range(30):
+		app.game._physics_process(1.0 / 60.0)
+	app._show_only("settings")
+	var menu_time: float = app.game.car.time
+	app._unhandled_input(_key(KEY_R, true))
+	_check("R does not restart from Settings", app.game.car.time == menu_time)
+	app._hide_overlays()
+
 	# Esc toggles pause: pauses a running run, resumes a paused one.
 	app._start_run(1)
 	await process_frame

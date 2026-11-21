@@ -30,8 +30,9 @@ Additions on top of the port:
   Tracks 26–28 showcase it (amber = still catchable, bronze = spent).
 - **Sprite cars.** Every car in the picker is its own free CC0 top-down sprite
   (see `assets/cars/CREDITS.md`); `tools/verify_cars.gd` fails if two share one.
-- **A restart key.** `R` restarts the run in progress. It can be rebound in
-  Settings, where the play key is rebound too.
+- **A restart key.** `R` restarts the run in progress, and retries from the crash
+  and finish cards. It can be rebound in Settings, where the play key is rebound
+  too.
 - **A pause key.** `Esc` pauses and resumes the run in progress. It is rebound in
   Settings alongside the play and restart keys.
 - **A menu that fits a phone.** The menu is a tabbed app shell - Garage, Editor,
@@ -226,7 +227,8 @@ godot --headless --path . --script res://tools/verify_cars.gd
 ```
 
 `tools/verify_keys.gd` checks the rebindable keys: the defaults (Space to play,
-R to restart, Esc to pause), that R restarts a run and leaves a replay alone,
+R to restart, Esc to pause), that R restarts a run, retries from the crash and
+finish cards, refuses a menu overlay, and leaves a replay alone,
 that Esc toggles pause on a live run only, and that a rebinding takes effect,
 refuses to collide with another key, and can be cancelled with Escape. It also
 checks the Settings "Controls" block always builds its rebind rows, so a device
