@@ -27,9 +27,9 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
@@ -100,7 +100,7 @@ jobs:
           mkdir -p build/android
           godot --headless --path . --export-debug "Android" build/android/drift-slinger.apk
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: drift-slinger-apk
           path: godot/build/android/drift-slinger.apk
@@ -126,7 +126,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # The rolling release is what /android points at, so a build that published
       # nothing (or an empty asset) must turn this workflow red.
       - name: The rolling APK release has the APK
