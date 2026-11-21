@@ -547,10 +547,11 @@ tab pages and populates them; the shell owns no game state.
 - **Three rebindable keys.** Space plays, `R` restarts the run in progress and
   `Esc` pauses and resumes it; all three are rebound in Settings, which captures
   the next key press (`_begin_capture` / `_bind_key`) and refuses a binding that
-  would collide with another key. `R` and `Esc` only touch a live run - never a
-  replay - and are keyboard-only, because on a phone the round restart button and
-  the pause button are how a run is restarted and paused. `verify_keys.gd` covers
-  all of that.
+  would collide with another key. `R` restarts a live run and also retries from
+  the crash and finish cards (the desktop equivalent of their "Run it again"
+  button); `Esc` only touches a live run; neither touches a replay. They are
+  keyboard-only, because on a phone the round restart button and the pause button
+  are how a run is restarted and paused. `verify_keys.gd` covers all of that.
 - **The Settings key rows are built on every device, touchscreen or not.** They
   used to be gated behind `DisplayServer.is_touchscreen_available()` (a tap hint
   on a touchscreen, the rebind rows otherwise). An iPad with a keyboard attached
@@ -1033,9 +1034,15 @@ list before anything else.
 ### The record tracker, and the client settings that are gone
 
 The record tracker posts from the server, not the browser. The `run` Edge Function
-(`supabase/functions/run/index.ts`) reads the webhook and the two message templates
+(`supabase/functions/run/index.ts`) reads the webhook and the message templates
 from `tracker_config` and announces an improvement itself, so every player's run is
-announced rather than only the admin's. The webhook is writable only through
+announced rather than only the admin's. There are four templates: speedrun WR and
+position, endless lead and position. An endless improvement goes through
+`announceEndless`, which uses the lead template at rank 1 and the position
+template otherwise, with `{metres}`, `{rank}` and `{total}` (an endless score is a
+distance, so it has no time or WR delta). The endless columns and the five-argument
+`set_tracker_config` are `0007_endless_tracker.sql`; apply that migration with the
+function deploy, or an endless improvement is stored without an announcement. The webhook is writable only through
 `set_tracker_config`, which checks a row in `public.admins` (0006), and no client
 can read `webhook_url` back - so the credential goes up and never comes down, and
 the `run` function only ever posts to discord.com. `supabase/tests/tracker_rls.sql`
@@ -1157,4 +1164,12 @@ The upload path is best-effort like everything else: `Api.enqueue_endless` keeps
 only the furthest distance per seed in the queue, so a later shorter run cannot
 overwrite a better one still waiting to send, and `_sync_my_runs` pulls the
 player's endless bests back down on sign-in.
+
+**An endless improvement is announced.** `run` calls `announceEndless` when
+`submit_endless_run` reports `improved` - a first entry or a further distance -
+so the Discord tracker covers the endless board as well as the track boards. The
+message names the distance and the rank, never a "record" or a time: the endless
+board is not replayed, so nothing about it is verified. `tools/docs-check.mjs`
+checks the four pieces (the call, the two defaults, the migration) are still
+present, because no client-side verifier can see this path.
 

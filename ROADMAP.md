@@ -108,7 +108,7 @@ preset fails `export`.
 
 **Shipped:** `.github/workflows/verify.yml` runs `node tools/test.mjs`,
 `node tools/sync-physics.mjs --check`, `node tools/version.mjs --check`, the
-tracker SQL test, and all fourteen Godot verifiers on `push` to `main`, every
+tracker SQL test, and all fifteen Godot verifiers on `push` to `main`, every
 pull request, and manual dispatch. It downloads Godot 4.5.2, imports the
 project, and runs each verifier in its own log group.
 
@@ -187,7 +187,7 @@ with two commands.
 **Shipped:** `tools/dev-setup.sh` installs Godot 4.5.2 and the export templates
 (Linux x86_64, idempotent), and the `Makefile` provides `setup`, `test`, `verify`,
 `check`, `web`, `apk` and `clean`. `make check` runs the JS physics tests, the
-vendored-copy check, the version check, the docs check and all fourteen Godot
+vendored-copy check, the version check, the docs check and all fifteen Godot
 verifiers. The tracker SQL test needs a database, so it stays in CI.
 
 ### A5. Fix the tracker RLS hole — S — [x]
