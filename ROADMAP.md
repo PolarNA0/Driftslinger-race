@@ -717,13 +717,22 @@ check covers the email round-trip.
 **Acceptance:** a forced error appears in the event table with the version and
 platform; the privacy policy says what is collected.
 
-### E7. Dependency and toolchain pinning — S
+### E7. Dependency and toolchain pinning — S — [x]
 
 - Godot version in one file, used by every workflow.
 - Dependabot/Renovate for GitHub Actions.
 - Pin the Supabase CLI and Deno versions used in CI.
 
 **Acceptance:** a version bump is one commit and CI proves it.
+
+**Shipped:** `toolchain.json` holds the Godot (editor + templates), Node and
+Supabase CLI versions. Every workflow reads it, `setup-node` reads `.nvmrc`, and
+`tools/dev-setup.sh` reads the same file. `node tools/toolchain.mjs --check`
+(run in CI) fails if a workflow or script hardcodes any of them, sets
+`node-version:` directly, or if `.nvmrc` and `toolchain.json` disagree. A bump is
+one edit to `toolchain.json` plus `.nvmrc`. Dependabot (`.github/dependabot.yml`)
+keeps the GitHub Actions current weekly; the game toolchain is bumped by hand
+because a Godot change needs its export templates too.
 
 ### E8. Release notes automation — S
 

@@ -117,7 +117,7 @@ build is the only client.
 ## Commands
 
 ```sh
-make setup      # once: install Godot 4.5.2 + export templates (Linux x86_64)
+make setup      # once: install the pinned Godot + export templates (Linux x86_64)
 make test       # JS physics, vendored copies, version, docs
 make verify     # every Godot verifier below
 make check      # test + verify
@@ -151,6 +151,15 @@ node tools/docs-check.mjs            # stale docs, unwired verifiers, missing pa
 node tools/replay-row.mjs --track N --steps ... --ticks N  # does a stored run still reproduce?
 node tools/smoke.mjs web|board       # post-deploy smoke test
 ```
+
+## The toolchain is pinned in one file
+
+`toolchain.json` is the only place the Godot, Node and Supabase CLI versions
+live. The workflows and `tools/dev-setup.sh` read it (Node comes from `.nvmrc`,
+which `setup-node` reads directly), and `node tools/toolchain.mjs --check` fails
+if any of them hardcodes a version or sets `node-version:` itself. A bump is one
+commit. Do not paste a version back into a workflow; a copy that is missed means
+CI and a developer build different things.
 
 ## Speedrun mode
 

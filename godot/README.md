@@ -102,7 +102,8 @@ The Android build is published to a rolling `android-latest` GitHub release by
 `.github/workflows/build-godot-android.yml`, so
 `releases/download/android-latest/drift-slinger.apk` is always the newest build.
 
-The Android export needs the Godot 4.5 export templates, a JDK 17, and the
+The Android export needs the export templates for the pinned Godot (see
+`../toolchain.json`), a JDK 17, and the
 Android SDK (platform-tools + build-tools + platform 35), wired into the editor
 settings (`export/android/java_sdk_path`, `export/android/android_sdk_path`, and
 `export/android/debug_keystore`). `JAVA_HOME`/`PATH` must include the JDK so

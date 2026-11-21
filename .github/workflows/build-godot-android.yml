@@ -60,18 +60,21 @@ jobs:
             -keyalg RSA -keysize 2048 -validity 10000 \
             -dname "CN=Android Debug,O=Android,C=US"
 
-      - name: Install Godot 4.5.2 and the export templates
+      - name: Read the toolchain
+        run: |
+          echo "GODOT_VERSION=$(node -p "require('./toolchain.json').godot")" >> "$GITHUB_ENV"
+          echo "GODOT_TEMPLATES=$(node -p "require('./toolchain.json').godot_templates")" >> "$GITHUB_ENV"
+      - name: Install Godot and the export templates
         run: |
           set -euo pipefail
-          GODOT_VERSION=4.5.2-stable
-          BASE=https://github.com/godotengine/godot/releases/download/$GODOT_VERSION
+          BASE="https://github.com/godotengine/godot/releases/download/$GODOT_VERSION"
           curl -sSL -o godot.zip "$BASE/Godot_v${GODOT_VERSION}_linux.x86_64.zip"
           curl -sSL -o templates.tpz "$BASE/Godot_v${GODOT_VERSION}_export_templates.tpz"
           mkdir -p "$HOME/.local/bin"
           unzip -q godot.zip -d "$HOME/.local/bin"
           mv "$HOME/.local/bin/Godot_v${GODOT_VERSION}_linux.x86_64" "$HOME/.local/bin/godot"
           chmod +x "$HOME/.local/bin/godot"
-          TPL_DIR="$HOME/.local/share/godot/export_templates/4.5.2.stable"
+          TPL_DIR="$HOME/.local/share/godot/export_templates/$GODOT_TEMPLATES"
           mkdir -p "$TPL_DIR"
           unzip -q templates.tpz -d /tmp/templates
           mv /tmp/templates/templates/* "$TPL_DIR/"
@@ -92,7 +95,7 @@ jobs:
             printf 'export/android/debug_keystore_pass = "android"\n'
             printf 'export/android/java_sdk_path = "%s"\n' "$JAVA_HOME"
             printf 'export/android/android_sdk_path = "%s"\n' "$ANDROID_HOME"
-          } > "$SETTINGS_DIR/editor_settings-4.5.tres"
+          } > "$SETTINGS_DIR/editor_settings-$(echo "$GODOT_VERSION" | cut -d. -f1-2).tres"
           godot --headless --path . --import
           mkdir -p build/android
           godot --headless --path . --export-debug "Android" build/android/drift-slinger.apk

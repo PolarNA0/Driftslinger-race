@@ -36,7 +36,7 @@ See [`AGENTS.md`](AGENTS.md) for the full picture.
 ## Verifying
 
 ```sh
-make setup     # once: Godot 4.5.2 + export templates (Linux x86_64)
+make setup     # once: the pinned Godot + export templates (Linux x86_64)
 make check     # every JS and Godot check
 ```
 
@@ -61,6 +61,7 @@ re-simulates every stored run.
 | `PHYSICS.md` | The checklist for any change to the physics the board verifies. |
 | `ROADMAP.md` | The forward plan, with acceptance tests and shipped notes. |
 | `Makefile` | `make check`, `verify`, `web`, `apk`, `setup`. |
+| `toolchain.json` | The pinned Godot, Node and Supabase CLI versions. `node tools/toolchain.mjs --check` enforces it. |
 
 ## Licensing
 

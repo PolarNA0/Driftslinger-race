@@ -35,18 +35,21 @@ jobs:
       # The Godot editor is not on the runner, and the web export needs the
       # export templates too, so fetch both from the release that matches the
       # project (see godot/project.godot: 4.5).
-      - name: Install Godot 4.5.2
+      - name: Read the toolchain
+        run: |
+          echo "GODOT_VERSION=$(node -p "require('./toolchain.json').godot")" >> "$GITHUB_ENV"
+          echo "GODOT_TEMPLATES=$(node -p "require('./toolchain.json').godot_templates")" >> "$GITHUB_ENV"
+      - name: Install Godot
         run: |
           set -euo pipefail
-          GODOT_VERSION=4.5.2-stable
-          BASE=https://github.com/godotengine/godot/releases/download/$GODOT_VERSION
+          BASE="https://github.com/godotengine/godot/releases/download/$GODOT_VERSION"
           curl -sSL -o godot.zip "$BASE/Godot_v${GODOT_VERSION}_linux.x86_64.zip"
           curl -sSL -o templates.tpz "$BASE/Godot_v${GODOT_VERSION}_export_templates.tpz"
           mkdir -p "$HOME/.local/bin"
           unzip -q godot.zip -d "$HOME/.local/bin"
           mv "$HOME/.local/bin/Godot_v${GODOT_VERSION}_linux.x86_64" "$HOME/.local/bin/godot"
           chmod +x "$HOME/.local/bin/godot"
-          TPL_DIR="$HOME/.local/share/godot/export_templates/4.5.2.stable"
+          TPL_DIR="$HOME/.local/share/godot/export_templates/$GODOT_TEMPLATES"
           mkdir -p "$TPL_DIR"
           unzip -q templates.tpz -d /tmp/templates
           mv /tmp/templates/templates/* "$TPL_DIR/"
@@ -92,7 +95,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version-file: .nvmrc
       # The deploy is only green if the shipped site answers, the wasm is real
       # wasm (not a gzip blob with the wrong header) and /android still redirects.
       - name: The deployed site answers

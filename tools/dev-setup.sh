@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Install the Godot the project builds with, so `make check` works from a clean
-# checkout. Linux x86_64 only; on anything else, install Godot 4.5.2 and the
-# export templates yourself and put `godot` on PATH.
+# checkout. The version comes from toolchain.json. Linux x86_64 only; on anything
+# else, install that Godot and its export templates yourself and put `godot` on
+# PATH.
 #
 #   tools/dev-setup.sh
 #
@@ -9,11 +10,7 @@
 # already-installed template set is not downloaded again.
 set -eu
 
-GODOT_VERSION="4.5.2-stable"
-GODOT_SHORT="4.5.2.stable"
-BASE="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}"
-BIN_DIR="${GODOT_BIN_DIR:-$HOME/.local/bin}"
-TPL_DIR="$HOME/.local/share/godot/export_templates/${GODOT_SHORT}"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 need() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -26,13 +23,24 @@ case "$(uname -s)-$(uname -m)" in
   Linux-x86_64) ;;
   *)
     echo "this script supports Linux x86_64 only" >&2
-    echo "install Godot ${GODOT_VERSION} and its export templates, then put godot on PATH" >&2
+    echo "install the Godot in toolchain.json and its export templates, then put godot on PATH" >&2
     exit 1
     ;;
 esac
 
+need node
 need curl
 need unzip
+
+read_toolchain() {
+  node -p "require(process.argv[1]).$1" "$ROOT/toolchain.json"
+}
+
+GODOT_VERSION="$(read_toolchain godot)"
+GODOT_SHORT="$(read_toolchain godot_templates)"
+BASE="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}"
+BIN_DIR="${GODOT_BIN_DIR:-$HOME/.local/bin}"
+TPL_DIR="$HOME/.local/share/godot/export_templates/${GODOT_SHORT}"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT

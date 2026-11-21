@@ -1,0 +1,7 @@
+{
+  "$comment": "One source for the build toolchain. tools/toolchain.mjs --check fails if a workflow or script hardcodes a version instead of reading this file. Node is mirrored in .nvmrc, which setup-node reads directly.",
+  "godot": "4.5.2-stable",
+  "godot_templates": "4.5.2.stable",
+  "node": "20",
+  "supabase_cli": "3.2.0"
+}

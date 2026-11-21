@@ -1,7 +1,7 @@
 # Local one-command verification. CI runs the same checks (see
 # .github/workflows/verify.yml), plus the tracker SQL test on a postgres service.
 #
-#   make setup   # install Godot 4.5.2 + export templates (Linux x86_64)
+#   make setup   # install the pinned Godot + export templates (Linux x86_64)
 #   make test    # JS physics, vendored copies, version, docs
 #   make verify  # every Godot verifier
 #   make check   # test + verify
@@ -36,6 +36,7 @@ test:
 	node tools/sync-physics.mjs --check
 	node tools/version.mjs --check
 	node tools/docs-check.mjs
+	node tools/toolchain.mjs --check
 
 verify:
 	$(GODOT) --headless --path godot --import

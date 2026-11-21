@@ -29,7 +29,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version-file: .nvmrc
       - name: Headless physics tests
         run: node tools/test.mjs
       - name: Vendored physics is in step
@@ -38,6 +38,8 @@ jobs:
         run: node tools/version.mjs --check
       - name: Docs are consistent
         run: node tools/docs-check.mjs
+      - name: The toolchain is pinned in one file
+        run: node tools/toolchain.mjs --check
 
   sql:
     name: SQL policies
@@ -68,14 +70,18 @@ jobs:
     name: Godot verifiers
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      GODOT: /tmp/Godot_v4.5.2-stable_linux.x86_64
     steps:
       - uses: actions/checkout@v4
-      - name: Install Godot 4.5.2
+      - name: Read the toolchain
         run: |
-          curl -sSL -o /tmp/godot.zip \
-            https://github.com/godotengine/godot/releases/download/4.5.2-stable/Godot_v4.5.2-stable_linux.x86_64.zip
+          V="$(node -p "require('./toolchain.json').godot")"
+          echo "GODOT_VERSION=$V" >> "$GITHUB_ENV"
+          echo "GODOT=/tmp/Godot_v${V}_linux.x86_64" >> "$GITHUB_ENV"
+      - name: Install Godot
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/godotengine/godot/releases/download/$GODOT_VERSION"
+          curl -sSL -o /tmp/godot.zip "$BASE/Godot_v${GODOT_VERSION}_linux.x86_64.zip"
           unzip -q /tmp/godot.zip -d /tmp
           chmod +x "$GODOT"
           "$GODOT" --version
@@ -114,18 +120,21 @@ jobs:
       # The export presets can break without a script failing: a missing custom
       # shell, a bad exclude filter, a template that is not installed. Catch it
       # on the PR, not after the deploy job has already published main.
-      - name: Install Godot 4.5.2 and export templates
+      - name: Read the toolchain
+        run: |
+          echo "GODOT_VERSION=$(node -p "require('./toolchain.json').godot")" >> "$GITHUB_ENV"
+          echo "GODOT_TEMPLATES=$(node -p "require('./toolchain.json').godot_templates")" >> "$GITHUB_ENV"
+      - name: Install Godot and export templates
         run: |
           set -euo pipefail
-          GODOT_VERSION=4.5.2-stable
-          BASE=https://github.com/godotengine/godot/releases/download/$GODOT_VERSION
+          BASE="https://github.com/godotengine/godot/releases/download/$GODOT_VERSION"
           curl -sSL -o godot.zip "$BASE/Godot_v${GODOT_VERSION}_linux.x86_64.zip"
           curl -sSL -o templates.tpz "$BASE/Godot_v${GODOT_VERSION}_export_templates.tpz"
           mkdir -p "$HOME/.local/bin"
           unzip -q godot.zip -d "$HOME/.local/bin"
           mv "$HOME/.local/bin/Godot_v${GODOT_VERSION}_linux.x86_64" "$HOME/.local/bin/godot"
           chmod +x "$HOME/.local/bin/godot"
-          TPL_DIR="$HOME/.local/share/godot/export_templates/4.5.2.stable"
+          TPL_DIR="$HOME/.local/share/godot/export_templates/$GODOT_TEMPLATES"
           mkdir -p "$TPL_DIR"
           unzip -q templates.tpz -d /tmp/templates
           mv /tmp/templates/templates/* "$TPL_DIR/"

@@ -1,0 +1,12 @@
+version: 2
+
+# GitHub Actions are the only dependencies this repo has (the game ships as a
+# Godot export and the tools use Node built-ins), so a weekly check is enough.
+# Godot, Node and the Supabase CLI are pinned in toolchain.json by hand, not by
+# Dependabot, because a Godot bump needs an export-template change too.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
