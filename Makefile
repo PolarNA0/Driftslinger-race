@@ -7,6 +7,7 @@
 #   make check   # test + verify
 #   make web     # export the web build
 #   make apk     # export the Android debug APK
+#   make notes   # release notes from the commits since the last tag
 
 GODOT ?= godot
 
@@ -26,7 +27,7 @@ VERIFIERS := \
 	verify_hud \
 	verify_storage
 
-.PHONY: setup test verify check web apk clean
+.PHONY: setup test verify check web apk notes clean
 
 setup:
 	bash tools/dev-setup.sh
@@ -56,6 +57,9 @@ web:
 apk:
 	mkdir -p godot/build/android
 	cd godot && $(GODOT) --headless --path . --export-debug "Android" build/android/drift-slinger.apk
+
+notes:
+	node tools/release-notes.mjs
 
 clean:
 	rm -rf godot/build

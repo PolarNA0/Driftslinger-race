@@ -734,7 +734,7 @@ one edit to `toolchain.json` plus `.nvmrc`. Dependabot (`.github/dependabot.yml`
 keeps the GitHub Actions current weekly; the game toolchain is bumped by hand
 because a Godot change needs its export templates too.
 
-### E8. Release notes automation — S
+### E8. Release notes automation — S — [x]
 
 Conventional commits + a `release-notes` job on tag, or the existing
 `release-notes` skill run manually. The release body should list gameplay
@@ -742,6 +742,12 @@ changes, physics changes (with the re-simulation results), and migration notes.
 
 **Acceptance:** a tag produces a readable release with the version and the
 physics version.
+
+**Shipped:** `tools/release-notes.mjs` groups the commits since the previous `v*`
+tag (conventional prefixes, with a verb fallback for the older history), prints
+the build version from `VERSION` and a fingerprint of the five physics files.
+`.github/workflows/release.yml` runs it on a `v*` tag and creates or updates the
+GitHub release. The fingerprint becomes a real `physics_version` when C1 lands.
 
 ---
 

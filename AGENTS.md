@@ -150,6 +150,7 @@ node tools/version.mjs --check       # VERSION vs App.VERSION vs export presets
 node tools/docs-check.mjs            # stale docs, unwired verifiers, missing paths
 node tools/replay-row.mjs --track N --steps ... --ticks N  # does a stored run still reproduce?
 node tools/smoke.mjs web|board       # post-deploy smoke test
+node tools/release-notes.mjs         # release notes since the previous tag
 ```
 
 ## The toolchain is pinned in one file
