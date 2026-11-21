@@ -203,7 +203,7 @@ func _ready() -> void:
 
 	# A screenshot hook for headless visual checks: `--shot <path> [--shot-menu]`
 	# saves one frame and quits. Default shows a run in progress; `--shot-menu`
-	# shows the menu instead. `--shot-tab <garage|play|account|settings>` opens a tab.
+	# shows the menu instead. `--shot-tab <garage|editor|play|account|settings>` opens a tab.
 	get_viewport().size_changed.connect(_layout_cards)
 	_layout_cards()
 

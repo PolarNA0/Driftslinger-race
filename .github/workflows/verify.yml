@@ -36,6 +36,8 @@ jobs:
         run: node tools/sync-physics.mjs --check
       - name: Build version is consistent
         run: node tools/version.mjs --check
+      - name: Docs are consistent
+        run: node tools/docs-check.mjs
 
   sql:
     name: SQL policies
@@ -102,3 +104,43 @@ jobs:
             "$GODOT" --headless --path godot --script "res://tools/$script.gd" || exit 1
             echo "::endgroup::"
           done
+
+  web-export:
+    name: Web export
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      # The export presets can break without a script failing: a missing custom
+      # shell, a bad exclude filter, a template that is not installed. Catch it
+      # on the PR, not after the deploy job has already published main.
+      - name: Install Godot 4.5.2 and export templates
+        run: |
+          set -euo pipefail
+          GODOT_VERSION=4.5.2-stable
+          BASE=https://github.com/godotengine/godot/releases/download/$GODOT_VERSION
+          curl -sSL -o godot.zip "$BASE/Godot_v${GODOT_VERSION}_linux.x86_64.zip"
+          curl -sSL -o templates.tpz "$BASE/Godot_v${GODOT_VERSION}_export_templates.tpz"
+          mkdir -p "$HOME/.local/bin"
+          unzip -q godot.zip -d "$HOME/.local/bin"
+          mv "$HOME/.local/bin/Godot_v${GODOT_VERSION}_linux.x86_64" "$HOME/.local/bin/godot"
+          chmod +x "$HOME/.local/bin/godot"
+          TPL_DIR="$HOME/.local/share/godot/export_templates/4.5.2.stable"
+          mkdir -p "$TPL_DIR"
+          unzip -q templates.tpz -d /tmp/templates
+          mv /tmp/templates/templates/* "$TPL_DIR/"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Export the web build
+        working-directory: godot
+        run: |
+          set -euo pipefail
+          godot --headless --path . --import
+          mkdir -p build/web
+          godot --headless --path . --export-release "Web" build/web/index.html
+      - name: The export produced a complete build
+        working-directory: godot
+        run: |
+          set -euo pipefail
+          test -s build/web/index.html
+          test -s build/web/index.pck
+          test -s build/web/index.wasm

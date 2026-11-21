@@ -34,9 +34,13 @@ Additions on top of the port:
   Settings, where the play key is rebound too.
 - **A pause key.** `Esc` pauses and resumes the run in progress. It is rebound in
   Settings alongside the play and restart keys.
-- **A menu that fits a phone.** The track list moved behind its own **Tracks**
-  button and every overlay card scrolls, so the account controls are reachable on
-  the 420x820 viewport instead of running off the bottom of the screen.
+- **A menu that fits a phone.** The menu is a tabbed app shell - Garage, Editor,
+  Play and Account across the bottom, Settings in the top bar - with a scrolling
+  content sheet, so every control is reachable on the 420x820 viewport instead of
+  running off the bottom of the screen. The track chooser is a grid on the Play
+  tab; there is no separate Tracks button.
+- **A track editor.** Players build their own roads from a piece palette on a
+  real `Track`, store them per account, and drive them as local-only time trials.
 - **A road band that survives a self-crossing.** The band is drawn as explicit
   triangles rather than one filled polygon, so the hairpin/loop tracks (21-25) no
   longer flash as the car crosses its own path. See the gotcha in `../AGENTS.md`.
@@ -60,11 +64,11 @@ runs upload, and the shared board is exactly those real runs - every row is a
 player's own verified run, watchable from its stored steps. There is no generated
 field behind it.
 
-**Endless leaderboards should be added soon.** Endless mode is scored by distance
-and has no online board yet; the speedrun board is time-based and ranks the other
-way. Adding one needs a `mode` column, an `endless_leaderboard` view and a
-matching `run`/`board` change, so it is server work for the owner. The full plan
-is in `../AGENTS.md` ("Endless leaderboards should be added soon").
+**The endless board is shipped and is deliberately separate.** Endless is scored
+by distance, furthest first, and is not re-simulated: `endless_runs` holds
+`(user_id, seed, metres)`, `endless_leaderboard` ranks it, and `board?mode=endless`
+serves it. Everyone drives the same endless road (`Game.ENDLESS_SEED`), so the
+distances compare. See "The endless board is player + distance" in `../AGENTS.md`.
 
 ## Export
 
@@ -167,11 +171,11 @@ godot --headless --path . --script res://tools/verify_online.gd
 the real scene in a `SubViewport` of each size (headless cannot resize the OS
 window), presses the real tabs, and fails if a tab's page does not come up or a
 control is wider than the viewport (the bug the old card menu had). It then opens
-the track editor and checks the new editor: every pinned control (the header and
-the camera row - everything outside the scrolling control area) is inside the
-viewport, each of the Build / Look / Help pages comes up with controls that fit the
-width, the map has a real road, and `Fit` brings that road on screen. Finally it
-loads the custom road into the game, checks the track's own colours reached the
+the track editor and checks it: every pinned control (the header, the camera row
+and the palette) is inside the viewport, every palette piece appends the op its
+label claims, a pinch zooms about the fingers without sliding the map, the colours
+sheet fits, the map has a real road, and `Fit` brings that road on screen. Finally
+it loads the custom road into the game, checks the track's own colours reached the
 renderer, and drives it to its finish to assert the finish card is local-only (no
 leaderboard, no world record).
 
@@ -195,6 +199,14 @@ resolves to empty so the game can fall back.
 godot --headless --path . --script res://tools/verify_editor.gd
 ```
 
+`tools/verify_storage.gd` checks that saves are atomic: a write lands, a second
+write replaces the first, a stale `.tmp` is ignored and cleared, and no temp file
+is left behind - so a crash mid-save cannot truncate the last good one.
+
+```sh
+godot --headless --path . --script res://tools/verify_storage.gd
+```
+
 `tools/verify_cars.gd` checks that every car in `Renderer2D.CAR_MODELS` names
 its own texture and that the texture loads - so a car is never drawn as a
 placeholder or a repeat of another.
@@ -212,6 +224,23 @@ that reports a touchscreen (an iPad with a keyboard) still gets them.
 
 ```sh
 godot --headless --path . --script res://tools/verify_keys.gd
+```
+
+`tools/verify_audio.gd` checks the audio and haptics layer: the shipped assets
+load, every looping cue is marked to loop, the mixer mutes without touching the
+streams, and the haptic gate records calls but stays off on a desktop (a headless
+run has no device, so it tests the decision, not the hardware).
+
+```sh
+godot --headless --path . --script res://tools/verify_audio.gd
+```
+
+`tools/verify_hud.gd` checks the run HUD and the settings screen: the PB/WR delta
+text and colours, the speedrun progress bar, the focus-out pause, and that the
+audio and feedback controls reach their owners.
+
+```sh
+godot --headless --path . --script res://tools/verify_hud.gd
 ```
 
 The physics matches the JS the server verifies with: both crash after 334 steps
@@ -237,7 +266,11 @@ The track geometry matches too (track 1: length 3074.0, finishS 3074.0, clean 10
 | `scripts/account.gd` | the old `js/account.js` — Supabase Auth and the `profiles` name |
 | `scripts/render.gd` | the old `js/render.js` — themes, camera, road band, vector and sprite cars |
 | `scripts/game.gd` | the old `js/game.js` — fixed 1/120s tick, modes, records, the run-in-progress replay |
-| `scripts/app.gd` | the old `js/app.js` — the tabbed menu (Play/Garage/Account), the board/history/settings overlays, leaderboard, history, accounts |
+| `scripts/app.gd` | the old `js/app.js` — the tabbed shell (Garage/Editor/Play/Account), the board/history/settings overlays, leaderboard, history, accounts |
+| `scripts/customtracks.gd` | new — `CustomTracks`, the editor's model: ops, validation, transforms, per-account storage |
+| `scripts/track_editor.gd` | new — `TrackEditor`, the full-screen editor overlay |
+| `scripts/track_preview.gd` | new — `TrackPreview`, the editor's pan/zoom map, grid and tap picking |
+| `scripts/retry_icon.gd` | new — the drawn restart icon (the font has no rotation arrow) |
 | `scripts/menu_shell.gd` | new — the full-screen app shell: top bar, content sheet, bottom tab bar |
 | `scripts/theme.gd` | new — `UiTheme`, the one `Theme` for the whole UI (palette, button variations, panels, scrollbars) |
 | `scripts/ui_icon.gd` | new — `UiIcon`, the tab and action icons drawn as geometry (the theme font has no glyphs) |
@@ -254,5 +287,6 @@ shared leaderboard or replay needs.
 xvfb-run -a godot --path . -- --shot /tmp/shot.png
 ```
 
-Add `--shot-tab <play|garage|account>` to capture a menu tab, or `--shot-menu`
-for the menu as it opens.
+Add `--shot-tab <garage|editor|play|account|settings>` to capture a menu tab, or
+`--shot-menu` for the menu as it opens. `--shot-overlay <tracks|board|history|account|tutorial|editor>`
+captures an overlay card.

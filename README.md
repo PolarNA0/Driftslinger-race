@@ -33,6 +33,22 @@ replays every uploaded run through this physics (vendored by
 
 See [`AGENTS.md`](AGENTS.md) for the full picture.
 
+## Verifying
+
+```sh
+make setup     # once: Godot 4.5.2 + export templates (Linux x86_64)
+make check     # every JS and Godot check
+```
+
+`make test` is the JavaScript half (physics, vendored copies, version, docs);
+`make verify` is every Godot verifier; `make web` and `make apk` export. CI runs
+the same checks in `.github/workflows/verify.yml`, plus the tracker SQL test on a
+postgres service.
+
+The forward plan and the shipped notes live in [`ROADMAP.md`](ROADMAP.md). Any
+change to the physics follows [`PHYSICS.md`](PHYSICS.md), because the leaderboard
+re-simulates every stored run.
+
 ## Layout
 
 | Path | What it is |
@@ -40,10 +56,11 @@ See [`AGENTS.md`](AGENTS.md) for the full picture.
 | `godot/` | **The game.** GDScript, scenes, assets, export presets, verifiers. |
 | `physics/` | The JS physics the server verifies runs with. Not a client. |
 | `supabase/` | Leaderboard schema and Edge Functions. |
-| `tools/` | `test.mjs` (physics + server verifier), `sync-physics.mjs`, `version.mjs`, `replay-row.mjs`, `smoke.mjs`. |
+| `tools/` | `test.mjs` (physics + server verifier), `sync-physics.mjs`, `version.mjs`, `docs-check.mjs`, `replay-row.mjs`, `smoke.mjs`. |
 | `AGENTS.md` | Working notes for this repo: architecture, gotchas, rules. |
 | `PHYSICS.md` | The checklist for any change to the physics the board verifies. |
 | `ROADMAP.md` | The forward plan, with acceptance tests and shipped notes. |
+| `Makefile` | `make check`, `verify`, `web`, `apk`, `setup`. |
 
 ## Licensing
 

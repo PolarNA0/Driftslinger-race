@@ -114,7 +114,11 @@ project, and runs each verifier in its own log group.
 
 The deploy gate is done: `verify.yml` is callable (`workflow_call`), and all
 three deploy workflows call it and set `deploy: needs: verify`, so `main` cannot
-deploy red. The `export` job is still a follow-up.
+deploy red. A `web-export` job now builds the Web preset (and asserts
+`index.html`, `index.pck` and `index.wasm` exist) on every verify run, so an
+export break is caught before the merge. The Android export is still exercised by
+its build workflow rather than on the PR, because it needs the SDK and a
+keystore.
 
 ### A2. One source of version truth — S — [x]
 
@@ -138,7 +142,7 @@ job runs it), and `--set 1.8` writes both copies and increments `version/code`.
 The build is `1.7` (version/code `4`).
 
 
-### A3. Docs truth pass — S
+### A3. Docs truth pass — S — [x]
 
 Fix the known drift:
 
@@ -154,7 +158,17 @@ Fix the known drift:
 **Acceptance:** a new contributor reading `godot/README.md` can run the game and
 every verifier without being told something false.
 
-### A4. Local one-command verification — S
+**Shipped:** `godot/README.md` no longer describes the old Tracks button, says the
+endless board is shipped (with the separate-table design), describes the editor
+as a palette and a map rather than Build/Look/Help pages, lists `verify_audio`,
+`verify_hud` and `verify_storage`, and has a current layout table. `README.md`
+gains a Verifying section, the Makefile and links to `ROADMAP.md` and
+`PHYSICS.md`. `AGENTS.md` carries the one-source version rule, the current
+commands and the shot flags. `tools/docs-check.mjs` (run in CI) fails on known
+stale phrases, a verifier that exists but is not in CI or `godot/README.md`, and
+a layout-table path that does not exist.
+
+### A4. Local one-command verification — S — [x]
 
 Add `tools/dev-setup.sh` (install Godot 4.5.2 + templates into `~/.local/bin`
 and the template dir) and a `Makefile` (or `justfile`) with:
@@ -169,6 +183,12 @@ make apk       # export android
 
 **Acceptance:** a clean checkout on Linux can go from clone to green `make check`
 with two commands.
+
+**Shipped:** `tools/dev-setup.sh` installs Godot 4.5.2 and the export templates
+(Linux x86_64, idempotent), and the `Makefile` provides `setup`, `test`, `verify`,
+`check`, `web`, `apk` and `clean`. `make check` runs the JS physics tests, the
+vendored-copy check, the version check, the docs check and all fourteen Godot
+verifiers. The tracker SQL test needs a database, so it stays in CI.
 
 ### A5. Fix the tracker RLS hole — S — [x]
 

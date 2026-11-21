@@ -117,6 +117,13 @@ build is the only client.
 ## Commands
 
 ```sh
+make setup      # once: install Godot 4.5.2 + export templates (Linux x86_64)
+make test       # JS physics, vendored copies, version, docs
+make verify     # every Godot verifier below
+make check      # test + verify
+make web        # export the web build
+make apk        # export the Android debug APK
+
 # Godot build (the game)
 godot --path godot                                        # play
 godot --headless --path godot --import                    # first-time import
@@ -128,14 +135,21 @@ godot --headless --path godot --script res://tools/verify_board.gd    # board pa
 godot --headless --path godot --script res://tools/verify_online.gd   # online layer (offline paths)
 godot --headless --path godot --script res://tools/verify_guard.gd    # holding/mashing must lose
 godot --headless --path godot --script res://tools/verify_editor.gd   # the track editor's model + roads
-godot --headless --path godot --script res://tools/verify_ui.gd       # menu/overlay fit, editor pages + map
+godot --headless --path godot --script res://tools/verify_ui.gd       # menu/overlay fit, editor palette + map
 godot --headless --path godot --script res://tools/verify_cars.gd     # every car has its own sprite
 godot --headless --path godot --script res://tools/verify_keys.gd     # restart/play keybinds
+godot --headless --path godot --script res://tools/verify_audio.gd    # audio assets, loop flags, haptics
+godot --headless --path godot --script res://tools/verify_hud.gd      # HUD deltas, progress bar, settings
+godot --headless --path godot --script res://tools/verify_storage.gd  # atomic saves
 
 # Physics + server verifier (JavaScript, must stay green)
 node tools/test.mjs            # headless core tests
 node tools/sync-physics.mjs    # vendor physics into the Edge Function
 node tools/sync-physics.mjs --check  # fail if the vendored copies are stale
+node tools/version.mjs --check       # VERSION vs App.VERSION vs export presets
+node tools/docs-check.mjs            # stale docs, unwired verifiers, missing paths
+node tools/replay-row.mjs --track N --steps ... --ticks N  # does a stored run still reproduce?
+node tools/smoke.mjs web|board       # post-deploy smoke test
 ```
 
 ## Speedrun mode
@@ -803,11 +817,15 @@ like a shipped one.
 - **The verifiers are excluded from exports** (`exclude_filter` in
   `export_presets.cfg` lists `tools/*`), so the headless scripts do not ship in
   the web pck or the APK. Keep them out of the player-facing builds.
-- **The menu shows the build version** (`App.VERSION`), in step with the release
-  tag, so a bug report can name the build.
-- **Headless layout check.** `--shot <path> [--shot-menu|--shot-overlay
-  <tracks|board|history|account>]` saves one frame and quits, so a card can be
-  checked at any resolution without a human driving the menu.
+- **The build version has one source: `VERSION` at the repo root.** Never edit
+  `App.VERSION` or `export_presets.cfg` by hand. `node tools/version.mjs --set
+  <version>` writes both and increments `version/code`; `--check` (run in CI)
+  fails on any disagreement. The menu shows it so a bug report can name the
+  build.
+- **Headless layout check.** `--shot <path> [--shot-menu|--shot-tab
+  <garage|editor|play|account|settings>|--shot-overlay
+  <tracks|board|history|account|tutorial|editor>]` saves one frame and quits, so
+  a card can be checked at any resolution without a human driving the menu.
 
 - Themes live in `godot/scripts/render.gd` (`THEMES`, `theme_for(seed)`);
   `Game.load` calls `renderer.set_seed(seed)` so each road has its own palette.
