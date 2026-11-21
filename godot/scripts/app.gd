@@ -14,6 +14,7 @@ const VERSION := "1.6"
 # buttons never accidentally swing the car.
 
 var game: Game
+var audio: GameAudio
 
 var shell: MenuShell                 # the full-screen frame (top bar, tabs, content)
 var tab_pages := {}                  # tab name -> Control
@@ -37,6 +38,12 @@ var menu_seed := 1
 var menu_mode := "speedrun"
 var ghost_mode := "off"
 var car_skin := 0
+var audio_master := 0.85
+var audio_music := 0.65
+var audio_sfx := 0.9
+var haptics_on := true
+var reduced_motion := false
+var tutorial_done := false
 
 var editor: TrackEditor           # the full-screen track editor overlay
 var editor_list: VBoxContainer    # the Editor tab's track rows
@@ -127,6 +134,13 @@ func _ready() -> void:
 	car_skin = int(Storage.get_pref("carSkin", 0))
 	if car_skin < 0 or car_skin >= Renderer2D.CAR_MODELS.size():
 		car_skin = 0
+	audio_master = clampf(float(Storage.get_pref("audioMaster", 0.85)), 0.0, 1.0)
+	audio_music = clampf(float(Storage.get_pref("audioMusic", 0.65)), 0.0, 1.0)
+	audio_sfx = clampf(float(Storage.get_pref("audioSfx", 0.9)), 0.0, 1.0)
+	haptics_on = bool(Storage.get_pref("haptics", true))
+	reduced_motion = bool(Storage.get_pref("reducedMotion", false))
+	tutorial_done = bool(Storage.get_pref("tutorialDone", false))
+	Haptics.enabled = haptics_on
 	# The desktop keys, rebindable in Settings. Space to play, R to reset, Esc to
 	# pause. The defaults live here so a fresh install has them without a pref write.
 	input_key = int(Storage.get_pref("inputKey", KEY_SPACE))
@@ -138,6 +152,12 @@ func _ready() -> void:
 	game.changed.connect(_on_game_change)
 	game.ticked.connect(_on_tick)
 	game.car_skin = car_skin
+
+	audio = GameAudio.new()
+	add_child(audio)
+	audio.attach_game(game)
+	audio.set_volumes(audio_master, audio_music, audio_sfx)
+	game.sfx.connect(_on_sfx)
 	# A custom track id resolves to its op list; a built-in track needs no provider.
 	game.opts_provider = func(seed: int) -> Dictionary: return CustomTracks.opts_for_id(seed)
 
@@ -220,9 +240,16 @@ func _label(text: String, size: int) -> Label:
 	return l
 
 
+func _tap(b: Button) -> void:
+	b.pressed.connect(func():
+		if audio != null:
+			audio.play("ui_click"))
+
+
 func _button(text: String, cb: Callable) -> Button:
 	var b := Button.new()
 	b.text = text
+	_tap(b)
 	b.pressed.connect(cb)
 	return b
 
@@ -256,6 +283,7 @@ func _round_icon_button(cb: Callable) -> Button:
 	b.offset_right = size / 2.0
 	b.offset_top = -size - 22.0
 	b.offset_bottom = -22.0
+	_tap(b)
 	b.pressed.connect(cb)
 	var icon := RetryIcon.new()
 	icon.color = UiTheme.INK
@@ -783,6 +811,7 @@ func _row_action(icon_kind: String, text: String, cb: Callable) -> Button:
 	b.clip_text = true
 	b.custom_minimum_size = Vector2(0, 40)
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_tap(b)
 	b.pressed.connect(cb)
 	var box := HBoxContainer.new()
 	box.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -1122,6 +1151,7 @@ func _segment(parent: Node, icon_kind: String, text: String, cb: Callable) -> Bu
 	b.clip_text = true
 	b.custom_minimum_size = Vector2(0, 48)
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_tap(b)
 	b.pressed.connect(cb)
 	var box := HBoxContainer.new()
 	box.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -1148,6 +1178,7 @@ func _action_button(icon_kind: String, text: String, cb: Callable) -> Button:
 	b.clip_text = true
 	b.custom_minimum_size = Vector2(0, 50)
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_tap(b)
 	b.pressed.connect(cb)
 	var box := HBoxContainer.new()
 	box.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -1826,6 +1857,7 @@ func _build_pause() -> void:
 	var col := _new_overlay("pause", "Paused")
 	col.add_child(_button("Resume", func():
 		_hide_overlays()
+		audio.pause_all(false)
 		game.state = "running"
 		_show_round_button(not game.is_replay())))
 	col.add_child(_button("Restart run", func(): _start_run(game.seed_num)))
@@ -1838,6 +1870,8 @@ func _build_pause() -> void:
 
 func _to_menu() -> void:
 	_end_watching()
+	audio.pause_all(false)
+	audio.music("music_menu")
 	game.set_physics_process(false)
 	game.load_track(menu_seed, menu_mode)
 	_refresh_mode_list()
@@ -1851,6 +1885,8 @@ func _to_menu() -> void:
 func _start_run(seed: int) -> void:
 	_end_watching()
 	_hide_overlays()
+	audio.pause_all(false)
+	audio.music("music_race")
 	game.load_track(seed, menu_mode)
 	_apply_ghost(seed)
 	_hud_reset()
@@ -1877,6 +1913,8 @@ func _watch_own_replay(seed: int) -> void:
 		"sub": "Track %d \u00b7 %s" % [seed, _fmt_time(float(best))],
 	}
 	_hide_overlays()
+	audio.pause_all(false)
+	audio.music("music_race")
 	if not game.load_replay(seed):
 		_end_watching()
 		return
@@ -1903,6 +1941,8 @@ func _watch_steps(seed: int, steps: String, name: String, time: float) -> void:
 		"sub": "%s \u00b7 Track %d \u00b7 %s" % [name, seed, _fmt_time(time)],
 	}
 	_hide_overlays()
+	audio.pause_all(false)
+	audio.music("music_race")
 	game.replay_steps = Replay.decode_steps(steps)
 	game.replay_index = 0
 	game.load_track(seed, "replay")
@@ -1922,13 +1962,32 @@ func _end_watching() -> void:
 # Game callbacks
 # =============================================================================
 
+# Discrete physics events. The physics reports what changed; App decides what it
+# sounds and feels like.
+func _on_sfx(name: String) -> void:
+	match name:
+		"grab":
+			audio.play("grab")
+			Haptics.fire("grab")
+		"release":
+			audio.play("release")
+			Haptics.fire("release")
+		"slingshot":
+			audio.play("slingshot")
+			Haptics.fire("slingshot")
+
+
 func _on_game_change(extra: Dictionary) -> void:
 	if game.is_replay():
 		if bool(extra.get("died", false)):
+			audio.play("crash")
+			audio.music("")
 			_end_watching()
 			_to_menu()
 			return
 		if bool(extra.get("finished", false)):
+			audio.play("finish")
+			audio.music("")
 			replay_tag.text = str(watching["tag"]) if watching != null else "Replay"
 			replay_sub.text = str(watching["sub"]) if watching != null else "That run, replayed."
 			_hide_watch_badge()
@@ -1936,6 +1995,9 @@ func _on_game_change(extra: Dictionary) -> void:
 		return
 
 	if bool(extra.get("died", false)):
+		audio.play("crash")
+		audio.music("")
+		Haptics.fire("crash")
 		if game.mode == "speedrun":
 			dead_tag.text = "Crashed"
 			dead_dist.text = _fmt_time(game.run_time())
@@ -1960,6 +2022,13 @@ func _on_game_change(extra: Dictionary) -> void:
 	if bool(extra.get("finished", false)):
 		var prev2: Variant = extra["prev"]
 		var beat2 := prev2 == null or game.run_time() < float(prev2)
+		audio.music("")
+		if beat2:
+			audio.play("pb")
+			Haptics.fire("pb")
+		else:
+			audio.play("finish")
+			Haptics.fire("finish")
 		finish_tag.text = "New best time" if beat2 else "Finished"
 		finish_time.text = _fmt_time(game.run_time())
 		var best2 := game.run_time() if prev2 == null else minf(float(prev2), game.run_time())
@@ -2047,6 +2116,7 @@ func _hud_reset() -> void:
 func _on_pause() -> void:
 	if game.state == "running":
 		game.state = "paused"
+		audio.pause_all(true)
 		_show_only("pause")
 		_show_round_button(false)
 
@@ -2057,6 +2127,7 @@ func _toggle_pause() -> void:
 		_on_pause()
 	elif overlay == "pause":
 		_hide_overlays()
+		audio.pause_all(false)
 		game.state = "running"
 		_show_round_button(not game.is_replay())
 
@@ -2065,6 +2136,47 @@ func _on_restart_round() -> void:
 	if game.is_replay():
 		return
 	_start_run(game.seed_num)
+
+
+# =============================================================================
+# Lifecycle: tab-out and the Android back button
+# =============================================================================
+
+func _notification(what: int) -> void:
+	match what:
+		NOTIFICATION_APPLICATION_FOCUS_OUT, NOTIFICATION_APPLICATION_PAUSED:
+			# Losing the tab/window mid-run must never cost a run. A replay can
+			# keep playing; it is not the player's score.
+			if game != null and game.state == "running" and not game.is_replay():
+				_on_pause()
+		NOTIFICATION_WM_GO_BACK_REQUEST:
+			_on_back_request()
+
+
+# Back is the phone's one universal gesture, so it has to mean "up one level":
+# close a dialog, leave the editor, resume a pause, then leave a card. Only on
+# the menu itself does it leave the app.
+func _on_back_request() -> void:
+	if dlg_root != null and dlg_root.visible:
+		_close_dialog()
+		return
+	if editor != null and editor.visible:
+		_on_editor_closed()
+		return
+	if overlay == "pause":
+		_hide_overlays()
+		audio.pause_all(false)
+		game.state = "running"
+		_show_round_button(not game.is_replay())
+		return
+	if overlay != "":
+		_show_only("menu")
+		return
+	if game != null and game.state == "running":
+		_on_pause()
+		return
+	if shell != null and shell.visible:
+		get_tree().quit()
 
 
 # =============================================================================

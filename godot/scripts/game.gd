@@ -29,6 +29,9 @@ const ENDLESS_SEED := 7
 
 signal changed(extra: Dictionary)
 signal ticked()
+# Discrete one-button events, for audio and haptics. The physics stays pure; the
+# loop only reports what changed between two steps.
+signal sfx(name: String)
 
 var renderer: Renderer2D
 var track: Track
@@ -206,7 +209,16 @@ func _physics_process(delta: float) -> void:
 		var input := _input_for_step()
 		if not is_replay():
 			steps.append(input)
+		var was_attached := car.attached
+		var was_grabbed := car.grabbed
+		var was_scale := car.speed_scale
 		car.step(FIXED_DT, input)
+		if car.grabbed > was_grabbed:
+			sfx.emit("grab")
+		if was_attached and not car.attached:
+			sfx.emit("release")
+		if car.speed_scale > was_scale + 0.001:
+			sfx.emit("slingshot")
 		if ghost_car != null:
 			var gh: bool = ghost_steps[ghost_index] if ghost_index < ghost_steps.size() else false
 			ghost_index += 1
