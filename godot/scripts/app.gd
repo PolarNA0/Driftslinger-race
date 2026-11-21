@@ -2306,16 +2306,29 @@ func _on_tick() -> void:
 		hud_mode.text = "CUSTOM \u00b7 SPEEDRUN" if CustomTracks.has(game.seed_num) else "SPEEDRUN \u00b7 TRACK %d" % game.seed_num
 		hud_dist.text = _fmt_time(game.run_time())
 		var best: Variant = game.record_time()
-		hud_sub.text = "best --" if best == null else "best %s" % _fmt_time(float(best))
+		var corners := game.track.fillets.size() if game.track != null else 0
+		var extra := " \u00b7 corner %d/%d" % [clampi(game.car.corner, 0, corners), corners]
+		hud_sub.text = ("best --" if best == null else "best %s" % _fmt_time(float(best))) + extra + _speed_tag()
 		if game.track != null and game.track.finish_s > 0.0:
 			hud_progress.value = clampf(game.car.s / game.track.finish_s, 0.0, 1.0)
 	else:
 		hud_mode.text = "ENDLESS"
 		hud_dist.text = _fmt_dist(game.metres())
-		hud_sub.text = "best %s" % _fmt_dist(maxf(float(game.record_dist()), game.metres()))
-	_update_hud_marks()
+		hud_sub.text = "best %s \u00b7 %d corners%s" % [
+			_fmt_dist(maxf(float(game.record_dist()), game.metres())),
+			game.car.grabbed,
+			_speed_tag(),
+		]
 	if game.car.grabbed > 0 or game.car.time > 1.2:
 		hint_label.visible = false
+	_update_hud_marks()
+
+
+func _speed_tag() -> String:
+	var mult := game.car.speed_scale
+	if game.track != null:
+		mult *= game.track.speed_scale_at(game.car.s)
+	return "" if absf(mult - 1.0) < 0.01 else " \u00b7 x%.2f" % mult
 
 
 func _hud_reset() -> void:
@@ -2451,8 +2464,11 @@ func _on_back_request() -> void:
 		game.state = "running"
 		_show_round_button(not game.is_replay())
 		return
+	if overlay == "tutorial":
+		_tutorial_back()
+		return
 	if overlay != "":
-		_show_only("menu")
+		_to_menu()
 		return
 	if game != null and game.state == "running":
 		_on_pause()

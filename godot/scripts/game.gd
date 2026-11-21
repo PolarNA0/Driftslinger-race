@@ -220,6 +220,8 @@ func _physics_process(delta: float) -> void:
 			sfx.emit("release")
 		if car.speed_scale > was_scale + 0.001:
 			sfx.emit("slingshot")
+			if not reduced_motion and renderer != null:
+				renderer.zoom_pulse(0.025)
 		if ghost_car != null:
 			var gh: bool = ghost_steps[ghost_index] if ghost_index < ghost_steps.size() else false
 			ghost_index += 1
@@ -257,6 +259,10 @@ func kick(amount: float) -> void:
 	if reduced_motion:
 		return
 	shake = maxf(shake, amount)
+	# `_follow` only runs while the physics is live, so a crash kick has to reach
+	# the renderer here or the shake it asks for is never drawn.
+	if renderer != null:
+		renderer.shake = shake
 
 
 func _die() -> void:
@@ -267,6 +273,8 @@ func _die() -> void:
 		return
 	var prev := Storage.save_record(seed_num, metres(), car.grabbed)
 	kick(18.0)
+	if not reduced_motion and renderer != null:
+		renderer.flash_hit(0.32)
 	changed.emit({"died": true, "prev": prev})
 
 
@@ -284,4 +292,6 @@ func _finish() -> void:
 	if prev == null or time < float(prev):
 		Storage.save_replay(seed_num, Replay.make_replay(seed_num, steps, time))
 	kick(10.0)
+	if not reduced_motion and renderer != null:
+		renderer.flash_hit(0.18)
 	changed.emit({"finished": true, "prev": prev})

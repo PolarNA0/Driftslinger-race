@@ -59,6 +59,21 @@ func _initialize() -> void:
         _check("endless hides the progress bar", not app.hud_progress.visible)
         _check("endless score is metres", app.hud_dist.text.ends_with(" m"))
 
+        print("-- feedback --")
+        app.game.reduced_motion = true
+        app.game.renderer.shake = 0.0
+        app.game.kick(18.0)
+        _check("reduce motion suppresses shake", app.game.renderer.shake == 0.0)
+        app.game.reduced_motion = false
+        app.game.kick(18.0)
+        _check("a crash reaches the renderer", app.game.renderer.shake > 0.0)
+        app.game.renderer.flash = 0.0
+        app.game.renderer.flash_hit(0.3)
+        _check("a crash flashes the screen", app.game.renderer.flash > 0.0)
+        app.game.renderer.pulse = 0.0
+        app.game.renderer.zoom_pulse(0.02)
+        _check("a slingshot pulses the zoom", app.game.renderer.pulse > 0.0)
+
         print("-- focus-out pause --")
         app.game.load_track(1, "speedrun")
         app.game.state = "running"

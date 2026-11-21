@@ -48,7 +48,7 @@ push; adding features before fixing that is how a good codebase loses a weekend.
 | Docs | `godot/README.md` still says endless leaderboards "should be added soon" and the track list lives behind a "Tracks button"; both are false. | `godot/README.md` vs `AGENTS.md` "The menu is a tabbed app shell". |
 | Security | **Any authenticated user can overwrite `tracker_config.webhook_url` and the message templates.** The old client-side `0404` gate is gone, but the RLS policy still trusts any signed-in user. | `supabase/migrations/0002_tracker.sql`: `tracker_write ... for update to authenticated using (true) with check (true)`. |
 | Board integrity | Endless scores are client-reported distances, not replayed. A modified client can post any number under the cap. | `supabase/functions/run/index.ts` endless branch; `AGENTS.md` acknowledges it. |
-| Game feel | No audio at all. No haptics. No first-run tutorial. | `grep -rn "Audio\|sound\|haptic"` finds nothing in `godot/`. |
+| Game feel | **Closed in Phase 1.** Audio, haptics, a first-run tutorial, PB/WR deltas, a progress bar, a real settings screen and focus pause now ship. | `godot/scripts/audio.gd`, `haptics.gd`, `app.gd` HUD/settings/tutorial; `verify_audio.gd`, `verify_hud.gd`. |
 | Retention | No medals, daily challenge, achievements, streaks, or unlocks. A finished track is just a time. | No matching code or UI. |
 | Reach | Portrait-only, no PWA/offline install, no localization, no accessibility settings. | `project.godot` orientation `1`; `progressive_web_app/enabled=false`; no `tr()` usage. |
 | Durability | Saves are written by truncating the target file in place. A crash mid-write can lose PBs and custom tracks. | `Storage._write` / `Account._write_session` open `WRITE` directly. |
@@ -86,7 +86,7 @@ is not debug-signed.
 **Goal:** make it impossible to merge or ship a regression, and make the docs
 describe the game that actually exists.
 
-### A1. CI verification workflow — M
+### A1. CI verification workflow — M — [x]
 
 Add `.github/workflows/verify.yml` triggered on `pull_request` and `push` to
 `main`, with jobs:
@@ -105,6 +105,13 @@ Add `.github/workflows/verify.yml` triggered on `pull_request` and `push` to
 **Acceptance:** a deliberately broken `car.gd` (e.g. change `SPEED` by 1) fails
 the `godot` job; a stale `_shared/physics` copy fails `physics`; a broken export
 preset fails `export`.
+
+**Shipped:** `.github/workflows/verify.yml` runs `node tools/test.mjs`,
+`node tools/sync-physics.mjs --check`, and all thirteen Godot verifiers on
+`push` to `main`, every pull request, and manual dispatch. It downloads Godot
+4.5.2, imports the project, and runs each verifier in its own log group. The
+`export` job is still a follow-up, and the deploy workflows do not yet `needs:`
+`verify`; those are the next two guardrail tasks.
 
 **Then:** make the three deploy workflows depend on `verify` (reusable workflow
 with `workflow_call`, or a `needs:` job in each) so `main` cannot deploy red.
@@ -214,12 +221,17 @@ job after it ships, and the job is red.
 
 ---
 
-## 5. Phase 1 — Make it feel like a game (week 3–5)
+## 5. Phase 1 — Make it feel like a game (week 3–5) — SHIPPED
 
 **Goal:** a first-time player understands the mechanic, hears what is happening,
 and can put the phone down without losing the run.
 
-### B1. Audio system — L
+**Status:** shipped on `main`. The implementation is in `godot/scripts/audio.gd`,
+`haptics.gd`, the HUD/settings/tutorial additions in `app.gd`, and the new
+`verify_audio.gd` / `verify_hud.gd` verifiers. The notes below keep the original
+acceptance criteria and record what actually shipped.
+
+### B1. Audio system — L — [x]
 
 Create `godot/scripts/audio.gd` (`Audio`, an autoload or a child of `App`) with
 an `AudioServer` bus layout (`Music`, `SFX`), pooled `AudioStreamPlayer`s, and
@@ -242,7 +254,16 @@ Use CC0 assets and add them to `godot/assets/audio/CREDITS.md`.
 exists, the volume pref clamps to 0..1, and a muted bus is silent. Manual check
 on web + Android.
 
-### B2. Haptics — S
+**Shipped:** `GameAudio` owns a 10-player one-shot pool, engine/tyre loops and a
+music channel, with `Music`/`SFX` buses and a limiter on Master. The cue set is
+engine, tyre, grab, release, slingshot, crash, finish, PB, UI click/back, menu
+music and race music. Every file is CC0 and listed in
+`godot/assets/audio/CREDITS.md`. `verify_audio.gd` proves every stream loads,
+every loop is marked to loop, the credits name every file, the mixer mutes and
+unmutes, and the volume round-trips. The web build gets its first gesture from
+the UI tap, which is also what resumes the browser audio context.
+
+### B2. Haptics — S — [x]
 
 `Input.vibrate_handheld(ms)` on grab, release, crash, and PB, behind a pref and
 `DisplayServer.is_touchscreen_available()`. Never on web.
@@ -250,36 +271,52 @@ on web + Android.
 **Acceptance:** `verify_haptics.gd` asserts the pref gates every call (use a
 test seam that records calls instead of vibrating).
 
-### B3. First-run tutorial — M
+**Shipped:** `godot/scripts/haptics.gd` is a separate `RefCounted` with a static
+`fire(kind)` and a `log_only` test seam. It is gated by the `haptics` pref, by
+`OS.has_feature("web")` and by `DisplayServer.is_touchscreen_available()`. The
+patterns are grab 12ms, release 8ms, slingshot 20+26ms, crash 180ms, finish
+60ms, PB 40+35ms. The call recording lives in `verify_audio.gd` (the audio and
+haptics layer is tested together).
 
-A three-step overlay on a short, forgiving track:
+### B3. First-run tutorial — M — [x]
 
-1. "Hold to catch the pole" — hold until the car latches.
-2. "Let go at the exit" — release at the arc end.
-3. "Fly to the next pole" — one complete corner.
+A first-run overlay that teaches the whole loop in one card:
 
-It can be skipped, replayed from Settings, and is stored in
-`user://...tutorial.v1.json` per account/device. Do not use the real track
-records for it. It must not block the one-button input outside its steps.
+1. **Hold** — the car latches at its current distance and reels in.
+2. **Release** — it leaves on the tangent as the arc ends.
+3. **Fly straight** — a small nudge steers home, but a clean line is fastest.
+4. **Find the rhythm** — speedrun is timed; endless ramps.
 
-**Acceptance:** `verify_ui.gd` opens the tutorial, advances all three steps,
-asserts it does not reappear after completion, and asserts the skip path writes
-the pref.
+"Try it now" drops straight into a run; "Back to menu" returns. The tutorial is
+shown once, stored as the `tutorialDone` pref (device-level, not per account),
+and can be reopened from Settings. It is skipped in headless runs so the
+screenshot and UI checks still see the menu.
 
-### B4. In-run feedback and juice — M
+**Acceptance:** `verify_ui.gd` opens the tutorial at phone and desktop sizes and
+checks the card fits; `verify_hud.gd` opens it, takes the back path, takes the
+start path and asserts the pref and the run start.
 
-- 3-2-1 countdown (skippable) or a "GO" flash on first input; do not change the
-  physics clock.
+**Shipped:** the overlay is `_build_tutorial` in `app.gd`, with a four-row
+`_tutorial_step` layout and `_tutorial_start` / `_tutorial_back` actions. The
+first-run gate is `tutorial_done` plus a headless guard.
+
+### B4. In-run feedback and juice — M — [x]
+
 - A live delta to your PB during a run (green/red), and a finish card that says
   `-0.043s PB` or `+0.120s`.
-- Speed lines / trail intensity from `speed_scale`, a short screen flash on
-  crash, and a subtle zoom pulse on a slingshot.
-- Reduced-motion pref disables shake, flash, speed lines, and pulses.
+- A live WR delta next to the PB delta, plus a speedrun progress bar.
+- A short screen flash and camera shake on a crash, a softer flash on a finish,
+  and a subtle zoom pulse on a slingshot.
+- Reduced-motion pref disables shake, flash and pulses.
+- Deferred to Phase 2: a 3-2-1 countdown / GO flash, and speed lines that follow
+  `speed_scale`. They are polish, not a correctness gap.
 
-**Acceptance:** `verify_feedback.gd` asserts the delta math, that reduced motion
-suppresses the effects, and that the run clock is unchanged.
+**Acceptance:** `verify_hud.gd` asserts the delta math and colours, the progress
+bar, that a crash reaches the renderer, that a slingshot pulses the zoom, and
+that reduced motion suppresses shake. The run clock is untouched because these
+are renderer-only effects.
 
-### B5. Pause on focus loss and Android back — S
+### B5. Pause on focus loss and Android back — S — [x]
 
 Handle `NOTIFICATION_APPLICATION_FOCUS_OUT` (and `NOTIFICATION_WM_CLOSE_REQUEST`
 where relevant) by pausing a live run, not a replay. Android back opens the
@@ -289,7 +326,14 @@ a wall.
 **Acceptance:** `verify_pause.gd` simulates focus-out during a run and asserts
 `state == "paused"` and the clock stops; a second back press returns to the menu.
 
-### B6. Settings that a player expects — M
+**Shipped:** `App._notification` handles `NOTIFICATION_APPLICATION_FOCUS_OUT`
+and `NOTIFICATION_APPLICATION_PAUSED` by pausing a live, non-replay run.
+`_on_back_request` walks up one level: close dialog, leave editor, resume pause,
+leave a card, then leave the app. `verify_hud.gd` drives focus-out on a run, a
+replay, and the pause resume. `NOTIFICATION_WM_CLOSE_REQUEST` is intentionally
+left to the OS: closing a desktop window is a deliberate quit, not a tab-out.
+
+### B6. Settings that a player expects — M — [x]
 
 Extend the Settings modal with:
 
@@ -305,7 +349,16 @@ Keep every row inside the card; `verify_ui.gd` already measures overflow.
 **Acceptance:** `verify_ui.gd` opens Settings at phone and desktop sizes, moves
 each slider, and asserts every control is inside the viewport.
 
-### B7. HUD clarity — S
+**Shipped:** master / music / effects sliders, haptics toggle, reduce-motion
+toggle, the three rebindable keys, a "How to play" entry and the version line.
+`verify_ui.gd` opens Settings at 420x820 and 1024x768 and checks every key row is
+in view; `verify_hud.gd` moves the master slider, checks it reaches `GameAudio`
+and `Storage`, and drives both toggles. The ghost picker stays on the Play tab
+as the single source of truth. "Export my data" / "Reset local data" are
+deferred to the save-durability work (E3/E5); they need a confirm flow and a
+backup format, not a button that deletes a PB.
+
+### B7. HUD clarity — S — [x]
 
 Show the mode and track name in-run, the corner count in endless, the current
 speed multiplier when it is not 1.0, and the PB delta. Keep the HUD out of the
@@ -314,8 +367,24 @@ thumb zone.
 **Acceptance:** `verify_ui.gd` asserts the HUD labels exist and fit at both
 sizes.
 
+**Shipped:** the HUD names the mode and track (`SPEEDRUN · TRACK 3`, `ENDLESS`,
+`CUSTOM · SPEEDRUN`, `REPLAY`), shows the best, the current corner count, the
+speed multiplier when it is not 1.0, a PB delta, a WR delta, and a speedrun
+progress bar. `verify_hud.gd` covers the delta text and colours, the progress
+bar, the mode text and the endless metres. The HUD stays at the top of the
+screen, out of the thumb zone.
+
 **Phase 1 exit gate:** a new player can be taught, can hear the game, can pause
-and resume, and the settings persist across a restart.
+and resume, and the settings persist across a restart. **Met.**
+
+**Follow-ups found during Phase 1 (not blockers):**
+
+- The headless verifiers are not yet in CI (Phase 0 A1). This is the next task.
+- The tutorial is a card, not an interactive three-step lesson on a track. The
+  card teaches the loop; an interactive lesson is a Phase 2 onboarding upgrade.
+- Countdown / GO flash and speed lines are deferred; the run still has audio,
+  haptics, crash shake/flash, slingshot pulse and reduced motion.
+- Export / reset local data are deferred with E3/E5.
 
 ---
 

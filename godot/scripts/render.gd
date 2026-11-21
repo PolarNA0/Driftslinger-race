@@ -54,6 +54,8 @@ var cam_x := 0.0
 var cam_y := 0.0
 var cam_angle := 0.0
 var shake := 0.0
+var flash := 0.0
+var pulse := 0.0
 var car_index := 0
 var seed_num := 1
 
@@ -83,13 +85,24 @@ func theme() -> Dictionary:
 	return THEMES[((seed_num - 1) % THEMES.size() + THEMES.size()) % THEMES.size()]
 
 
+var _shake_off := Vector2.ZERO
+
+
 func _to_screen(wx: float, wy: float) -> Vector2:
 	var th := -PI / 2.0 - cam_angle
 	var c := cos(th)
 	var s := sin(th)
 	var dx := wx - cam_x
 	var dy := wy - cam_y
-	return Vector2(_w / 2.0 + (dx * c - dy * s) * _scale, _anchor_y + (dx * s + dy * c) * _scale)
+	return Vector2(_w / 2.0 + (dx * c - dy * s) * _scale, _anchor_y + (dx * s + dy * c) * _scale) + _shake_off
+
+
+func flash_hit(amount: float) -> void:
+	flash = maxf(flash, amount)
+
+
+func zoom_pulse(amount: float) -> void:
+	pulse = maxf(pulse, amount)
 
 
 func _ready() -> void:
@@ -97,7 +110,11 @@ func _ready() -> void:
 	set_process(true)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	if flash > 0.0:
+		flash = maxf(0.0, flash - delta * 2.8)
+	if pulse > 0.0:
+		pulse = maxf(0.0, pulse - delta * 0.18)
 	queue_redraw()
 
 
@@ -112,6 +129,8 @@ func _draw() -> void:
 	# world is shorter than MIN_WORLD_H - on a wide or short window that cap is what
 	# keeps enough road ahead of the car to play, instead of a screen full of tarmac.
 	_scale = minf((_w * ROAD_W_FRAC) / (2.0 * Cfg.ROAD_HALF_WIDTH), _h / MIN_WORLD_H)
+	_scale *= 1.0 + pulse
+	_shake_off = Vector2(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * shake * 0.6
 
 	var t := theme()
 	draw_rect(Rect2(Vector2(-40, -40), Vector2(_w + 80, _h + 80)), t["ground"])
@@ -121,6 +140,8 @@ func _draw() -> void:
 	_draw_ghost()
 	_draw_rope()
 	_draw_car()
+	if flash > 0.001:
+		draw_rect(Rect2(Vector2.ZERO, Vector2(_w, _h)), Color(1, 1, 1, flash))
 
 
 func _samples() -> Array:

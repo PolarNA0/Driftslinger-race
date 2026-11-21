@@ -1,0 +1,70 @@
+name: Verify
+
+# The game and the server share one physics. This workflow is the gate that keeps
+# them honest: the JavaScript tests prove the server's verifier, the Godot
+# verifiers prove the client players run, and the vendored physics check proves
+# the two copies have not drifted.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  physics:
+    name: Physics and server verifier
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Headless physics tests
+        run: node tools/test.mjs
+      - name: Vendored physics is in step
+        run: node tools/sync-physics.mjs --check
+
+  godot:
+    name: Godot verifiers
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GODOT: /tmp/Godot_v4.5.2-stable_linux.x86_64
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Godot 4.5.2
+        run: |
+          curl -sSL -o /tmp/godot.zip \
+            https://github.com/godotengine/godot/releases/download/4.5.2-stable/Godot_v4.5.2-stable_linux.x86_64.zip
+          unzip -q /tmp/godot.zip -d /tmp
+          chmod +x "$GODOT"
+          "$GODOT" --version
+      - name: Import the project
+        run: "$GODOT" --headless --path godot --import
+      - name: Run every headless verifier
+        run: |
+          for script in \
+            parity \
+            verify_tracks \
+            verify_reattach \
+            verify_endless \
+            verify_board \
+            verify_online \
+            verify_guard \
+            verify_editor \
+            verify_ui \
+            verify_cars \
+            verify_keys \
+            verify_audio \
+            verify_hud
+          do
+            echo "::group::$script"
+            "$GODOT" --headless --path godot --script "res://tools/$script.gd" || exit 1
+            echo "::endgroup::"
+          done
