@@ -170,7 +170,7 @@ make apk       # export android
 **Acceptance:** a clean checkout on Linux can go from clone to green `make check`
 with two commands.
 
-### A5. Fix the tracker RLS hole — S
+### A5. Fix the tracker RLS hole — S — [x]
 
 Add `supabase/migrations/0006_admin.sql`:
 
@@ -185,6 +185,16 @@ Add `supabase/migrations/0006_admin.sql`:
 
 **Acceptance:** a pgTAP/SQL test signs in as a normal user and asserts the update
 is refused (42501); the service role can still set it.
+
+**Shipped:** `0006_admin.sql` adds `public.admins` (RLS on, no policies, no client
+grants), drops `tracker_write`, and revokes both the table-level and the
+column-level `update` grants from `authenticated`. An admin sets the tracker
+through the security-definer `set_tracker_config`, which checks the admin row
+itself. `supabase/tests/tracker_rls.sql` applies the real migrations on a
+throwaway database and asserts a normal player's update and RPC are refused
+(42501), the templates stay readable, the webhook stays unreadable, an admin's
+write lands, and the service role can still write directly. The `sql` CI job runs
+it on a `postgres:17` service.
 
 ### A6. Physics-change protocol, written down — S
 

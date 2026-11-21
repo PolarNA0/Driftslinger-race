@@ -972,9 +972,13 @@ list before anything else.
 The record tracker posts from the server, not the browser. The `run` Edge Function
 (`supabase/functions/run/index.ts`) reads the webhook and the two message templates
 from `tracker_config` and announces an improvement itself, so every player's run is
-announced rather than only the admin's. RLS lets a signed-in player write
-`webhook_url` but not read it back, so the credential goes up and never comes down,
-and the `run` function only ever posts to discord.com.
+announced rather than only the admin's. The webhook is writable only through
+`set_tracker_config`, which checks a row in `public.admins` (0006), and no client
+can read `webhook_url` back - so the credential goes up and never comes down, and
+the `run` function only ever posts to discord.com. `supabase/tests/tracker_rls.sql`
+proves a normal player's update and RPC call are refused (42501), an admin's
+succeed, and the service role can still write directly; CI runs it on a postgres
+service container.
 
 The old JS client had a settings screen (zoom, the hook colour) and an admin code
 (`0404`, checked in the client - a lock on a cupboard, not a safe) that revealed the
