@@ -850,9 +850,10 @@ like a shipped one.
   if it does not earn gold.
 - **All UI colour and type comes from `godot/scripts/theme.gd` (`UiTheme`).**
   `App._ready` applies one built `Theme` to the whole UI tree, so nothing falls
-  back to the engine's default grey. The palette is a near-white page, white
-  cards, near-black ink and one signal-red accent (`#C13526`); the HUD is the
-  only dark surface. Inter is bundled in `godot/assets/fonts/` (OFL) and is the
+  back to the engine's default grey. The palette is a graphite page
+  (`#0B0C0E`), charcoal cards (`#141619`), warm off-white ink and one coral
+  accent (`#FF5A3C`); the HUD shares the same dark family. Inter is bundled in
+  `godot/assets/fonts/` (OFL) and is the
   default font; `_label` picks a weight from its size
   (`UiTheme.font_for_size`). `app.gd` reaches into `UiTheme` for the few colours
   it sets per-label (`UiTheme.INK_DIM`, `UiTheme.HUD_GOOD`, ...) — do not

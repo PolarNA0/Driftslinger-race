@@ -127,8 +127,8 @@ func _check_size(vp: Vector2i) -> void:
 	var seeded: Label = app.track_pb_labels[seed_track]
 	if not seeded.text.contains("10.14"):
 		_fail("track card did not show the seeded best (got '%s')" % seeded.text)
-	# The selected card is a white card with a 2px accent border, and its labels
-	# stay ink on white. Check both the border and the contrast, because a child
+	# The selected card is a charcoal card with a 2px accent border, and its labels
+	# stay ink on the card. Check both the border and the contrast, because a child
 	# Label does not inherit the button's font_pressed_color.
 	var selected: Button = null
 	for b in app.track_buttons:

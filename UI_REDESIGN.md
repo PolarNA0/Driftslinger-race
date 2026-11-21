@@ -1,8 +1,9 @@
 # UI redesign: Clean
 
-Status: **implemented (first pass)**. The clean system, the Play/Garage layout,
-the editor chrome and the HUD fixes shipped together. Bottom sheets, `UiMotion`,
-dynamic type and the optional dark menu are still open.
+Status: **implemented**. The clean dark system, the Play/Garage layout, the
+editor chrome, the bottom sheets and the HUD fixes shipped together. `UiMotion`
+and dynamic type are still open. The light variant was tried and rejected: on a
+phone it was too bright, so the shipped menu is the dark one.
 
 The bottom tab system stays. The direction below is the shipped one; the
 sections that are still a plan are called out in "Implementation status".
@@ -16,8 +17,8 @@ game; the menu should look like a well-made tool.
 
 **Shipped in this pass**
 
-- `godot/scripts/theme.gd` is the clean system: near-white page, white cards,
-  one hairline, near-black ink and one signal-red accent. The old navy/gold
+- `godot/scripts/theme.gd` is the clean dark system: graphite page, charcoal
+  cards, one hairline, warm off-white ink and one coral accent. The old navy/gold
   palette is gone.
 - Inter is bundled under `godot/assets/fonts/` (400/500/600/700, OFL) and is the
   theme's default font. Labels pick a weight from their size
@@ -26,7 +27,7 @@ game; the menu should look like a well-made tool.
   accent rule and an accent icon/label.
 - The Play tab is a 2-column grid of track cards, each with a real mini-map
   (`TrackMap` builds a `Track` and draws its centreline), the number and the PB.
-  The selected card is a white card with a 2px accent border. The daily row is a
+  The selected card is a charcoal card with a 2px accent border. The daily row is a
   compact card with the action on the right, and a sticky Race footer sits above
   the tab bar so a long grid never buries the action.
 - Garage is a 2-column car card grid with the selected car marked by the same
@@ -34,15 +35,12 @@ game; the menu should look like a well-made tool.
 - The HUD has no progress bar. PB/WR are live pace deltas measured at the same
   road position (`Game.set_pace` / `pace_time_at`), so they start at `0.000`;
   endless compares distance at the same elapsed time.
-- The editor keeps its map-first surface but uses the clean light chrome.
+- The editor keeps its map-first surface but uses the clean dark chrome.
 
 **Still open**
 
-- Bottom sheets for pause/finish/crash/board/history (overlays are still
-  centred cards, restyled by the theme).
 - `UiMotion` press/tab/sheet timing and reduced-motion animation.
 - Dynamic type / 1.3x text-scale checks.
-- Optional Clean Dark menu (the HUD is already dark).
 - Account stats and the daily board sheet.
 
 ## 1. Why this, why now
@@ -129,21 +127,21 @@ AI-generated product design, not a racing game.
 
 ## 3. Two modes, one system
 
-### A. Clean Light (recommended)
+### A. Clean Light (tried, rejected)
 
 Near-white page, white cards, near-black ink, one signal-red accent. It reads
-as a modern app, gives the road maximum contrast, and is the least likely to
-look dated. On a phone at night it can be bright; the game can offer the dark
-variant as a setting.
+as a modern app, but on a phone it was too bright next to the game's dark road
+themes, and the white sheets dominated the screen.
 
-### B. Clean Dark
+### B. Clean Dark (shipped)
 
-The same tokens inverted: `#0E0E0E` page, `#161616` cards, `#F5F5F2` ink,
-`#FF6B4A` accent. It matches the game's dark road themes and is easier on the
-eyes at night. It is the same layout and type, not a second design.
+Graphite page, charcoal cards, warm off-white ink, one coral accent. It matches
+the game's dark road themes and the HUD, and it keeps the road the brightest
+thing on screen. It is the same layout and type as the light pass, not a second
+design.
 
-**Recommendation: A as the default, B as a Settings option.** Do not mix them
-halfway (a light page with dark cards, or a dark page with a white sheet).
+**Decision: B only.** Do not mix the two halfway (a light page with dark cards,
+or a dark page with a white sheet).
 
 ## 4. Design tokens
 
@@ -153,43 +151,28 @@ change in the same commit.
 
 ### 4.1 Colour
 
-**Clean Light:**
+**Clean Dark (shipped):**
 
 | Token | Hex | Use |
 |---|---|---|
-| `INK` | `#111111` | primary text, times |
-| `INK_DIM` | `#5F5F5F` | secondary text |
-| `INK_MUTE` | `#686868` | hints, labels (4.9:1 on sunk) |
-| `PAGE` | `#F6F6F4` | page |
-| `CARD` | `#FFFFFF` | card |
-| `CARD_SUNK` | `#F0F0ED` | inset row, track chip |
-| `LINE` | `#E4E4E0` | 1px hairline |
-| `ACCENT` | `#C13526` | primary action, active tab, danger |
-| `ACCENT_INK` | `#FFFFFF` | text on accent |
-| `GOOD` | `#2E6B4F` | ahead, success |
-| `BAD` | `#B23A2E` | behind, error |
-| `GOLD` | `#B08A2E` | gold medal (large/icon only) |
-| `SILVER` | `#9A9A9A` | silver medal |
-| `BRONZE` | `#9A6A3A` | bronze medal |
+| `INK` | `#F3F1EA` | primary text, times |
+| `INK_DIM` | `#B8B5AC` | secondary text |
+| `INK_MUTE` | `#8E8B83` | hints, labels (4.9:1 on sunk) |
+| `PAGE` | `#0B0C0E` | page |
+| `CARD` | `#141619` | card |
+| `CARD_SUNK` | `#1B1E22` | inset row, track chip |
+| `LINE` | `#2A2E34` | 1px hairline |
+| `ACCENT` | `#FF5A3C` | primary action, active tab |
+| `ACCENT_INK` | `#1A0A06` | text on accent (6.2:1) |
+| `GOOD` | `#7FD1A3` | ahead, success |
+| `BAD` | `#FF9A8C` | behind, error |
+| `GOLD` | `#E0BC66` | gold medal |
+| `SILVER` | `#C0C0C0` | silver medal |
+| `BRONZE` | `#C08A58` | bronze medal |
 
-**Clean Dark (HUD and optional menu):**
-
-| Token | Hex | Use |
-|---|---|---|
-| `DARK_BG` | `#0E0E0E` | page / HUD chip at 82% |
-| `DARK_CARD` | `#161616` | card |
-| `DARK_LINE` | `#2A2A2A` | hairline |
-| `DARK_INK` | `#F5F5F2` | primary text |
-| `DARK_DIM` | `#BDBDB7` | secondary text |
-| `DARK_MUTE` | `#8E8E88` | labels |
-| `DARK_ACCENT` | `#FF6B4A` | accent (6.8:1 on `DARK_BG`) |
-| `DARK_GOOD` | `#8FBF9F` | ahead |
-| `DARK_BAD` | `#E08A76` | behind |
-
-Contrast check (WCAG 2.2): ink 18.9:1 on white, dim 6.4:1, mute 5.1:1,
-accent 5.1:1, good 6.3:1, bad 5.9:1; white on accent 5.1:1. `GOLD` is 3.2:1 on
-white, so it is a medal icon/large number, never body text. On the dark HUD,
-ink 18.0:1, dim 10.2:1, accent 6.8:1, good 9.3:1, bad 7.4:1.
+Contrast check (WCAG 2.2): ink 16.0:1 on a card, dim 8.8:1, mute 5.3:1,
+accent 5.9:1 on a card, dark accent text 6.2:1 on the accent, good 10.8:1, bad
+9.6:1 on the page. `GOLD` is 10.0:1 on a card, so it is safe for medal text too.
 
 The accent is a **signal**, not a theme: primary CTA, active tab, a crash.
 PB-ahead uses `GOOD`; a PB-behind uses `BAD`; medals use gold/silver/bronze. Do
@@ -234,8 +217,8 @@ Rules:
 ### 4.4 Material
 
 There is no glass in the menu. Cards are flat `CARD` with a 1px `LINE`; sheets
-are flat `CARD` with a shadow. The only translucent surface is the **HUD** over
-the road: `DARK_BG` at 82% with a 1px top highlight, no gradient, no blur.
+are flat `CARD` with a shadow. The HUD has no panel: its text sits directly over
+the road with a soft shadow. The only translucent surface is the overlay scrim.
 
 If a real backdrop blur is wanted later, make it a desktop-only option and
 disable it on mobile/web by default. It is not part of this plan.
@@ -474,8 +457,8 @@ the new system rather than rebuilt twice.
   after every phase.
 - **Font licensing.** Inter is OFL; ship the licence. Do not use a system font
   that may not exist on Android/web.
-- **Light vs dark.** A light menu is a change of mood. Ship the dark variant as
-  a setting rather than mixing the two.
+- **Light vs dark.** The shipped menu is dark. Do not add a light setting without
+  a new review; the white pass was rejected as too bright on a phone.
 - **Godot theme limits.** `StyleBoxFlat` can do flat cards and hairlines; it
   cannot do gradients. This plan does not need gradients.
 - **Editor regression.** `TrackPreview` input is pinned by `verify_editor`; only
@@ -488,8 +471,7 @@ the new system rather than rebuilt twice.
 
 ## 10. Open questions
 
-1. **Mode:** Clean Light (recommended), Clean Dark, or light with a dark
-   setting?
+1. **Mode:** Clean Dark (shipped). A light setting is not planned.
 2. **Track chooser:** 2-column cards (recommended), the existing 5-column
    number grid, or both with a toggle?
 3. **Play hero:** a track card grid, one large live map, or both?

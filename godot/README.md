@@ -294,7 +294,7 @@ The track geometry matches too (track 1: length 3074.0, finishS 3074.0, clean 10
 | `scripts/track_map.gd` | new — `TrackMap`, the read-only mini-map on each Play track card |
 | `scripts/retry_icon.gd` | new — the drawn restart icon (the font has no rotation arrow) |
 | `scripts/menu_shell.gd` | new — the full-screen app shell: top bar, content sheet, bottom tab bar |
-| `scripts/theme.gd` | new — `UiTheme`, the one `Theme` for the whole UI: clean light palette, Inter weights, flat cards, button variations and scrollbars |
+| `scripts/theme.gd` | new — `UiTheme`, the one `Theme` for the whole UI: clean dark palette, Inter weights, flat cards, button variations and scrollbars |
 | `scripts/ui_icon.gd` | new — `UiIcon`, the tab and action icons drawn as geometry (the theme font has no glyphs) |
 
 The PRNG is reproduced exactly (masking products to 32 bits, the way JS

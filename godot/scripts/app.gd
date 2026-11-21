@@ -1574,7 +1574,7 @@ func _build_track_list(parent: Node) -> void:
 
 # The per-track best on each card, so the grid answers "which have I run?" without
 # opening every track. Only the built-in cards are in the grid; custom tracks have
-# their own list. The selected card keeps ink labels on a white card with an accent
+# their own list. The selected card keeps ink labels on a charcoal card with an accent
 # border, so contrast never depends on the selection.
 func _refresh_track_bests() -> void:
 	for b in track_buttons:
@@ -1593,8 +1593,8 @@ func _refresh_track_bests() -> void:
 
 
 func _paint_chip(b: Button, pb: Label) -> void:
-	# The selected card is a white card with an accent border, so the labels stay
-	# ink/dim on white. Do not paint them with the accent: the accent is the border.
+	# The selected card is a charcoal card with an accent border, so the labels stay
+	# ink/dim on the card. Do not paint them with the accent: the accent is the border.
 	var num: Label = pb.get_parent().get_child(0)
 	num.add_theme_color_override("font_color", UiTheme.INK)
 	pb.add_theme_color_override("font_color", UiTheme.INK_DIM)

@@ -4,44 +4,46 @@ class_name UiTheme
 # The game's look, in one place. A single Theme is applied to the whole UI tree,
 # so nothing falls back to the engine's default grey buttons and black panels.
 #
-# The direction is deliberately clean: a near-white page, white cards, near-black
-# ink and one signal-red accent. The road and the car carry the colour; the menu
-# stays neutral. There are no gradients, glass, grain or glow - a card is a card.
+# The direction is deliberately clean and dark: a graphite page, charcoal cards,
+# warm off-white ink and one coral accent. The road and the car carry the colour;
+# the menu stays neutral. There are no gradients, glass, grain or glow - a card is
+# a card. The dark system matches the game's road themes and the HUD, and it is
+# easier to read over a bright road at night than a white sheet.
 
-const INK := Color("111111")          # primary text
-const INK_DIM := Color("5f5f5f")      # secondary text
-const INK_MUTE := Color("686868")     # hints and labels (4.9:1 on CARD_SUNK)
-const BG := Color("f6f6f4")           # page
-const SURFACE := Color("ffffff")      # card
-const CARD_SUNK := Color("f0f0ed")    # inset row / track chip
-const SURFACE_EDGE := Color("e4e4e0") # 1px hairline
+const INK := Color("f3f1ea")          # primary text
+const INK_DIM := Color("b8b5ac")      # secondary text
+const INK_MUTE := Color("8e8b83")     # hints and labels (4.9:1 on CARD_SUNK)
+const BG := Color("0b0c0e")           # page
+const SURFACE := Color("141619")      # card
+const CARD_SUNK := Color("1b1e22")    # inset row / track chip
+const SURFACE_EDGE := Color("2a2e34") # 1px hairline
 const PANEL := SURFACE
 const PANEL_EDGE := SURFACE_EDGE
-const PANEL_SHADOW := Color("111111")
-const ACCENT := Color("c13526")       # signal red: primary action, active tab
-const ACCENT_TEXT := Color("ffffff")
-const BTN := SURFACE
-const BTN_HOVER := Color("f7f7f5")
-const BTN_DOWN := Color("efefec")
-const BTN_EDGE := SURFACE_EDGE
-const DISABLED_BG := Color("f0f0ed")
-const DISABLED_EDGE := Color("e4e4e0")
-const DANGER := Color("b23a2e")
-const GOOD := Color("2e6b4f")
-const MEDAL_GOLD := Color("b08a2e")
-const MEDAL_SILVER := Color("9a9a9a")
-const MEDAL_BRONZE := Color("9a6a3a")
-const TAB_IDLE := Color("686868")
+const PANEL_SHADOW := Color("000000")
+const ACCENT := Color("ff5a3c")       # signal coral: primary action, active tab
+const ACCENT_TEXT := Color("1a0a06")
+const BTN := Color("1d2126")
+const BTN_HOVER := Color("252a30")
+const BTN_DOWN := Color("16191d")
+const BTN_EDGE := Color("333941")
+const DISABLED_BG := Color("17191c")
+const DISABLED_EDGE := Color("262a2f")
+const DANGER := Color("ff7a6a")
+const GOOD := Color("7fd1a3")
+const MEDAL_GOLD := Color("e0bc66")
+const MEDAL_SILVER := Color("c0c0c0")
+const MEDAL_BRONZE := Color("c08a58")
+const TAB_IDLE := Color("8e8b83")
 
-# The HUD is the only translucent surface: it sits over the road, so it needs a
-# dark smoked fill and cream text. It is still flat, with no gradient or blur.
-const HUD_BG := Color("0e0e0e")
-const HUD_INK := Color("f5f5f2")
-const HUD_DIM := Color("bdbdb7")
-const HUD_MUTE := Color("8e8e88")
-const HUD_GOOD := Color("8fbf9f")
-const HUD_BAD := Color("e08a76")
-const HUD_ACCENT := Color("ff6b4a")
+# The HUD sits over the road, so it uses the same graphite family with cream
+# text. It is still flat, with no gradient or blur.
+const HUD_BG := Color("0b0c0e")
+const HUD_INK := Color("f3f1ea")
+const HUD_DIM := Color("b8b5ac")
+const HUD_MUTE := Color("8e8b83")
+const HUD_GOOD := Color("7fd1a3")
+const HUD_BAD := Color("ff9a8c")
+const HUD_ACCENT := Color("ff5a3c")
 
 const FONT_REGULAR := "res://assets/fonts/Inter-Regular.woff2"
 const FONT_MEDIUM := "res://assets/fonts/Inter-Medium.woff2"
@@ -91,9 +93,9 @@ static func _flat(bg: Color, edge: Color, radius: int, border: int, pad_h: int, 
 static func _button_styles(t: Theme, type_name: String, base_bg: Color, base_edge: Color,
                 text: Color, radius: int = 14, pad_h: int = 16, border: int = 1) -> void:
         t.set_stylebox("normal", type_name, _flat(base_bg, base_edge, radius, border, pad_h, 11))
-        t.set_stylebox("hover", type_name, _flat(base_bg.lightened(0.04) if base_bg != Color(0, 0, 0, 0) else Color(0, 0, 0, 0.04), base_edge, radius, border, pad_h, 11))
-        t.set_stylebox("pressed", type_name, _flat(base_bg.darkened(0.04) if base_bg != Color(0, 0, 0, 0) else Color(0, 0, 0, 0.07), base_edge, radius, border, pad_h, 11))
-        t.set_stylebox("hover_pressed", type_name, _flat(base_bg.darkened(0.04) if base_bg != Color(0, 0, 0, 0) else Color(0, 0, 0, 0.07), base_edge, radius, border, pad_h, 11))
+        t.set_stylebox("hover", type_name, _flat(base_bg.lightened(0.06) if base_bg != Color(0, 0, 0, 0) else Color(1, 1, 1, 0.06), base_edge, radius, border, pad_h, 11))
+        t.set_stylebox("pressed", type_name, _flat(base_bg.darkened(0.08) if base_bg != Color(0, 0, 0, 0) else Color(1, 1, 1, 0.10), base_edge, radius, border, pad_h, 11))
+        t.set_stylebox("hover_pressed", type_name, _flat(base_bg.darkened(0.08) if base_bg != Color(0, 0, 0, 0) else Color(1, 1, 1, 0.10), base_edge, radius, border, pad_h, 11))
         t.set_stylebox("focus", type_name, _flat(Color(0, 0, 0, 0), ACCENT, radius, 2, pad_h, 11))
         t.set_stylebox("disabled", type_name, _flat(DISABLED_BG, DISABLED_EDGE, radius, border, pad_h, 11))
         t.set_color("font_color", type_name, text)
@@ -128,7 +130,7 @@ static func build() -> Theme:
         t.default_font = font_weight(400)
         t.default_font_size = 15
 
-        # --- Buttons: flat white chips with a hairline; the accent is the primary ---
+        # --- Buttons: flat charcoal chips with a hairline; the accent is the primary ---
         _button_styles(t, "Button", BTN, BTN_EDGE, INK)
 
         t.set_type_variation("PrimaryButton", "Button")
@@ -146,7 +148,7 @@ static func build() -> Theme:
         t.set_stylebox("pressed", "GhostButton", _flat(CARD_SUNK, BTN_EDGE, 14, 1, 16, 11))
         t.set_stylebox("hover_pressed", "GhostButton", _flat(CARD_SUNK, BTN_EDGE, 14, 1, 16, 11))
 
-        # A selected chip is a white card with a 2px accent border, not a solid
+        # A selected chip is a charcoal card with a 2px accent border, not a solid
         # accent fill. A full-width filled segment read as a banner.
         t.set_type_variation("ToggleButton", "Button")
         _button_styles(t, "ToggleButton", BTN, BTN_EDGE, INK)
@@ -156,9 +158,9 @@ static func build() -> Theme:
         t.set_color("font_pressed_color", "ToggleButton", ACCENT)
         t.set_color("font_hover_pressed_color", "ToggleButton", ACCENT)
 
-        # The track card: a tall white card with a map, number and best. Selected is
-        # a 2px accent border; the labels stay ink, so contrast never depends on the
-        # selection.
+        # The track card: a tall charcoal card with a map, number and best. Selected
+        # is a 2px accent border; the labels stay ink, so contrast never depends on
+        # the selection.
         t.set_type_variation("TrackCard", "Button")
         _button_styles(t, "TrackCard", BTN, BTN_EDGE, INK, 16, 10, 1)
         var track_on := _flat(BTN, ACCENT, 16, 2, 10, 9)
@@ -173,7 +175,7 @@ static func build() -> Theme:
 
         # --- Panels: flat cards, one hairline, a shadow only on a sheet ---
         var card := _flat(PANEL, PANEL_EDGE, 20, 1, 18, 16)
-        card.shadow_color = Color(PANEL_SHADOW.r, PANEL_SHADOW.g, PANEL_SHADOW.b, 0.06)
+        card.shadow_color = Color(PANEL_SHADOW.r, PANEL_SHADOW.g, PANEL_SHADOW.b, 0.30)
         card.shadow_size = 8
         card.shadow_offset = Vector2(0, 2)
         t.set_stylebox("panel", "PanelContainer", card)
@@ -186,7 +188,7 @@ static func build() -> Theme:
 
         t.set_type_variation("Sheet", "PanelContainer")
         var sheet := _flat(PANEL, PANEL_EDGE, 24, 1, 20, 18)
-        sheet.shadow_color = Color(PANEL_SHADOW.r, PANEL_SHADOW.g, PANEL_SHADOW.b, 0.16)
+        sheet.shadow_color = Color(PANEL_SHADOW.r, PANEL_SHADOW.g, PANEL_SHADOW.b, 0.55)
         sheet.shadow_size = 24
         sheet.shadow_offset = Vector2(0, -6)
         t.set_stylebox("panel", "Sheet", sheet)
@@ -217,7 +219,7 @@ static func build() -> Theme:
         tab_on.border_width_top = 3
         tab_on.border_color = ACCENT
         t.set_stylebox("normal", "TabButton", tab_off)
-        t.set_stylebox("hover", "TabButton", _flat(Color(0, 0, 0, 0.035), Color(0, 0, 0, 0), 0, 0, 6, 6))
+        t.set_stylebox("hover", "TabButton", _flat(Color(1, 1, 1, 0.06), Color(0, 0, 0, 0), 0, 0, 6, 6))
         t.set_stylebox("pressed", "TabButton", tab_on)
         t.set_stylebox("hover_pressed", "TabButton", tab_on)
         t.set_stylebox("focus", "TabButton", tab_off)
@@ -274,7 +276,7 @@ static func build() -> Theme:
 
         # --- Scrollbars: slim and unobtrusive ---
         t.set_stylebox("scroll", "VScrollBar", _flat(Color(0, 0, 0, 0), Color(0, 0, 0, 0), 6, 0, 0, 0))
-        var grabber := _flat(SURFACE_EDGE, SURFACE_EDGE, 6, 0, 0, 0)
+        var grabber := _flat(Color(1, 1, 1, 0.14), Color(1, 1, 1, 0.14), 6, 0, 0, 0)
         grabber.corner_radius_top_left = 6
         t.set_stylebox("grabber", "VScrollBar", grabber)
         t.set_stylebox("grabber_highlight", "VScrollBar", _flat(INK_MUTE, INK_MUTE, 6, 0, 0, 0))
