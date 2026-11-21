@@ -2109,7 +2109,7 @@ func _build_dead() -> void:
 	col.add_child(dead_dist)
 	dead_sub = _label("", 16)
 	col.add_child(dead_sub)
-	col.add_child(_button("Try again", func(): _start_run(game.seed_num)))
+	col.add_child(_primary_button("Try again", func(): _start_run(game.seed_num)))
 	col.add_child(_button("Leaderboard", func(): _show_leaderboard(game.seed_num)))
 	col.add_child(_button("Main menu", _to_menu))
 
@@ -2143,7 +2143,7 @@ func _build_finish() -> void:
 	row.add_child(btn_finish_wr)
 	btn_finish_lb = _button("Leaderboard", func(): _show_leaderboard(game.seed_num))
 	col.add_child(btn_finish_lb)
-	col.add_child(_button("Run it again", func(): _start_run(game.seed_num)))
+	col.add_child(_primary_button("Run it again", func(): _start_run(game.seed_num)))
 	col.add_child(_button("Main menu", _to_menu))
 
 
@@ -2177,7 +2177,7 @@ func _build_tutorial() -> void:
 	_tutorial_step(col, "2", "Release", "Let go as the arc ends. The car leaves on the tangent, so a release one frame late leaves the road a sliver off-line.")
 	_tutorial_step(col, "3", "Fly straight", "A small nudge steers the car home, but a clean line is still the fastest. A wide grab is never faster than a tight one.")
 	_tutorial_step(col, "4", "Find the rhythm", "Speedrun is a timed track; Endless is one road that gets faster and tighter. The HUD shows your PB and WR gap as you drive.")
-	col.add_child(_button("Try it now", _tutorial_start))
+	col.add_child(_primary_button("Try it now", _tutorial_start))
 	col.add_child(_button("Back to menu", _tutorial_back))
 
 
@@ -2216,7 +2216,7 @@ func _tutorial_back() -> void:
 
 func _build_pause() -> void:
 	var col := _new_overlay("pause", "Paused")
-	col.add_child(_button("Resume", func():
+	col.add_child(_primary_button("Resume", func():
 		_hide_overlays()
 		audio.pause_all(false)
 		game.state = "running"
