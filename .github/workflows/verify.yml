@@ -46,7 +46,8 @@ jobs:
           chmod +x "$GODOT"
           "$GODOT" --version
       - name: Import the project
-        run: "$GODOT" --headless --path godot --import
+        run: |
+          "$GODOT" --headless --path godot --import
       - name: Run every headless verifier
         run: |
           for script in \
