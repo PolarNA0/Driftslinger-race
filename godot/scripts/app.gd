@@ -191,6 +191,13 @@ func _capture_after(secs: float) -> void:
 			"board": _show_leaderboard(menu_seed)
 			"history": _show_history()
 			"account": _to_menu(); shell.select("account")
+			"editor":
+				# The editor is the one screen whose whole point is how it looks, so it
+				# needs a headless shot like the menu has. A new track has no pieces,
+				# which is exactly the empty canvas a player first sees.
+				var t: Variant = CustomTracks.new_track()
+				if t != null:
+					_open_editor(int(t["id"]))
 			_: _to_menu()
 	elif not args.has("--shot-menu"):
 		_start_run(menu_seed)

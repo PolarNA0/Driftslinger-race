@@ -412,14 +412,19 @@ func _start_world() -> Vector2:
         return Vector2(float(p["x"]), float(p["y"]))
 
 
-# The grid line nearest a screen point, snapped in world space so it lines up with the
-# road at every zoom.
-func _draw_grid() -> void:
+# The grid, snapped in world space so it lines up with the road at every zoom.
+#
+# The colour is derived from what is underneath rather than fixed: the grid is an
+# overlay on a ground the player chooses, and the theme presets run from near-black
+# (Night) to a bright amber (Sunset). A light ink at low alpha is invisible on the
+# bright ones, so pick dark lines on a light ground and light lines on a dark one.
+func _draw_grid(under: Color) -> void:
         var w0 := screen_to_world(Vector2.ZERO)
         var w1 := screen_to_world(size)
         var c0 := world_to_cell(w0) - Vector2i.ONE
         var c1 := world_to_cell(w1) + Vector2i.ONE
-        var line := Color(UiTheme.INK, 0.07)
+        var light_ground := under.get_luminance() > 0.45
+        var line := Color(0.0, 0.0, 0.0, 0.22) if light_ground else Color(UiTheme.INK, 0.16)
         for cx in range(c0.x, c1.x + 1):
                 var x := float(cx) * CELL
                 var a := world_to_screen(Vector2(x, w0.y))
@@ -440,7 +445,7 @@ func _draw() -> void:
         draw_rect(Rect2(Vector2.ZERO, size), UiTheme.BG)
         if _road.size() < 2:
                 if show_grid:
-                        _draw_grid()
+                        _draw_grid(UiTheme.BG)
                 # Nothing placed yet: the canvas is the ground and the grid, plus a prompt.
                 # Once a piece is down the road draws, valid or not, so the player can see
                 # what they are building.
@@ -456,13 +461,7 @@ func _draw() -> void:
         var road: Color = colors["road"]
         var stripe: Color = colors["stripe"]
 
-        # Ground first, then the grid on top of it. The grid used to be drawn before
-        # this rect, so the moment the first piece landed the ground painted straight
-        # over it and the grid vanished - exactly when the player needs it to line the
-        # next piece up against the one before.
         draw_rect(Rect2(Vector2.ZERO, size), ground)
-        if show_grid:
-                _draw_grid()
 
         var hw := maxf(1.0, Cfg.ROAD_HALF_WIDTH * _zoom)
         _band(road, hw)
@@ -471,6 +470,14 @@ func _draw() -> void:
         _draw_pieces(colors)
         _mark(0.0, Color8(90, 226, 120))
         _finish_bar()
+
+        # The grid is drawn last, over the ground and the road. Drawing it first was
+        # one bug (the ground painted it out the moment a piece landed); drawing it
+        # over the ground but under the road was the second - a fixed 7% ink over a
+        # bright ground drops to a contrast of 0.073, so it was there but invisible.
+        # Last and colour-adaptive means it is always legible.
+        if show_grid:
+                _draw_grid(ground)
 
 
 func _entry() -> Dictionary:

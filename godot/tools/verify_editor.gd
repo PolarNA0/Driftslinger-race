@@ -25,7 +25,7 @@ func _drive(track: Track) -> Dictionary:
 		var held := false
 		if car.attached:
 			held = car.remaining() > 0.0
-		else:
+		elif car.corner >= 0 and car.corner < track.fillets.size():
 			var f: Dictionary = track.fillets[car.corner]
 			var c: Vector2 = f["c"]
 			held = U.dist(c.x, c.y, car.x, car.y) <= Cfg.GRAB_RANGE
@@ -172,6 +172,27 @@ func _init() -> void:
 		no_fin.append(CustomTracks.make_corner(90 if i % 2 == 0 else -90))
 	var nf_v := CustomTracks.validate(no_fin)
 	var nf_ok: bool = not bool(nf_v["ok"]) and str(nf_v["error"]).contains("finish")
+	# As soon as there is a finish line the track is playable. The rule used to demand
+	# two corners, which refused a perfectly drivable road: a straight into a finish
+	# builds and the car crosses the line. Requiring corners the player has not placed
+	# yet is what made the editor feel like it was forcing pieces on them.
+	var one_line := [CustomTracks.make_finish(400.0)]
+	var ol_v := CustomTracks.validate(one_line)
+	var ol_ok: bool = bool(ol_v["ok"])
+	print("  a finish line alone is a playable track: %s" % ("OK" if ol_ok else "FAIL"))
+	pass_all = ol_ok and pass_all
+	pass_all = _drivable(one_line, "finish only") and pass_all
+	# One corner and a finish is also a whole track: the corner is optional, not a
+	# prerequisite.
+	var one_corner := [
+		CustomTracks.make_straight(240.0),
+		CustomTracks.make_corner(90),
+		CustomTracks.make_finish(300.0),
+	]
+	var oc_v := CustomTracks.validate(one_corner)
+	print("  one corner and a finish is playable: %s" % ("OK" if bool(oc_v["ok"]) else "FAIL"))
+	pass_all = bool(oc_v["ok"]) and pass_all
+	pass_all = _drivable(one_corner, "one corner") and pass_all
 	print("  a track with no finish is refused: %s" % ("OK" if nf_ok else "FAIL"))
 	pass_all = nf_ok and pass_all
 	# Exactly one finish: two would mean two ends.
@@ -431,28 +452,64 @@ func _init() -> void:
 		pole_ok = false
 	print("  every corner has a pole, drawn at %.1fpx: %s" % [pole_r, "OK" if pole_ok else "FAIL"])
 	pass_all = pole_ok and pass_all
-	# A turn must go where the player pointed. Placement used to ignore the tapped cell
-	# entirely and only alternate direction with the previous corner, so a corner always
-	# landed on the same side no matter where the tap was - which read as the piece
-	# snapping to the previous placement instead of going where it was aimed.
+	# A palette tile must place exactly the piece it draws. The tile carries a signed
+	# angle and the op has to use that sign: a left tile that placed a right turn, or a
+	# 270 tile that placed a 90, is a picture that lies about the road it adds.
+	var signs_ok := true
+	for key in ["90", "-90", "180", "270", "-270", "reattach", "reattach_l"]:
+		if PieceIcon.turn_deg(key) == 0:
+			signs_ok = false
+		if key.begins_with("-") and PieceIcon.turn_deg(key) == PieceIcon.turn_deg(key.substr(1)):
+			signs_ok = false
+	print("  every turn tile carries its own signed angle: %s" % ("OK" if signs_ok else "FAIL"))
+	pass_all = signs_ok and pass_all
+	# A 270 and a 90 must be different pictures, not one drawn twice: that was the
+	# report that the palette "does not show the correct way they turn".
+	var icons_distinct: bool = (
+		PieceIcon.turn_deg("90") != PieceIcon.turn_deg("270")
+		and PieceIcon.turn_deg("90") != PieceIcon.turn_deg("-90")
+		and PieceIcon.turn_deg("180") != PieceIcon.turn_deg("270")
+	)
+	print("  the turn tiles are not all the same piece: %s" % ("OK" if icons_distinct else "FAIL"))
+	# The art has to agree with the label. Check the drawn centreline: a right tile
+	# must end to the right of where it entered, a left tile to the left, and every
+	# tile must stay inside its own box (a 270 used to be drawn off the edge).
+	var art_ok := true
+	for key in ["90", "-90", "180", "270", "-270"]:
+		var deg: int = PieceIcon.turn_deg(key)
+		var pts: PackedVector2Array = PieceIcon.arc_points(deg, 56.0, 56.0, 11.2, 8.96)
+		if pts.size() < 2:
+			art_ok = false
+			continue
+		var entry: Vector2 = pts[0]
+		var exit: Vector2 = pts[pts.size() - 1]
+		var went_right: bool = exit.x > entry.x + 0.5
+		var went_left: bool = exit.x < entry.x - 0.5
+		if deg > 0 and deg != 180 and not went_right:
+			art_ok = false
+			print("    %s is a right turn but exits at dx=%.1f" % [key, exit.x - entry.x])
+		if deg < 0 and not went_left:
+			art_ok = false
+			print("    %s is a left turn but exits at dx=%.1f" % [key, exit.x - entry.x])
+		for p in pts:
+			if p.x < -0.5 or p.y < -0.5 or p.x > 56.5 or p.y > 56.5:
+				art_ok = false
+				print("    %s draws outside its tile at %s" % [key, p])
+	print("  each tile is drawn turning the way its label says: %s" % ("OK" if art_ok else "FAIL"))
+	pass_all = art_ok and pass_all
+	pass_all = icons_distinct and pass_all
+	# A corner tile must place the signed op, whichever cell was tapped. Placement
+	# used to take the direction from the tapped cell, so the same tile could add a
+	# left or a right turn depending on where the finger landed.
 	var aim := TrackPreview.new()
 	aim.size = Vector2(600.0, 400.0)
 	aim.palette = CustomTracks.theme_of(ct)
 	aim.rebuild([CustomTracks.make_straight(240.0)])
-	var end: Vector2 = aim.op_end_world()
-	var heading: Vector2 = aim.op_end_heading()
-	var left_n := Vector2(heading.y, -heading.x)
-	# A point clearly on the road-end's left must give a positive (left) turn.
-	var left_turn: Dictionary = _aimed(aim, end + left_n * 120.0, 90, false)
-	var right_turn: Dictionary = _aimed(aim, end - left_n * 120.0, 90, false)
-	var aimed_ok: bool = int(left_turn["deg"]) > 0 and int(right_turn["deg"]) < 0
-	print("  a turn is aimed at the side that was tapped: %s" % ("OK" if aimed_ok else "FAIL"))
-	pass_all = aimed_ok and pass_all
-	# The two are genuinely different ops, so a tap left and a tap right cannot collapse
-	# to the same piece - which is what "curves and pillars place at the same time" was.
-	var distinct_ok: bool = int(left_turn["deg"]) != int(right_turn["deg"])
-	print("  tapping the other side gives the other turn: %s" % ("OK" if distinct_ok else "FAIL"))
-	pass_all = distinct_ok and pass_all
+	var l_op := CustomTracks.make_corner(PieceIcon.turn_deg("-90"), CustomTracks.DEFAULT_RADIUS)
+	var r_op := CustomTracks.make_corner(PieceIcon.turn_deg("90"), CustomTracks.DEFAULT_RADIUS)
+	var fixed_dir: bool = int(l_op["deg"]) < 0 and int(r_op["deg"]) > 0
+	print("  a tile places its own direction, not the tap's: %s" % ("OK" if fixed_dir else "FAIL"))
+	pass_all = fixed_dir and pass_all
 	aim.free()
 
 
@@ -464,6 +521,21 @@ func _init() -> void:
 	var partial_ok: bool = not part.ok and part._road.size() >= 2
 	print("  an unfinished track still draws its pieces: %s" % ("OK" if partial_ok else "FAIL"))
 	pass_all = partial_ok and pass_all
+	# The grid must stay legible on every theme ground, not just the dark ones. It
+	# was a fixed light ink at low alpha, which measures fine over the editor's own
+	# background but collapses against a bright ground like Sunset's - the grid was
+	# being drawn, and was simply invisible. Check the contrast the renderer picks.
+	var grid_ok := true
+	for preset in CustomTracks.THEME_PRESETS:
+		var g := Color(str(preset["ground"]))
+		var line := Color(0.0, 0.0, 0.0, 0.22) if g.get_luminance() > 0.45 else Color(UiTheme.INK, 0.16)
+		var over := g.lerp(line, line.a)
+		var delta: float = absf(over.get_luminance() - g.get_luminance())
+		if delta < 0.05:
+			grid_ok = false
+			print("    %s: grid contrast %.3f, too low" % [str(preset["name"]), delta])
+	print("  the grid stays visible on every theme ground: %s" % ("OK" if grid_ok else "FAIL"))
+	pass_all = grid_ok and pass_all
 	part.free()
 	# On a blank canvas the first piece grows from the end of the lead-in, which is
 	# where the built road starts. Reading the start from an empty `_track` gave the
@@ -638,22 +710,3 @@ func _interleave(corners: Array) -> Array:
 	return out
 
 
-# The editor aims a turn by projecting the tapped cell onto the road end's left
-# normal. That lives in `track_editor.gd`, which needs a full UI to construct, so the
-# arithmetic is reproduced here against the same preview state it reads.
-func _aimed(pv, w: Vector2, deg: int, reattach: bool) -> Dictionary:
-	var turn := 0
-	var to: Vector2 = w - pv.op_end_world()
-	if to.length() > 1.0:
-		var h: Vector2 = pv.op_end_heading()
-		var left := Vector2(h.y, -h.x)
-		var side: float = to.normalized().dot(left)
-		if absf(side) > 0.2:
-			turn = 1 if side > 0.0 else -1
-	var c: Dictionary
-	if turn == 0:
-		c = CustomTracks.next_corner([], deg)
-	else:
-		c = CustomTracks.make_corner(turn * absi(deg))
-	c["reattach"] = reattach
-	return c

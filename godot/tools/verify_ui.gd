@@ -257,7 +257,7 @@ func _check_size(vp: Vector2i) -> void:
 
 		# The core interaction: arm a piece, tap the grid, and the piece is added. Every
 		# palette entry is exercised, because a dead button is silent.
-		for key in ["straight", "90", "180", "270", "reattach", "finish"]:
+		for key in ["straight", "90", "-90", "180", "270", "-270", "reattach", "reattach_l", "finish"]:
 			var before: int = app.editor.ops.size()
 			var had_finish := CustomTracks.finish_index(app.editor.ops) >= 0
 			app.editor._arm(key)
@@ -288,12 +288,15 @@ func _check_size(vp: Vector2i) -> void:
 						_fail("editor: the finish palette did not add a finish")
 				elif key == "straight" and CustomTracks.is_corner(added):
 					_fail("editor: the straight palette added a corner")
-				elif key == "reattach" and not bool(added.get("reattach", false)):
+				elif key.begins_with("reattach") and not bool(added.get("reattach", false)):
 					_fail("editor: the reattach palette added a normal turn")
-				elif key != "reattach" and bool(added.get("reattach", false)):
+				elif not key.begins_with("reattach") and bool(added.get("reattach", false)):
 					_fail("editor: the '%s' palette added a reattach turn" % key)
 				elif key != "straight" and not CustomTracks.is_corner(added):
 					_fail("editor: the '%s' palette added a straight" % key)
+				elif CustomTracks.is_corner(added) and int(added["deg"]) != PieceIcon.turn_deg(key):
+					# The tile is a picture of a turn: it must place that turn, not its mirror.
+					_fail("editor: '%s' placed deg=%d, want %d" % [key, int(added["deg"]), PieceIcon.turn_deg(key)])
 			app.editor._arm(key)
 		# Exactly one finish, ever, and it is last: that is what makes the road finite.
 		var fins := 0

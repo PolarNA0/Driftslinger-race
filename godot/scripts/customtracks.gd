@@ -370,8 +370,6 @@ static func validate(ops: Array) -> Dictionary:
 			if ln < MIN_LEN or ln > MAX_LEN:
 				return {"ok": false, "error": "A straight must be %d-%d long." % [int(MIN_LEN), int(MAX_LEN)], "corners": corners, "length": length}
 			length += ln
-	if corners < 2:
-		return {"ok": false, "error": "A track needs at least 2 corners.", "corners": corners, "length": length}
 	if corners > MAX_CORNERS:
 		return {"ok": false, "error": "Too many corners (max %d)." % MAX_CORNERS, "corners": corners, "length": length}
 	if finish_at < 0:

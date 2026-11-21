@@ -631,10 +631,38 @@ like a shipped one.
 - **A tap cannot place a piece at an arbitrary point, because the road is
   continuous.** An op is a length or a turn *relative to where the last op ended*,
   so a piece is always appended to the road's end. The tapped cell therefore sets
-  how far the next straight runs (its distance from `preview.op_end_world()`), and
-  a turn is aimed at the cell. Moving a piece to a disconnected spot would need a
-  road made of separate ribbons, which is not what the game drives. If the editor
-  is ever asked to "put a piece there", this is the constraint to explain first.
+  how far the next straight runs (its distance from `preview.op_end_world()`).
+  Moving a piece to a disconnected spot would need a road made of separate ribbons,
+  which is not what the game drives. If the editor is ever asked to "put a piece
+  there", this is the constraint to explain first.
+- **A turn tile places its own signed angle; the tap does not aim it.** The palette
+  carries left and right variants (`90`/`-90`, `270`/`-270`, `reattach`/
+  `reattach_l`) because the two are different roads. Placement reads the angle off
+  the tile (`PieceIcon.turn_deg`), so the same tile always adds the same turn
+  wherever the grid is tapped. Aiming a turn at the tapped cell instead meant one
+  tile could place a left or a right corner depending on where the finger landed,
+  which is what made the palette feel like it was guessing.
+- **The palette art is generated from the arc the piece produces.** `PieceIcon`
+  draws the centreline from `Track.build_ops`' own geometry - pivot one radius to
+  the side of the entry, sweep by the signed angle - rather than from hand-drawn
+  shapes, and fits the arc's bounding box to the tile. The sign of `deg` decides
+  which side the pivot sits on, which is what makes a left tile look like a left
+  turn; a fixed side drew every turn the same way. `arc_points` is static so
+  `verify_editor.gd` can assert each tile exits to the side its label claims and
+  stays inside its box, instead of testing a copy of the arithmetic.
+- **The grid is drawn last and adapts to the ground.** It has to survive a bright
+  ground: the theme presets run from near-black (Night) to amber (Sunset), and a
+  fixed light ink at 7% alpha measured a contrast of 0.073 against Sunset - the
+  grid was drawn and simply invisible. It is now the final draw (over the road, so
+  it never gets painted out) and picks dark lines on a light ground, light lines on
+  a dark one. `verify_editor.gd` checks the contrast on every preset.
+- **One piece per pick.** Placing a piece clears `_armed`, so the next grid tap
+  cannot silently add a second piece. Pick, tap, pick, tap - the player is never
+  made to place something they did not choose.
+- **A finish line is enough to play.** `validate` used to require 2 corners, which
+  refused a road that drives perfectly well: a straight into a finish builds and
+  the car crosses the line in ~3.5s. The only hard requirement is a finish, because
+  without one the road has no end.
 - **The map is a camera and an editing surface.** `TrackPreview` pans (drag),
   zooms (pinch / wheel / the `+`/`-` buttons), `fit`s the whole road, and
   `focus_index` centres a piece. With no piece armed, a tap (not a drag) picks the

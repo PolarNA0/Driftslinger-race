@@ -213,7 +213,9 @@ func _build_palette() -> void:
 		c.queue_free()
 	_palette_buttons = {}
 	# Each tile is a picture of the piece, not a word for it: the shape is what a
-	# player is choosing.
+	# player is choosing. Left and right are separate tiles because they place
+	# different roads, and the tile's art is generated from the signed angle, so what
+	# is drawn is the way the piece will actually turn.
 	#
 	# There is no separate "pillar" tile. A pillar IS the turn: the pole the car
 	# slings around sits at the centre of the arc. The old tile built the identical
@@ -222,10 +224,13 @@ func _build_palette() -> void:
 	# difference - its pole stays live after an early release.
 	var items := [
 		["straight", "Straight"],
-		["90", "Turn 90\u00b0"],
+		["90", "Right 90\u00b0"],
+		["-90", "Left 90\u00b0"],
 		["180", "Hairpin 180\u00b0"],
-		["270", "Loop 270\u00b0"],
-		["reattach", "Reattach turn"],
+		["270", "Right loop 270\u00b0"],
+		["-270", "Left loop 270\u00b0"],
+		["reattach", "Right reattach 90\u00b0"],
+		["reattach_l", "Left reattach 90\u00b0"],
 		["finish", "Finish line"],
 	]
 	for it in items:
@@ -297,6 +302,8 @@ func _on_cell_tapped(cell: Vector2i) -> void:
 		var d := w.distance_to(preview.growth_point(ops.size()))
 		ops.append(CustomTracks.make_finish(clampf(d, CustomTracks.MIN_LEN, CustomTracks.MAX_LEN)))
 		selected = ops.size() - 1
+		_armed = ""
+		preview.armed = Callable()
 		_commit()
 		return
 	var start := preview.growth_point(CustomTracks.finish_index(ops) if has_finish else ops.size())
@@ -309,6 +316,10 @@ func _on_cell_tapped(cell: Vector2i) -> void:
 	else:
 		_place_armed(w, start)
 	selected = ops.size() - 1
+	# One piece per pick: the palette goes back to "nothing armed", so a stray grid
+	# tap cannot add a piece the player did not ask for. Re-arm to place again.
+	_armed = ""
+	preview.armed = Callable()
 	_commit()
 	# Deliberately no `fit()` here. Re-framing the whole track after a placement
 	# moves the view out from under the pointer, so the piece appears to snap to
@@ -323,40 +334,15 @@ func _place_armed(w: Vector2, start: Vector2) -> void:
 			# now to the cell the player pointed at.
 			var d := w.distance_to(start)
 			ops.append(CustomTracks.make_straight(clampf(d, CustomTracks.MIN_LEN, CustomTracks.MAX_LEN)))
-		"90":
-			ops.append(_aimed_corner(w, start, 90, false))
-		"180":
-			ops.append(_aimed_corner(w, start, 180, false))
-		"270":
-			ops.append(_aimed_corner(w, start, 270, false))
-		"reattach":
-			ops.append(_aimed_corner(w, start, 90, true))
 		_:
-			pass
-
-
-# A turn goes where the player pointed, not wherever the previous corner happened
-# to leave the road. The tapped cell decides the side: project it onto the road
-# end's left normal and turn toward the side it falls on. A tap straight down the
-# road has no side, so it falls back to `next_corner`, which alternates with the
-# previous corner - the rule a staircase track needs.
-func _aimed_corner(w: Vector2, start: Vector2, deg: int, reattach: bool) -> Dictionary:
-	var turn := 0
-	var to := w - start
-	if to.length() > 1.0:
-		var h := preview.op_end_heading()
-		# Left of the heading is the heading turned -90 degrees.
-		var left := Vector2(h.y, -h.x)
-		var side := to.normalized().dot(left)
-		if absf(side) > 0.2:
-			turn = 1 if side > 0.0 else -1
-	var c: Dictionary
-	if turn == 0:
-		c = CustomTracks.next_corner(ops, deg)
-	else:
-		c = CustomTracks.make_corner(turn * absi(deg))
-	c["reattach"] = reattach
-	return c
+			# A turn is exactly the tile that was picked, including its direction. It
+			# does not depend on where the grid was tapped: the player has already chosen
+			# the piece, so the tap only says "put it on the road".
+			var deg := PieceIcon.turn_deg(_armed)
+			if deg == 0:
+				return
+			ops.append(CustomTracks.make_corner(deg, CustomTracks.DEFAULT_RADIUS,
+					_armed.begins_with("reattach")))
 
 
 # --- the sheet ---------------------------------------------------------------
@@ -463,7 +449,7 @@ func _build_inspect(target: VBoxContainer, i: int) -> void:
 		var left := Button.new()
 		left.toggle_mode = true
 		left.theme_type_variation = "ToggleButton"
-		left.button_pressed = int(p["deg"]) > 0
+		left.button_pressed = int(p["deg"]) < 0
 		left.text = "Left"
 		left.focus_mode = Control.FOCUS_NONE
 		left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -475,7 +461,7 @@ func _build_inspect(target: VBoxContainer, i: int) -> void:
 		var right := Button.new()
 		right.toggle_mode = true
 		right.theme_type_variation = "ToggleButton"
-		right.button_pressed = int(p["deg"]) < 0
+		right.button_pressed = int(p["deg"]) > 0
 		right.text = "Right"
 		right.focus_mode = Control.FOCUS_NONE
 		right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
