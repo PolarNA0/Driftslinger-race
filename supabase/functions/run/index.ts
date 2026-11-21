@@ -83,7 +83,7 @@ Deno.serve(async (req) => {
     // A first run or a further distance is a new board entry, so it is announced
     // exactly as a speedrun improvement is. The endless board is not verified, so
     // the message names a distance and a rank, never a "record".
-    if (data.improved) {
+    if (data.improved && Number(data.metres) > 0) {
       await announceEndless({
         userId: user.id,
         seed,
