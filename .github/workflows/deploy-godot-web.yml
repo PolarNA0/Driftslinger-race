@@ -80,7 +80,7 @@ jobs:
       # Pin wrangler 4: the static-assets binding in wrangler.toml is a v4 feature,
       # and the action otherwise installs v3 and the deploy is rejected.
       - name: Deploy to Cloudflare
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
