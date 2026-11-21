@@ -104,6 +104,23 @@ static func save_replay(seed: int, replay: Dictionary) -> void:
 	_write("replays.v1", all)
 
 
+# --- attempts: how many times a seed was started ----------------------------
+# Only the daily card reads this. A finished run already lands in the history;
+# attempts also count the runs that ended in a crash, which is the number a daily
+# card should show.
+static func get_attempts(seed: int) -> int:
+	var all: Dictionary = _read("attempts.v1", {})
+	return int(all.get(str(seed), 0))
+
+
+static func add_attempt(seed: int) -> int:
+	var all: Dictionary = _read("attempts.v1", {})
+	var n := int(all.get(str(seed), 0)) + 1
+	all[str(seed)] = n
+	_write("attempts.v1", all)
+	return n
+
+
 # --- run history: every finished run, newest first ---------------------------
 static func get_runs(seed: int) -> Array:
 	var all: Dictionary = _read("runs.v1", {})

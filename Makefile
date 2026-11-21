@@ -14,6 +14,7 @@ GODOT ?= godot
 VERIFIERS := \
 	parity \
 	verify_tracks \
+	verify_daily \
 	verify_reattach \
 	verify_endless \
 	verify_board \

@@ -83,6 +83,13 @@ for (const [doc, base] of [
   }
 }
 
+// The daily challenge is a shipped mode, so its model, verifier and docs must
+// stay together.
+check('daily challenge model exists', existsSync(join(root, 'godot/scripts/daily.gd')));
+check('daily challenge verifier exists', existsSync(join(root, 'godot/tools/verify_daily.gd')));
+check('AGENTS documents the daily challenge', read('AGENTS.md').includes('## The daily challenge'));
+check('Makefile runs verify_daily', read('Makefile').includes('verify_daily'));
+
 // While a deploy is pending, the handoff note must be reachable from the two
 // files an agent reads first. Once it is applied and the file is deleted, this
 // check disappears with it.

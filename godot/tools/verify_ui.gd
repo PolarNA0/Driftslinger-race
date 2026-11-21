@@ -82,6 +82,12 @@ func _check_size(vp: Vector2i) -> void:
 	await process_frame
 	if not app.track_section.visible:
 		_fail("track chooser hidden in speedrun")
+	if not app.daily_section.visible:
+		_fail("daily card hidden in speedrun")
+	if not _in_view(app.daily_button, vp):
+		_fail("daily button out of view at %s" % app.daily_button.get_global_rect())
+	if not app.daily_title.text.contains("Track"):
+		_fail("daily card did not name its track (got '%s')" % app.daily_title.text)
 	# Every track chip must fit its number AND its best time. Both are `clip_text`,
 	# so a chip narrower than its label silently drops the last digit ("27" reads as
 	# "2", and a best of "10.142s" loses its tail) - which is exactly what the 7-wide
@@ -143,6 +149,8 @@ func _check_size(vp: Vector2i) -> void:
 	await process_frame
 	if app.track_section.visible:
 		_fail("track chooser still shown in endless")
+	if app.daily_section.visible:
+		_fail("daily card still shown in endless")
 	for b in app.track_buttons:
 		if b.is_visible_in_tree() and _in_view(b, vp):
 			_fail("track button reachable in endless")
@@ -427,6 +435,57 @@ func _check_size(vp: Vector2i) -> void:
 	CustomTracks.erase(made_id)
 	app._refresh_editor_list()
 	app._refresh_custom_list()
+
+	# A daily challenge is a real speedrun on a modified track, and it is
+	# local-only: no board, no world record, no medal. Drive one to the finish.
+	var times_snapshot: Variant = Storage._read("times.v1", {})
+	var replays_snapshot: Variant = Storage._read("replays.v1", {})
+	var runs_snapshot: Variant = Storage._read("runs.v1", {})
+	var tries_snapshot: Variant = Storage._read("attempts.v1", {})
+	app._set_mode("speedrun")
+	app._refresh_daily()
+	await process_frame
+	var daily_seed := int(app.daily_challenge["seed"])
+	var tries_before := Storage.get_attempts(daily_seed)
+	app._play_daily()
+	await process_frame
+	if not Daily.is_daily(app.game.seed_num):
+		_fail("daily button did not start a daily seed")
+	if app.game.mode != "speedrun":
+		_fail("daily challenge loaded outside speedrun")
+	if Storage.get_attempts(daily_seed) != tries_before + 1:
+		_fail("daily attempt was not counted")
+	if app.game.track != null:
+		var dt: Track = app.game.track
+		var di := 0
+		while app.game.car.alive and not app.game.car.finished and di < 200000:
+			di += 1
+			var dheld := false
+			if app.game.car.attached:
+				dheld = app.game.car.remaining() > 0.0
+			else:
+				var df: Dictionary = dt.fillets[app.game.car.corner]
+				var dc: Vector2 = df["c"]
+				dheld = U.dist(dc.x, dc.y, app.game.car.x, app.game.car.y) <= Cfg.GRAB_RANGE
+			app.game.set_held(dheld)
+			app.game._physics_process(1.0 / 120.0)
+		await process_frame
+		if not app.game.car.finished:
+			_fail("a clean line did not finish the daily")
+		if app.btn_finish_lb.visible:
+			_fail("finish card offers a leaderboard for a daily")
+		if app.btn_finish_wr.visible:
+			_fail("finish card offers a world record for a daily")
+		if app.finish_medal.visible:
+			_fail("finish card awards a built-in medal for a daily")
+		if not app.finish_rank.text.begins_with("Daily"):
+			_fail("daily finish card did not say Daily (got '%s')" % app.finish_rank.text)
+	app._to_menu()
+	await process_frame
+	Storage._write("times.v1", times_snapshot)
+	Storage._write("replays.v1", replays_snapshot)
+	Storage._write("runs.v1", runs_snapshot)
+	Storage._write("attempts.v1", tries_snapshot)
 
 	sub.queue_free()
 	await process_frame

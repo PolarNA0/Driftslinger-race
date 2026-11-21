@@ -271,7 +271,12 @@ func _die() -> void:
 	if is_replay():
 		changed.emit({"died": true, "replay": true})
 		return
-	var prev := Storage.save_record(seed_num, metres(), car.grabbed)
+	# A speedrun crash is not a distance record. Saving one used to leave a
+	# meaningless entry in `records.v1` for every track, and a daily would have
+	# added one per date.
+	var prev := {"dist": 0.0, "corners": 0}
+	if mode == "endless":
+		prev = Storage.save_record(seed_num, metres(), car.grabbed)
 	kick(18.0)
 	if not reduced_motion and renderer != null:
 		renderer.flash_hit(0.32)

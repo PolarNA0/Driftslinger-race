@@ -98,6 +98,11 @@ var ghost_buttons := {}        # "off"/"self" -> Button
 var track_buttons := []        # one per track, in order
 var track_pb_labels := {}      # track number -> the Label under it showing the best
 var track_medals := {}         # track number -> the MedalIcon in the chip corner
+var daily_section: Control
+var daily_title: Label
+var daily_sub: Label
+var daily_button: Button
+var daily_challenge: Dictionary = {}
 var car_buttons := []
 var lb_title: Label
 var lb_note: Label
@@ -177,8 +182,12 @@ func _ready() -> void:
 	audio.attach_game(game)
 	audio.set_volumes(audio_master, audio_music, audio_sfx)
 	game.sfx.connect(_on_sfx)
-	# A custom track id resolves to its op list; a built-in track needs no provider.
-	game.opts_provider = func(seed: int) -> Dictionary: return CustomTracks.opts_for_id(seed)
+	# A custom track id resolves to its op list, and a daily seed to today's
+	# track plus its modifier; a built-in track needs no provider.
+	game.opts_provider = func(seed: int) -> Dictionary:
+		if Daily.is_daily(seed):
+			return Daily.opts(Daily.challenge_for_seed(seed))
+		return CustomTracks.opts_for_id(seed)
 
 	layer = CanvasLayer.new()
 	add_child(layer)
@@ -728,6 +737,7 @@ func _on_tab(name: String) -> void:
 		"play":
 			shell.set_title("Play", "Pick a track and go")
 			_refresh_custom_list()
+			_refresh_daily()
 		"garage":
 			shell.set_title("Garage", "Choose your car")
 		"editor":
@@ -748,6 +758,27 @@ func _build_play_tab() -> void:
 	col.add_child(mode_bar)
 	mode_buttons["speedrun"] = _segment(mode_bar, "clock", "Tracks", func(): _set_mode("speedrun"))
 	mode_buttons["endless"] = _segment(mode_bar, "infinity", "Endless", func(): _set_mode("endless"))
+
+	# Today's challenge is its own card: one track and one modifier, the same for
+	# everyone. It is local-only, so it sits beside the normal track chooser
+	# rather than replacing it.
+	daily_section = _col(6)
+	col.add_child(daily_section)
+	daily_section.add_child(_section("Daily challenge"))
+	var daily_card := PanelContainer.new()
+	daily_card.theme_type_variation = "SubCard"
+	daily_section.add_child(daily_card)
+	var dc := _col(4)
+	daily_card.add_child(dc)
+	daily_title = _label("", 18)
+	dc.add_child(daily_title)
+	daily_sub = _label("", 12)
+	daily_sub.add_theme_color_override("font_color", UiTheme.INK_DIM)
+	daily_sub.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	dc.add_child(daily_sub)
+	daily_button = _ghost_button("Play daily", _play_daily)
+	daily_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	dc.add_child(daily_button)
 
 	# The track chooser only applies to a time attack: endless is one open road,
 	# so the whole section is hidden in that mode rather than shown and ignored.
@@ -1501,6 +1532,7 @@ func _show_tracks() -> void:
 
 func _refresh_track_list() -> void:
 	_refresh_track_visibility()
+	_refresh_daily()
 	for b in track_buttons:
 		b.button_pressed = (int(b.get_meta("track")) == menu_seed)
 	_refresh_track_bests()
@@ -1520,6 +1552,28 @@ func _refresh_track_list() -> void:
 	_refresh_custom_list()
 
 
+func _refresh_daily() -> void:
+	if daily_title == null:
+		return
+	daily_challenge = Daily.today()
+	var seed := int(daily_challenge["seed"])
+	daily_title.text = Daily.summary(daily_challenge)
+	var best: Variant = Storage.get_best_time(seed)
+	var tries := Storage.get_attempts(seed)
+	var best_text := "best --" if best == null else "best %s" % _fmt_time(float(best))
+	var tries_text := "no tries yet" if tries == 0 else ("1 try" if tries == 1 else "%d tries" % tries)
+	daily_sub.text = "%s \u00b7 %s \u00b7 %s" % [str(daily_challenge["date"]), best_text, tries_text]
+	daily_button.text = "Play daily" if best == null else "Beat your daily"
+
+
+func _play_daily() -> void:
+	# Recompute rather than trust the card: the app can sit on this tab across
+	# UTC midnight, and the date is what picks the challenge.
+	_refresh_daily()
+	_set_mode("speedrun")
+	_start_run(int(daily_challenge["seed"]))
+
+
 # Endless has no track to pick, so the chooser is hidden rather than shown and
 # ignored. Speedrun is where a track means anything - and the same goes for the
 # custom-track picker underneath it.
@@ -1528,6 +1582,8 @@ func _refresh_track_visibility() -> void:
 		track_section.visible = (menu_mode != "endless")
 	if custom_section != null:
 		custom_section.visible = (menu_mode != "endless")
+	if daily_section != null:
+		daily_section.visible = (menu_mode != "endless")
 
 
 func _refresh_mode_list() -> void:
@@ -1724,7 +1780,7 @@ func _show_history() -> void:
 		var seed := int(r["seed"])
 		var best: Variant = Storage.get_best_time(seed)
 		var pb := best != null and absf(float(r["time"]) - float(best)) < 1e-9
-		var label := CustomTracks.display_name(seed) if CustomTracks.has(seed) else "Track %d" % seed
+		var label := _seed_name(seed)
 		hist_rows.add_child(_label("%s   %s   %s   %s" % [
 			label, "Personal best" if pb else "Finished",
 			_fmt_time(float(r["time"])), _ago(float(r["at"]))], 14))
@@ -2115,11 +2171,14 @@ func _start_run(seed: int) -> void:
 	audio.pause_all(false)
 	audio.music("music_race")
 	game.load_track(seed, menu_mode)
+	var daily := Daily.is_daily(seed)
+	if daily:
+		Storage.add_attempt(seed)
 	_apply_ghost(seed)
 	_hud_reset()
 	# Fetch the board in the background so the WR mark can appear during the run.
-	# A custom track is local-only and has no board to ask for.
-	if not CustomTracks.has(seed):
+	# A custom track and a daily challenge are local-only and have no board.
+	if not daily and not CustomTracks.has(seed):
 		_load_reals(seed, menu_mode)
 	hint_label.visible = true
 	_show_round_button(true)
@@ -2141,7 +2200,7 @@ func _watch_own_replay(seed: int) -> void:
 	watching = {
 		"kind": "self", "seed": seed, "name": null, "time": float(best),
 		"label": "%s's best" % _player_name(), "tag": "Your best run",
-		"sub": "Track %d \u00b7 %s" % [seed, _fmt_time(float(best))],
+		"sub": "%s \u00b7 %s" % [_seed_name(seed), _fmt_time(float(best))],
 	}
 	_hide_overlays()
 	audio.pause_all(false)
@@ -2249,6 +2308,7 @@ func _on_game_change(extra: Dictionary) -> void:
 		_show_only("dead")
 		hint_label.visible = false
 		_show_round_button(false)
+		_refresh_daily()
 
 	if bool(extra.get("finished", false)):
 		var prev2: Variant = extra["prev"]
@@ -2263,7 +2323,8 @@ func _on_game_change(extra: Dictionary) -> void:
 		finish_tag.text = "New best time" if beat2 else "Finished"
 		finish_time.text = _fmt_time(game.run_time())
 		var custom := CustomTracks.has(game.seed_num)
-		var medal := "" if custom else Medals.medal_for(game.seed_num, game.run_time())
+		var daily := Daily.is_daily(game.seed_num)
+		var medal := "" if custom or daily else Medals.medal_for(game.seed_num, game.run_time())
 		finish_medal.text = Medals.label(medal)
 		finish_medal.add_theme_color_override("font_color", Medals.color(medal))
 		finish_medal.visible = medal != ""
@@ -2277,22 +2338,27 @@ func _on_game_change(extra: Dictionary) -> void:
 		finish_pb_delta.visible = true
 		_set_delta(finish_wr_delta, "WR", game.run_time(), run_wr_time, true, "s")
 		finish_wr_delta.visible = run_wr_time != null
-		var rank := 0 if custom else Leaderboard.player_rank(best2, _reals_for(game.seed_num))
-		finish_rank.text = "#%d on Track %d" % [rank, game.seed_num] if rank > 0 else ""
+		if daily:
+			var mod := str(Daily.challenge_for_seed(game.seed_num)["modifier"])
+			finish_rank.text = "Daily \u00b7 %s" % Daily.modifier_label(mod)
+		else:
+			var rank := 0 if custom else Leaderboard.player_rank(best2, _reals_for(game.seed_num))
+			finish_rank.text = "#%d on Track %d" % [rank, game.seed_num] if rank > 0 else ""
 		btn_watch.visible = Storage.get_replay(game.seed_num) != null
-		btn_finish_wr.visible = not custom and Leaderboard.world_record(_reals_for(game.seed_num)) != null
-		btn_finish_lb.visible = not custom
+		btn_finish_wr.visible = not custom and not daily and Leaderboard.world_record(_reals_for(game.seed_num)) != null
+		btn_finish_lb.visible = not custom and not daily
 		_show_only("finish")
 		hint_label.visible = false
 		_show_round_button(false)
-		# A custom track is local-only: the server has never heard of its id and its
-		# shape is the player's own, so there is no board to upload to. The run is
-		# already saved locally (the time, the history and the replay), which is all a
-		# custom track needs.
-		if not custom:
+		# A custom track and a daily challenge are local-only: the server has
+		# never heard of their ids and their shape is not the built-in track, so
+		# there is no board to upload to. The run is already saved locally (the
+		# time, the history and the replay), which is all they need.
+		if not custom and not daily:
 			var seed_done := game.seed_num
 			Api.enqueue(seed_done, Replay.encode_steps(game.steps), _player_name())
 			_submit_queued(seed_done)
+		_refresh_daily()
 
 
 # Send queued endless runs. There is no finish card to refresh - endless ends in a
@@ -2370,13 +2436,19 @@ func _hud_reset() -> void:
 	if game.is_replay():
 		hud_mode.text = "REPLAY"
 		hud_dist.text = "0.000s"
-		hud_sub.text = "%s \u00b7 Track %d" % [str(watching["label"]), game.seed_num] \
-			if watching != null else "replay \u00b7 Track %d" % game.seed_num
+		hud_sub.text = "%s \u00b7 %s" % [str(watching["label"]), _seed_name(game.seed_num)] \
+			if watching != null else "replay \u00b7 %s" % _seed_name(game.seed_num)
 		hud_pb_delta.visible = false
 		hud_wr_delta.visible = false
 		hud_progress.visible = false
 	elif game.mode == "speedrun":
-		hud_mode.text = "CUSTOM \u00b7 SPEEDRUN" if CustomTracks.has(game.seed_num) else "SPEEDRUN \u00b7 TRACK %d" % game.seed_num
+		if Daily.is_daily(game.seed_num):
+			var mod := str(Daily.challenge_for_seed(game.seed_num)["modifier"])
+			hud_mode.text = "DAILY \u00b7 %s" % Daily.modifier_label(mod).to_upper()
+		elif CustomTracks.has(game.seed_num):
+			hud_mode.text = "CUSTOM \u00b7 SPEEDRUN"
+		else:
+			hud_mode.text = "SPEEDRUN \u00b7 TRACK %d" % game.seed_num
 		hud_dist.text = "0.000s"
 		var best: Variant = Storage.get_best_time(game.seed_num)
 		hud_sub.text = "best --" if best == null else "best %s" % _fmt_time(float(best))
@@ -2571,6 +2643,15 @@ func _unhandled_input(event: InputEvent) -> void:
 # =============================================================================
 # Formatting
 # =============================================================================
+
+# What a seed is called in a HUD line or a replay badge.
+func _seed_name(seed: int) -> String:
+	if Daily.is_daily(seed):
+		return "Daily %s" % Daily.date_for_seed(seed)
+	if CustomTracks.has(seed):
+		return CustomTracks.display_name(seed)
+	return "Track %d" % seed
+
 
 func _fmt_time(s: float) -> String:
 	return "%.3fs" % s

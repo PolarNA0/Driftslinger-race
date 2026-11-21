@@ -3,10 +3,13 @@
 A one-button car-drifting game. Hold to sling the car round a pillar, let go to
 fly straight to the next one. Leave the road and the run ends.
 
-Two modes:
+Two modes, plus a daily challenge:
 
 - **Speedrun** — a finite ~10s track, scored by time.
 - **Endless** — an infinite road, scored by distance in metres.
+- **Daily challenge** — one track and one modifier (mirror, or no reattach on a
+  reattach track), the same for everyone on the same UTC date. It is local-only:
+  the run is saved on the device and never uploaded.
 
 ## The Godot build is the game
 

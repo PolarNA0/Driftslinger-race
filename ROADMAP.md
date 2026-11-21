@@ -520,19 +520,33 @@ in the chip's corner, the finish card names the medal, and the Play tab shows a
 "Medals" summary. `verify_medals.gd` drives a clean line on every track and
 asserts gold.
 
-### C4. Daily challenge — L
+### C4. Daily challenge — L — SHIPPED
 
-A date-derived challenge: one track, one optional modifier (mirror, reverse, no
-reattach, tight corners), the same for everyone that day. Start local-only:
-`daily.v1.json` stores the date, track, modifier, attempts and best. Then add a
-`daily_runs` table and a board if it proves popular.
+A date-derived challenge: one track and one modifier, the same for everyone on
+the same UTC date. It is local-only; there is no server board.
 
-Use the existing `CustomTracks.mirror` / `reverse` transforms for modifiers so
-the geometry stays in the proven op-list system.
+- `godot/scripts/daily.gd` derives the challenge from the date with a stable
+  hash, so two devices agree. The date also becomes the seed
+  (`Daily.BASE + day index`), which reuses the existing per-seed best-time,
+  history and replay stores and makes yesterday a different seed rather than an
+  overwrite.
+- The modifiers are **mirror** and **no reattach** (the latter only on tracks
+  26-28, where it changes the road). `Track` grew `shape_seed`, `mirror` and
+  `no_reattach` opts, all off by default, so built-in tracks are bit-identical.
+  `shape_seed` keeps a daily on track 1 the real track 1 rather than a different
+  road that happens to share its number.
+- The Play tab has a daily card with the date, track, modifier, best and tries.
+  The card is hidden in endless, like the track chooser.
+- A daily run is local-only: no upload, no leaderboard, no world record and no
+  built-in medal. `verify_ui` drives one to its finish and asserts all of that.
+- `verify_daily.gd` proves the same date picks the same challenge, a month does
+  not repeat one track or modifier, every variant finishes on a clean line,
+  mirroring flips every corner and keeps the length, no-reattach strips every
+  pillar, and two dates store separate bests and attempts.
 
-**Acceptance:** the same date yields the same challenge on two devices;
-yesterday's result is not overwritten; a custom modifier still finishes on every
-track (`verify_tracks` extended).
+**Not done:** a `daily_runs` table and a board. That is deliberate until the
+mode proves popular; adding it would mean deciding whether a modified run is
+comparable across dates at all.
 
 ### C5. Custom-track sharing — M
 

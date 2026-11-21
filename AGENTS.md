@@ -53,6 +53,10 @@ build is the only client.
   a new track is one entry and it joins the menu at once.
 - `godot/scripts/car.gd` — the physics. `step(dt, held)` is pure and testable.
 - `godot/scripts/game.gd` — fixed 1/120s tick, modes, records, replays.
+- `godot/scripts/daily.gd` — `Daily`, the date-derived challenge: one track and
+  one modifier (mirror, or no reattach on a reattach track) for the UTC date,
+  keyed by a per-date seed so yesterday is not overwritten. See "The daily
+  challenge".
 - `godot/scripts/render.gd` — top-down orthographic view, road themes, the
   car sprites, and the responsive zoom (see "Fitting every screen").
 - `godot/scripts/app.gd` — the shell: the tabbed menu, overlays, leaderboard,
@@ -90,7 +94,8 @@ build is the only client.
   and leaderboard client (see "The online layer").
 - `godot/scenes/main.tscn`, `godot/project.godot` — scene and project settings.
 - `godot/tools/` — headless verifiers (`parity.gd`, `verify_tracks.gd`,
-  `verify_reattach.gd`, `verify_endless.gd`, `verify_board.gd`, `verify_online.gd`,
+  `verify_daily.gd`, `verify_reattach.gd`, `verify_endless.gd`, `verify_board.gd`,
+  `verify_online.gd`,
   `verify_guard.gd`, `verify_ui.gd`, `verify_editor.gd`, `verify_cars.gd`,
   `verify_keys.gd`, `verify_medals.gd`). See `godot/README.md`.
 
@@ -544,10 +549,12 @@ tab pages and populates them; the shell owns no game state.
   holds the key bindings and the build version). The old "Tracks" button is gone -
   the track chooser lives on the Play tab as a grid of numbers, with the selected
   track and its best above it, and the player's own tracks in a "My tracks" picker
-  underneath. Editor is a making-things tab, so it sits next to Garage.
-- **Endless hides the track chooser.** Endless is one open road, so the whole
-  track section (`track_section`) is hidden in that mode rather than shown and
-  ignored; `verify_ui.gd` asserts it is gone and unreachable. Speedrun shows it.
+  underneath. A daily-challenge card sits above the chooser. Editor is a
+  making-things tab, so it sits next to Garage.
+- **Endless hides the track chooser and the daily card.** Endless is one open
+  road, so the whole track section (`track_section`) and the daily section
+  (`daily_section`) are hidden in that mode rather than shown and ignored;
+  `verify_ui.gd` asserts both are gone and unreachable. Speedrun shows them.
 - **Three rebindable keys.** Space plays, `R` restarts the run in progress and
   `Esc` pauses and resumes it; all three are rebound in Settings, which captures
   the next key press (`_begin_capture` / `_bind_key`) and refuses a binding that
@@ -603,6 +610,41 @@ tab pages and populates them; the shell owns no game state.
   selected chip's labels against the accent and fails under 4.5:1. Any new
   button-with-labels needs the same treatment.
 - **The version line is on Settings**, not under the Play button.
+
+## The daily challenge
+
+One track and one modifier for the UTC date, the same on every device. It is
+**local-only**: no upload, no leaderboard, no world record and no built-in medal.
+The card sits on the Play tab and is hidden in endless, like the track chooser.
+
+- **The date is the seed.** `Daily.seed_for(date)` is `BASE` plus the day index,
+  so the existing per-seed best-time, history, replay and attempt stores work
+  unchanged and yesterday is a different seed rather than an overwrite.
+  `BASE` (900,000,000) is far above the built-in numbers and the custom range.
+- **The same date must pick the same road everywhere.** `Daily.challenge_for`
+  hashes `"slingdrift-daily-v1:" + date` (a stable `String.hash()`), picks a
+  track from `Tracks.MENU_TRACKS`, then a modifier. The date is UTC
+  (`Time.get_date_string_from_system(true)`), so a time zone cannot disagree.
+- **A daily seed is not a track number.** `Track` gained a `shape_seed` opt: the
+  seed keys storage, but the rng (and so the staircase's first turn) comes from
+  the real track number. Without it a daily on track 1 would be a different
+  staircase on every date.
+- **Modifiers are `Track` opts, default off.** `mirror` flips the staircase's
+  `turn_sign` and negates each op-list arc's angle; `no_reattach` forces every
+  fillet's `reattach` to false. Both are off for a built-in track, so the parity
+  goldens and every shipped road are unchanged. `no_reattach` is only offered on
+  tracks 26-28, where it actually changes the road.
+- **Local-only is gated in `App`, not in the physics.** `Daily.is_daily(seed)`
+  skips `_load_reals`, the upload, the board/WR buttons and the medal. The run
+  still saves its time, history and replay locally, so "Beat your daily" and a
+  ghost of your best daily run both work.
+- **A speedrun crash is not a distance record.** `Game._die` now writes
+  `records.v1` only in endless. It used to write one for every speedrun crash,
+  which would have added a meaningless entry per daily date.
+- `godot/tools/verify_daily.gd` proves determinism, a month of variation, every
+  variant finishing on a clean line, mirror geometry, no-reattach stripping, and
+  per-date bests/attempts. `verify_ui.gd` drives a daily to its finish and
+  asserts the card, the attempt count and the local-only finish card.
 
 ## The track editor (the Editor tab)
 

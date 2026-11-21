@@ -30,6 +30,9 @@ Additions on top of the port:
   Tracks 26–28 showcase it (amber = still catchable, bronze = spent).
 - **Sprite cars.** Every car in the picker is its own free CC0 top-down sprite
   (see `assets/cars/CREDITS.md`); `tools/verify_cars.gd` fails if two share one.
+- **A daily challenge.** One track and one modifier (mirror, or no reattach on a
+  reattach track) for the UTC date, the same on every device. It is local-only:
+  the best and the attempts are stored per date and nothing uploads.
 - **A restart key.** `R` restarts the run in progress, and retries from the crash
   and finish cards. It can be rebound in Settings, where the play key is rebound
   too.
@@ -133,6 +136,7 @@ finish time and how far off the centreline the car strayed:
 
 ```sh
 godot --headless --path . --script res://tools/verify_tracks.gd
+godot --headless --path . --script res://tools/verify_daily.gd
 ```
 
 `tools/verify_reattach.gd` checks the new pillar: that a plain pillar stays spent
@@ -225,6 +229,11 @@ placeholder or a repeat of another.
 ```sh
 godot --headless --path . --script res://tools/verify_cars.gd
 ```
+
+`tools/verify_daily.gd` checks the date-derived challenge: the same date picks
+the same track and modifier, every modifier finishes on every track, mirroring
+flips every corner, no-reattach strips every pillar, and two dates keep separate
+bests and attempt counts.
 
 `tools/verify_keys.gd` checks the rebindable keys: the defaults (Space to play,
 R to restart, Esc to pause), that R restarts a run, retries from the crash and

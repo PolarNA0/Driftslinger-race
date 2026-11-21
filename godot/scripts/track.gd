@@ -24,6 +24,11 @@ var radius: float
 var target_time: float
 var seg_index: int = 0
 var ops: Variant = null
+# A daily challenge can mirror the road or strip its reattach pillars without
+# changing the track number it is stored under. Both default off, so a built-in
+# track is bit-identical to before.
+var mirror := false
+var no_reattach := false
 
 # Endless is the only infinite road, so it is the only one that ramps. `endless`
 # is true for a plain Track.new(seed) and false for any track with opts (every
@@ -48,7 +53,12 @@ var cur: Vector2
 
 func _init(p_seed: int = 1, opts: Dictionary = {}) -> void:
 	seed = p_seed
-	rng = U.mulberry32(seed)
+	# The storage key and the shape seed are usually the same. A daily challenge
+	# is keyed by its date so yesterday's result is not overwritten, but its road
+	# must be the real track's road, so it passes the track number here.
+	rng = U.mulberry32(int(opts.get("shape_seed", seed)))
+	mirror = bool(opts.get("mirror", false))
+	no_reattach = bool(opts.get("no_reattach", false))
 	finite = opts.has("corners") and int(opts["corners"]) > 0
 	corner_limit = int(opts["corners"]) if finite else 1000000
 	finish_len = float(opts.get("finish_len", Cfg.SPEEDRUN_FINISH))
@@ -62,6 +72,8 @@ func _init(p_seed: int = 1, opts: Dictionary = {}) -> void:
 	# Alternate turn direction; pick the first one from the seed so different
 	# roads are not all mirror images of each other.
 	turn_sign = -1 if rng.call() < 0.5 else 1
+	if mirror:
+		turn_sign = -turn_sign
 	# A track can instead be given an explicit op list: straights and signed arcs,
 	# walked in order. That is what the hairpin and loop tracks (21-25) need,
 	# because their corners are not quarter turns and the staircase builder only
@@ -94,6 +106,8 @@ func build_ops() -> void:
 			break
 		if op["t"] == "A":
 			var th := deg_to_rad(float(op["deg"]))
+			if mirror:
+				th = -th
 			var s: float = sign(th)
 			if s == 0.0:
 				s = 1.0
@@ -114,7 +128,7 @@ func build_ops() -> void:
 				"phi": th, "t1": cur, "t2": c + Vector2(cos(a2), sin(a2)) * r,
 				"s0": length, "s1": length + r * abs(th),
 				# A pillar you can re-grab after letting go early (see Car.release).
-				"reattach": bool(op.get("reattach", false)),
+				"reattach": false if no_reattach else bool(op.get("reattach", false)),
 			}
 			fillets.append(fil)
 			push_arc(fil)
