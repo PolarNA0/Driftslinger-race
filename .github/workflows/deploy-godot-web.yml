@@ -30,7 +30,7 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The Godot editor is not on the runner, and the web export needs the
       # export templates too, so fetch both from the release that matches the
@@ -92,7 +92,7 @@ jobs:
     needs: deploy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
