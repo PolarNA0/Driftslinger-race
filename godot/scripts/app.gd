@@ -1312,6 +1312,12 @@ func _segment(parent: Node, icon_kind: String, text: String, cb: Callable) -> Bu
 	var l := _label(text, 15)
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	box.add_child(l)
+	# The icon and the label are children, so the theme's font_pressed_color
+	# does not reach them. Repaint both when the segment is selected, or the
+	# chip's tint and its contents disagree.
+	b.toggled.connect(func(on: bool):
+		ic.color = UiTheme.ACCENT if on else UiTheme.INK
+		l.add_theme_color_override("font_color", UiTheme.ACCENT if on else UiTheme.INK))
 	parent.add_child(b)
 	return b
 

@@ -102,14 +102,18 @@ static func build() -> Theme:
         t.set_type_variation("GhostButton", "Button")
         _button_styles(t, "GhostButton", Color(0.09, 0.11, 0.20, 0.72), BTN_EDGE.darkened(0.25), INK_DIM)
 
-        # Toggle chips (mode / ghost / track / car pickers). The pressed look is the
-        # accent, so the current choice is unmistakable.
+        # Toggle chips (mode / ghost / track / car pickers). The selected chip is a
+        # tinted accent chip with an accent border and accent text, not a solid gold
+        # fill: a full-width segment painted solid read as a banner, not a control,
+        # and three of them on the Play tab made the page mostly yellow. The tint is
+        # still unmistakable next to the slate idle chip.
         t.set_type_variation("ToggleButton", "Button")
         _button_styles(t, "ToggleButton", BTN, BTN_EDGE, INK)
-        t.set_stylebox("pressed", "ToggleButton", _flat(ACCENT, ACCENT.lightened(0.15), 12, 2, 16, 12))
-        t.set_stylebox("hover_pressed", "ToggleButton", _flat(ACCENT, ACCENT.lightened(0.15), 12, 2, 16, 12))
-        t.set_color("font_pressed_color", "ToggleButton", ACCENT_TEXT)
-        t.set_color("font_hover_pressed_color", "ToggleButton", ACCENT_TEXT)
+        var seg_on := _flat(Color(ACCENT.r, ACCENT.g, ACCENT.b, 0.16), ACCENT, 12, 2, 16, 12)
+        t.set_stylebox("pressed", "ToggleButton", seg_on)
+        t.set_stylebox("hover_pressed", "ToggleButton", seg_on)
+        t.set_color("font_pressed_color", "ToggleButton", ACCENT)
+        t.set_color("font_hover_pressed_color", "ToggleButton", ACCENT)
 
         # A square-ish chip for the picker grids (track numbers, car swatches). The
         # default 16px side padding leaves only ~15px of text room in a 7-wide grid on

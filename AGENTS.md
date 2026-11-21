@@ -784,6 +784,13 @@ like a shipped one.
 
 ## UI look, boot splash and fitting every screen
 
+- **A selected segment is tinted, not painted solid gold.** The mode and ghost
+  toggles are full-width 48px chips; with a solid `ACCENT` fill, three of them on
+  the Play tab read as banners, not controls ("what does that huge yellow bar
+  do?"). `ToggleButton`'s pressed style is now a 16% accent tint with an accent
+  border, and `_segment` repaints its child icon and label on `toggled` because
+  the theme's `font_pressed_color` does not reach a child `Label`. The solid gold
+  fill is kept for `GridChip` (the small track/car chips) and the primary button.
 - **Medals are derived, never stored.** `Medals.medal_for(track, time)` recomputes
   the award from the player's best, so a threshold change re-colours history
   instead of leaving stale awards behind. Gold is 3% over the track's
