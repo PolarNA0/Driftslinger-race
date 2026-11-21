@@ -22,6 +22,7 @@ var tab_cols := []                   # the scroll columns inside tab pages, for 
 var mode_bar: HBoxContainer
 var play_track_label: Label
 var play_best_label: Label
+var medals_label: Label
 var track_section: VBoxContainer     # the track chooser, hidden in endless
 var car_preview: TextureRect
 var car_name_label: Label
@@ -96,6 +97,7 @@ var mode_buttons := {}         # "speedrun"/"endless" -> Button
 var ghost_buttons := {}        # "off"/"self" -> Button
 var track_buttons := []        # one per track, in order
 var track_pb_labels := {}      # track number -> the Label under it showing the best
+var track_medals := {}         # track number -> the MedalIcon in the chip corner
 var car_buttons := []
 var lb_title: Label
 var lb_note: Label
@@ -124,6 +126,7 @@ var finish_rank: Label
 var btn_watch: Button
 var btn_finish_wr: Button
 var btn_finish_lb: Button
+var finish_medal: Label
 var settings_master: HSlider
 var settings_music: HSlider
 var settings_sfx: HSlider
@@ -764,6 +767,10 @@ func _build_play_tab() -> void:
 	var tgrid := _col(4)
 	tc.add_child(tgrid)
 	_build_track_list(tgrid)
+	medals_label = _label("", 12)
+	medals_label.add_theme_color_override("font_color", UiTheme.INK_DIM)
+	medals_label.clip_text = true
+	tc.add_child(medals_label)
 
 	col.add_child(_primary_button("Play", func(): _start_run(menu_seed)))
 
@@ -1399,6 +1406,7 @@ func _refresh_car_preview() -> void:
 func _build_track_list(parent: Node) -> void:
 	track_buttons.clear()
 	track_pb_labels.clear()
+	track_medals.clear()
 	var grid := GridContainer.new()
 	grid.columns = 5
 	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1435,9 +1443,18 @@ func _build_track_list(parent: Node) -> void:
 		pb.add_theme_color_override("font_color", UiTheme.INK_DIM)
 		pb.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		box.add_child(pb)
+		var medal := MedalIcon.new()
+		medal.anchor_left = 1.0
+		medal.anchor_right = 1.0
+		medal.offset_left = -12.0
+		medal.offset_right = -4.0
+		medal.offset_top = 5.0
+		medal.offset_bottom = 13.0
+		b.add_child(medal)
 		grid.add_child(b)
 		track_buttons.append(b)
 		track_pb_labels[s] = pb
+		track_medals[s] = medal
 
 
 # The per-track best under each chip, so the grid answers "which have I run?"
@@ -1456,7 +1473,12 @@ func _refresh_track_bests() -> void:
 			continue
 		var best: Variant = Storage.get_best_time(s)
 		pb.text = "--" if best == null else _fmt_time(float(best))
+		var medal: MedalIcon = track_medals.get(s)
+		if medal != null:
+			medal.medal = "" if best == null else Medals.medal_for(s, float(best))
 		_paint_chip(b, pb)
+	if medals_label != null:
+		medals_label.text = "Medals  " + Medals.summary_text()
 
 
 func _paint_chip(b: Button, pb: Label) -> void:
@@ -1958,6 +1980,8 @@ func _build_finish() -> void:
 	col.add_child(finish_tag)
 	finish_time = _label("", 30)
 	col.add_child(finish_time)
+	finish_medal = _label("", 14)
+	col.add_child(finish_medal)
 	finish_sub = _label("", 16)
 	col.add_child(finish_sub)
 	var marks := _row(12)
@@ -2232,6 +2256,11 @@ func _on_game_change(extra: Dictionary) -> void:
 			Haptics.fire("finish")
 		finish_tag.text = "New best time" if beat2 else "Finished"
 		finish_time.text = _fmt_time(game.run_time())
+		var custom := CustomTracks.has(game.seed_num)
+		var medal := "" if custom else Medals.medal_for(game.seed_num, game.run_time())
+		finish_medal.text = Medals.label(medal)
+		finish_medal.add_theme_color_override("font_color", Medals.color(medal))
+		finish_medal.visible = medal != ""
 		var best2 := game.run_time() if prev2 == null else minf(float(prev2), game.run_time())
 		finish_sub.text = "best %s" % _fmt_time(best2)
 		if prev2 == null:
@@ -2242,7 +2271,6 @@ func _on_game_change(extra: Dictionary) -> void:
 		finish_pb_delta.visible = true
 		_set_delta(finish_wr_delta, "WR", game.run_time(), run_wr_time, true, "s")
 		finish_wr_delta.visible = run_wr_time != null
-		var custom := CustomTracks.has(game.seed_num)
 		var rank := 0 if custom else Leaderboard.player_rank(best2, _reals_for(game.seed_num))
 		finish_rank.text = "#%d on Track %d" % [rank, game.seed_num] if rank > 0 else ""
 		btn_watch.visible = Storage.get_replay(game.seed_num) != null

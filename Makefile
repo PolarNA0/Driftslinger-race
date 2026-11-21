@@ -23,6 +23,7 @@ VERIFIERS := \
 	verify_ui \
 	verify_cars \
 	verify_keys \
+	verify_medals \
 	verify_audio \
 	verify_hud \
 	verify_storage

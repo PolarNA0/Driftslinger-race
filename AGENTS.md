@@ -74,6 +74,10 @@ build is the only client.
   (palette, button/toggle variations, panels, scrollbars).
 - `godot/scripts/ui_icon.gd` — `UiIcon`, the tab and action icons drawn as
   geometry, because the theme font has no icon glyphs.
+- `godot/scripts/medals.gd` — `Medals`, the per-track gold/silver/bronze
+  thresholds (derived from `target_time`) and the summary counts.
+- `godot/scripts/medal_icon.gd` — `MedalIcon`, the tiny drawn medal in a track
+  chip's corner.
 - `godot/assets/ui/boot_splash.png` — the boot splash, set in `project.godot`.
 - `godot/web/shell.html` — the web export's HTML shell (the custom loader).
 - `godot/scripts/{replay,storage,leaderboard,account}.gd` — the ported support
@@ -84,7 +88,7 @@ build is the only client.
 - `godot/tools/` — headless verifiers (`parity.gd`, `verify_tracks.gd`,
   `verify_reattach.gd`, `verify_endless.gd`, `verify_board.gd`, `verify_online.gd`,
   `verify_guard.gd`, `verify_ui.gd`, `verify_editor.gd`, `verify_cars.gd`,
-  `verify_keys.gd`). See `godot/README.md`.
+  `verify_keys.gd`, `verify_medals.gd`). See `godot/README.md`.
 
 ### JavaScript (the server's physics)
 
@@ -138,6 +142,7 @@ godot --headless --path godot --script res://tools/verify_editor.gd   # the trac
 godot --headless --path godot --script res://tools/verify_ui.gd       # menu/overlay fit, editor palette + map
 godot --headless --path godot --script res://tools/verify_cars.gd     # every car has its own sprite
 godot --headless --path godot --script res://tools/verify_keys.gd     # restart/play keybinds
+godot --headless --path godot --script res://tools/verify_medals.gd   # per-track medal thresholds
 godot --headless --path godot --script res://tools/verify_audio.gd    # audio assets, loop flags, haptics
 godot --headless --path godot --script res://tools/verify_hud.gd      # HUD deltas, progress bar, settings
 godot --headless --path godot --script res://tools/verify_storage.gd  # atomic saves
@@ -779,6 +784,13 @@ like a shipped one.
 
 ## UI look, boot splash and fitting every screen
 
+- **Medals are derived, never stored.** `Medals.medal_for(track, time)` recomputes
+  the award from the player's best, so a threshold change re-colours history
+  instead of leaving stale awards behind. Gold is 3% over the track's
+  `target_time`, silver 10%, bronze 20%; a clean line runs 1-2% over target, so
+  gold at exactly target was unearnable. A custom track has no target and no
+  medal. `verify_medals.gd` drives a clean line on every shipped track and fails
+  if it does not earn gold.
 - **All UI colour comes from `godot/scripts/theme.gd` (`UiTheme`).** `App._ready`
   applies one built `Theme` to the whole UI tree, so nothing falls back to the
   engine's default grey. The palette is deep-navy panels with a warm-gold accent

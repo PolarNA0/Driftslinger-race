@@ -24,6 +24,9 @@ const BTN_EDGE := Color("434d88")
 const DISABLED_BG := Color("171b2c")
 const DISABLED_EDGE := Color("262c47")
 const DANGER := Color("ff7b7b")
+const MEDAL_GOLD := Color("ffe08a")
+const MEDAL_SILVER := Color("d7dcea")
+const MEDAL_BRONZE := Color("d08a4e")
 const GOOD := Color("7fe08a")       # ahead of a PB or the WR
 
 # The full-screen app shell. The whole window is the app now, not a card floating

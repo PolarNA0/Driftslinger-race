@@ -495,7 +495,7 @@ a "reported, not verified" label on the board. Do not pretend it is verified.
 distance is rejected; a board row can be watched; `tools/test.mjs` covers the
 same claims on the JS side and `verify_endless.gd` on the Godot side.
 
-### C3. Medals and per-track goals — M
+### C3. Medals and per-track goals — M — [x]
 
 Derive gold/silver/bronze targets deterministically from each track's
 `targetTime` (e.g. gold = target, silver = +3%, bronze = +8%), show the medal on
@@ -504,6 +504,14 @@ the track chip and the finish card, and add a "Medals" summary on the Play tab.
 **Acceptance:** `verify_board.gd` (or a new `verify_medals.gd`) asserts the
 thresholds are ordered, deterministic, and that a real clean line earns gold on
 every shipped track.
+
+**Shipped:** `Medals` (`godot/scripts/medals.gd`) derives gold/silver/bronze from
+the track's `target_time` at 3%/10%/20% over it. The example above (gold = target)
+was wrong for the shipped tracks: a clean line runs 1-2% over target, so gold at
+exactly target was unearnable on tracks 1, 5 and 21-28. A drawn `MedalIcon` sits
+in the chip's corner, the finish card names the medal, and the Play tab shows a
+"Medals" summary. `verify_medals.gd` drives a clean line on every track and
+asserts gold.
 
 ### C4. Daily challenge — L
 

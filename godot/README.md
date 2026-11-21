@@ -200,6 +200,15 @@ resolves to empty so the game can fall back.
 godot --headless --path . --script res://tools/verify_editor.gd
 ```
 
+`tools/verify_medals.gd` checks the per-track medals: the gold/silver/bronze
+thresholds are ordered and derived only from the track number, a clean line earns
+gold on every shipped track, and a time past bronze or a custom track earns
+nothing.
+
+```sh
+godot --headless --path . --script res://tools/verify_medals.gd
+```
+
 `tools/verify_storage.gd` checks that saves are atomic: a write lands, a second
 write replaces the first, a stale `.tmp` is ignored and cleared, and no temp file
 is left behind - so a crash mid-save cannot truncate the last good one.
