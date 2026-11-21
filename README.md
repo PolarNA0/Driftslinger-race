@@ -40,8 +40,9 @@ See [`AGENTS.md`](AGENTS.md) for the full picture.
 | `godot/` | **The game.** GDScript, scenes, assets, export presets, verifiers. |
 | `physics/` | The JS physics the server verifies runs with. Not a client. |
 | `supabase/` | Leaderboard schema and Edge Functions. |
-| `tools/` | `test.mjs` (physics + server verifier), `sync-physics.mjs` and `version.mjs`. |
+| `tools/` | `test.mjs` (physics + server verifier), `sync-physics.mjs`, `version.mjs`, `replay-row.mjs`. |
 | `AGENTS.md` | Working notes for this repo: architecture, gotchas, rules. |
+| `PHYSICS.md` | The checklist for any change to the physics the board verifies. |
 | `ROADMAP.md` | The forward plan, with acceptance tests and shipped notes. |
 
 ## Licensing

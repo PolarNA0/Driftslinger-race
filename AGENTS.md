@@ -275,6 +275,12 @@ runs it against the Godot build players actually run; `tools/test.mjs` runs it
 against the JS physics the server verifies with. If you touch `car.gd`,
 `physics/car.js`, `cfg.gd` or `physics/config.js`, run both.
 
+**Any physics change follows `PHYSICS.md`.** It is short: change both sides, run
+both suites, re-simulate at least three real board rows per affected track with
+`node tools/replay-row.mjs`, and decide whether the change is the same physics or
+a new version. A row that no longer reproduces means it is a different game, and
+a board set on the old numbers must not be silently re-ranked.
+
 ## Track shape: one corner, one pole, one sling
 
 Every corner is a **quarter turn (90 degrees)** and corners **alternate left and

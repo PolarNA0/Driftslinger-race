@@ -196,7 +196,7 @@ throwaway database and asserts a normal player's update and RPC are refused
 write lands, and the service role can still write directly. The `sql` CI job runs
 it on a `postgres:17` service.
 
-### A6. Physics-change protocol, written down — S
+### A6. Physics-change protocol, written down — S — [x]
 
 Add a short `PHYSICS.md` (or a section of `AGENTS.md`) that says: any change to
 `cfg.gd`, `car.gd`, `physics/config.js`, `physics/car.js`, `track.gd` or
@@ -205,6 +205,13 @@ real board rows per affected track, recorded in the PR, and (c) a decision on
 whether the change is a new physics version (P2-1).
 
 **Acceptance:** the template exists; the next physics PR follows it.
+
+**Shipped:** `PHYSICS.md` states what counts as a physics change, the five-step
+checklist (both sides, both suites, three real rows, a version decision, no
+tuning to a row), and why the goldens cannot catch every tunable.
+`tools/replay-row.mjs` replays a stored row and fails on a tick mismatch, so
+step 3 is one command. `.github/pull_request_template.md` carries the checklist
+and the row table.
 
 ### A7. Post-deploy smoke tests — S
 
