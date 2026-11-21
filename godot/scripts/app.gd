@@ -74,9 +74,17 @@ var layer: CanvasLayer
 var ui_root: Control
 
 # --- nodes -------------------------------------------------------------------
+var hud_mode: Label
 var hud_dist: Label
 var hud_sub: Label
+var hud_pb_delta: Label
+var hud_wr_delta: Label
+var hud_progress: ProgressBar
 var hint_label: Label
+var run_pb_time: Variant = null
+var run_pb_dist: Variant = null
+var run_wr_time: Variant = null
+var run_wr_dist: Variant = null
 var btn_pause: Button
 var btn_restart_round: Button
 var watch_badge: PanelContainer
@@ -110,10 +118,17 @@ var dead_sub: Label
 var finish_tag: Label
 var finish_time: Label
 var finish_sub: Label
+var finish_pb_delta: Label
+var finish_wr_delta: Label
 var finish_rank: Label
 var btn_watch: Button
 var btn_finish_wr: Button
 var btn_finish_lb: Button
+var settings_master: HSlider
+var settings_music: HSlider
+var settings_sfx: HSlider
+var settings_haptics: Button
+var settings_motion: Button
 var replay_tag: Label
 var replay_sub: Label
 
@@ -152,6 +167,7 @@ func _ready() -> void:
 	game.changed.connect(_on_game_change)
 	game.ticked.connect(_on_tick)
 	game.car_skin = car_skin
+	game.reduced_motion = reduced_motion
 
 	audio = GameAudio.new()
 	add_child(audio)
@@ -525,6 +541,15 @@ func _player_name() -> String:
 # HUD
 # =============================================================================
 
+func _hud_mark(text: String) -> Label:
+	var l := _label(text, 14)
+	l.add_theme_color_override("font_color", UiTheme.INK_DIM)
+	l.add_theme_constant_override("outline_size", 5)
+	l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return l
+
+
 func _build_hud() -> void:
 	var top := _col(2)
 	top.set_anchors_preset(Control.PRESET_TOP_WIDE)
@@ -533,6 +558,13 @@ func _build_hud() -> void:
 	top.offset_top = 14
 	top.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui_root.add_child(top)
+
+	hud_mode = _label("SPEEDRUN", 13)
+	hud_mode.add_theme_color_override("font_color", UiTheme.ACCENT)
+	hud_mode.add_theme_constant_override("outline_size", 5)
+	hud_mode.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.65))
+	hud_mode.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	top.add_child(hud_mode)
 
 	hud_dist = _label("0.000s", 44)
 	hud_dist.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -546,6 +578,30 @@ func _build_hud() -> void:
 	hud_sub.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
 	hud_sub.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top.add_child(hud_sub)
+
+	var marks := _row(12)
+	marks.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	top.add_child(marks)
+	hud_pb_delta = _hud_mark("PB --")
+	marks.add_child(hud_pb_delta)
+	hud_wr_delta = _hud_mark("WR --")
+	marks.add_child(hud_wr_delta)
+
+	hud_progress = ProgressBar.new()
+	hud_progress.show_percentage = false
+	hud_progress.max_value = 1.0
+	hud_progress.value = 0.0
+	hud_progress.custom_minimum_size = Vector2(0, 7)
+	hud_progress.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var bar_bg := StyleBoxFlat.new()
+	bar_bg.bg_color = Color(1, 1, 1, 0.16)
+	bar_bg.set_corner_radius_all(3)
+	var bar_fill := StyleBoxFlat.new()
+	bar_fill.bg_color = UiTheme.ACCENT
+	bar_fill.set_corner_radius_all(3)
+	hud_progress.add_theme_stylebox_override("background", bar_bg)
+	hud_progress.add_theme_stylebox_override("fill", bar_fill)
+	top.add_child(hud_progress)
 
 	# Name the input the player actually has: a phone taps the screen, a desktop
 	# holds the mouse or Space. A touch-first hint on a laptop reads as "I need a
@@ -1040,6 +1096,30 @@ func _build_settings_page() -> void:
 # "Controls" heading with nothing under it to change. The tap hint sits alongside
 # the bindings when a touchscreen is present, not instead of them.
 func _settings_controls(c: VBoxContainer) -> void:
+	c.add_child(_section("Audio"))
+	settings_master = _slider_row(c, "Master", audio_master, func(v: float):
+		audio_master = v
+		audio.set_volumes(audio_master, audio_music, audio_sfx)
+		Storage.set_pref("audioMaster", v))
+	settings_music = _slider_row(c, "Music", audio_music, func(v: float):
+		audio_music = v
+		audio.set_volumes(audio_master, audio_music, audio_sfx)
+		Storage.set_pref("audioMusic", v))
+	settings_sfx = _slider_row(c, "Effects", audio_sfx, func(v: float):
+		audio_sfx = v
+		audio.set_volumes(audio_master, audio_music, audio_sfx)
+		Storage.set_pref("audioSfx", v))
+	c.add_child(_section("Feedback"))
+	settings_haptics = _toggle_row(c, "Haptics", "Vibrate on grabs, crashes and personal bests. Phones only.", haptics_on,
+		func(on: bool):
+			haptics_on = on
+			Haptics.enabled = on
+			Storage.set_pref("haptics", on))
+	settings_motion = _toggle_row(c, "Reduce motion", "Turn off the screen shake on a crash or a slingshot.", reduced_motion,
+		func(on: bool):
+			reduced_motion = on
+			game.reduced_motion = on
+			Storage.set_pref("reducedMotion", on))
 	c.add_child(_section("Controls"))
 	if DisplayServer.is_touchscreen_available():
 		var t := _label("Tap and hold anywhere to swing. A keyboard works too - rebind its keys below.", 14)
@@ -1049,6 +1129,56 @@ func _settings_controls(c: VBoxContainer) -> void:
 	_key_row(c, "Play", "play", "Hold this key to swing.", input_key)
 	_key_row(c, "Reset", "reset", "Press this key to restart the current run.", reset_key)
 	_key_row(c, "Pause", "pause", "Press this key to pause and resume.", pause_key)
+
+
+# A labelled 0..1 slider. The percentage is its own label so the control reads at
+# a glance and a phone finger has a target bigger than the track.
+func _slider_row(parent: VBoxContainer, title: String, value: float, cb: Callable) -> HSlider:
+	var row := _row(10)
+	parent.add_child(row)
+	var lbl := _label(title, 16)
+	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(lbl)
+	var pct := _label("%d%%" % int(round(value * 100.0)), 14)
+	pct.add_theme_color_override("font_color", UiTheme.INK_DIM)
+	row.add_child(pct)
+	var s := HSlider.new()
+	s.min_value = 0.0
+	s.max_value = 1.0
+	s.step = 0.05
+	s.value = value
+	s.custom_minimum_size = Vector2(0, 26)
+	s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(s)
+	s.value_changed.connect(func(v: float):
+		pct.text = "%d%%" % int(round(v * 100.0))
+		cb.call(v))
+	return s
+
+
+# A label + On/Off toggle + one-line hint. The toggle is a ToggleButton so the
+# accent pressed state is the same language as the track and ghost pickers.
+func _toggle_row(parent: VBoxContainer, title: String, hint: String, on: bool, cb: Callable) -> Button:
+	var row := _row(10)
+	parent.add_child(row)
+	var lbl := _label(title, 16)
+	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(lbl)
+	var b := Button.new()
+	b.toggle_mode = true
+	b.theme_type_variation = "ToggleButton"
+	b.button_pressed = on
+	b.text = "On" if on else "Off"
+	b.custom_minimum_size = Vector2(76, 0)
+	b.pressed.connect(func():
+		b.text = "On" if b.button_pressed else "Off"
+		cb.call(b.button_pressed))
+	row.add_child(b)
+	var h := _label(hint, 12)
+	h.add_theme_color_override("font_color", UiTheme.INK_MUTE)
+	h.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	parent.add_child(h)
+	return b
 
 
 func _open_settings() -> void:
@@ -1787,6 +1917,12 @@ func _load_reals(seed: int, mode: String = "speedrun") -> void:
 	board_reals = rows
 	board_reals_seed = seed
 	board_reals_mode = mode
+	# A live run's PB/WR marks depend on this data, so refresh them as soon as the
+	# board arrives rather than waiting for the next run.
+	if game != null and game.seed_num == seed and game.mode == mode:
+		_refresh_run_marks()
+		if game.state == "running":
+			_update_hud_marks()
 	# The player may have moved on while that was in flight, in which case there is
 	# nothing on screen to re-render.
 	if overlay == "board" and board_seed == seed and board_mode == mode:
@@ -1818,6 +1954,12 @@ func _build_finish() -> void:
 	col.add_child(finish_time)
 	finish_sub = _label("", 16)
 	col.add_child(finish_sub)
+	var marks := _row(12)
+	col.add_child(marks)
+	finish_pb_delta = _hud_mark("")
+	marks.add_child(finish_pb_delta)
+	finish_wr_delta = _hud_mark("")
+	marks.add_child(finish_wr_delta)
 	finish_rank = _label("", 16)
 	col.add_child(finish_rank)
 	var row := _row(8)
@@ -1890,6 +2032,10 @@ func _start_run(seed: int) -> void:
 	game.load_track(seed, menu_mode)
 	_apply_ghost(seed)
 	_hud_reset()
+	# Fetch the board in the background so the WR mark can appear during the run.
+	# A custom track is local-only and has no board to ask for.
+	if not CustomTracks.has(seed):
+		_load_reals(seed, menu_mode)
 	hint_label.visible = true
 	_show_round_button(true)
 	game.start()
@@ -2033,6 +2179,14 @@ func _on_game_change(extra: Dictionary) -> void:
 		finish_time.text = _fmt_time(game.run_time())
 		var best2 := game.run_time() if prev2 == null else minf(float(prev2), game.run_time())
 		finish_sub.text = "best %s" % _fmt_time(best2)
+		if prev2 == null:
+			finish_pb_delta.text = "First PB"
+			finish_pb_delta.add_theme_color_override("font_color", UiTheme.GOOD)
+		else:
+			_set_delta(finish_pb_delta, "PB", game.run_time(), prev2, true, "s")
+		finish_pb_delta.visible = true
+		_set_delta(finish_wr_delta, "WR", game.run_time(), run_wr_time, true, "s")
+		finish_wr_delta.visible = run_wr_time != null
 		var custom := CustomTracks.has(game.seed_num)
 		var rank := 0 if custom else Leaderboard.player_rank(best2, _reals_for(game.seed_num))
 		finish_rank.text = "#%d on Track %d" % [rank, game.seed_num] if rank > 0 else ""
@@ -2084,33 +2238,106 @@ func _submit_queued(seed: int) -> void:
 
 func _on_tick() -> void:
 	if game.is_replay():
+		hud_mode.text = "REPLAY"
 		hud_dist.text = _fmt_time(game.run_time())
 		hud_sub.text = "%s \u00b7 Track %d" % [str(watching["label"]), game.seed_num] \
 			if watching != null else "replay \u00b7 Track %d" % game.seed_num
+		hud_pb_delta.visible = false
+		hud_wr_delta.visible = false
+		hud_progress.visible = false
 		return
+	hud_progress.visible = game.mode == "speedrun"
 	if game.mode == "speedrun":
+		hud_mode.text = "CUSTOM \u00b7 SPEEDRUN" if CustomTracks.has(game.seed_num) else "SPEEDRUN \u00b7 TRACK %d" % game.seed_num
 		hud_dist.text = _fmt_time(game.run_time())
 		var best: Variant = game.record_time()
 		hud_sub.text = "best --" if best == null else "best %s" % _fmt_time(float(best))
+		if game.track != null and game.track.finish_s > 0.0:
+			hud_progress.value = clampf(game.car.s / game.track.finish_s, 0.0, 1.0)
 	else:
+		hud_mode.text = "ENDLESS"
 		hud_dist.text = _fmt_dist(game.metres())
 		hud_sub.text = "best %s" % _fmt_dist(maxf(float(game.record_dist()), game.metres()))
+	_update_hud_marks()
 	if game.car.grabbed > 0 or game.car.time > 1.2:
 		hint_label.visible = false
 
 
 func _hud_reset() -> void:
+	_refresh_run_marks()
 	if game.is_replay():
+		hud_mode.text = "REPLAY"
 		hud_dist.text = "0.000s"
 		hud_sub.text = "%s \u00b7 Track %d" % [str(watching["label"]), game.seed_num] \
 			if watching != null else "replay \u00b7 Track %d" % game.seed_num
+		hud_pb_delta.visible = false
+		hud_wr_delta.visible = false
+		hud_progress.visible = false
 	elif game.mode == "speedrun":
+		hud_mode.text = "CUSTOM \u00b7 SPEEDRUN" if CustomTracks.has(game.seed_num) else "SPEEDRUN \u00b7 TRACK %d" % game.seed_num
 		hud_dist.text = "0.000s"
 		var best: Variant = Storage.get_best_time(game.seed_num)
 		hud_sub.text = "best --" if best == null else "best %s" % _fmt_time(float(best))
+		hud_progress.visible = true
+		hud_progress.value = 0.0
 	else:
+		hud_mode.text = "ENDLESS"
 		hud_dist.text = "0 m"
 		hud_sub.text = "best %s" % _fmt_dist(float(Storage.get_record(game.seed_num)["dist"]))
+		hud_progress.visible = false
+	_update_hud_marks()
+
+
+# The marks a run is measured against. Read once at the start of a run rather
+# than every tick: Storage reads a file, and a HUD must not do I/O at 120 Hz.
+func _refresh_run_marks() -> void:
+	run_pb_time = Storage.get_best_time(game.seed_num)
+	var dist := float(Storage.get_record(game.seed_num)["dist"])
+	run_pb_dist = dist if dist > 0.0 else null
+	var reals := _reals_for(game.seed_num, game.mode)
+	if game.mode == "speedrun":
+		var wr = Leaderboard.world_record(reals)
+		run_wr_time = wr["time"] if wr != null else null
+		run_wr_dist = null
+	else:
+		run_wr_time = null
+		var best := 0.0
+		for r in reals:
+			best = maxf(best, float(r["dist"]))
+		run_wr_dist = best if best > 0.0 else null
+
+
+func _update_hud_marks() -> void:
+	if game.is_replay():
+		hud_pb_delta.visible = false
+		hud_wr_delta.visible = false
+		return
+	var speedrun := game.mode == "speedrun"
+	if speedrun:
+		_set_delta(hud_pb_delta, "PB", game.run_time(), run_pb_time, true, "s")
+		_set_delta(hud_wr_delta, "WR", game.run_time(), run_wr_time, true, "s")
+		hud_pb_delta.visible = run_pb_time != null
+		hud_wr_delta.visible = run_wr_time != null
+	else:
+		_set_delta(hud_pb_delta, "PB", game.metres(), run_pb_dist, false, "m")
+		_set_delta(hud_wr_delta, "WR", game.metres(), run_wr_dist, false, "m")
+		hud_pb_delta.visible = run_pb_dist != null
+		hud_wr_delta.visible = run_wr_dist != null
+
+
+func _set_delta(l: Label, prefix: String, now: float, ref: Variant, lower_is_better: bool, unit: String) -> void:
+	if ref == null:
+		l.text = "%s --" % prefix
+		l.add_theme_color_override("font_color", UiTheme.INK_MUTE)
+		return
+	var d := now - float(ref)
+	var ahead := d < 0.0 if lower_is_better else d > 0.0
+	var sign := "+" if d >= 0.0 else "-"
+	var mag := absf(d)
+	var body := ("%.3fs" % mag) if unit == "s" else ("%d m" % roundi(mag))
+	l.text = "%s %s%s" % [prefix, sign, body]
+	var col := UiTheme.GOOD if ahead else (UiTheme.DANGER if absf(d) > 0.0005 else UiTheme.INK_DIM)
+	l.add_theme_color_override("font_color", col)
 
 
 func _on_pause() -> void:

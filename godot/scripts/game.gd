@@ -44,6 +44,7 @@ var shake := 0.0
 var mode := "endless"
 var seed_num := 1
 var car_skin := 0
+var reduced_motion := false
 
 # Supplies `Track.new` opts for a seed. App installs this so a custom (player-built)
 # track id resolves to its op list; a built-in track needs no provider and falls
@@ -253,6 +254,8 @@ func _follow(delta: float) -> void:
 
 
 func kick(amount: float) -> void:
+	if reduced_motion:
+		return
 	shake = maxf(shake, amount)
 
 

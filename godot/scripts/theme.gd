@@ -24,6 +24,7 @@ const BTN_EDGE := Color("434d88")
 const DISABLED_BG := Color("171b2c")
 const DISABLED_EDGE := Color("262c47")
 const DANGER := Color("ff7b7b")
+const GOOD := Color("7fe08a")       # ahead of a PB or the WR
 
 # The full-screen app shell. The whole window is the app now, not a card floating
 # over the road, so these carry the chrome: BG is the page, BAR is the top and
@@ -66,6 +67,22 @@ static func _button_styles(t: Theme, type_name: String, base_bg: Color, base_edg
         t.set_font_size("font_size", type_name, 16)
         t.set_constant("outline_size", type_name, 0)
         t.set_constant("h_separation", type_name, 8)
+
+
+# A soft dot for slider grabbers. The engine default is a grey square, which
+# reads as a broken control next to the accent-coloured track.
+static func _dot(color: Color, size: int) -> ImageTexture:
+        var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+        img.fill(Color(0, 0, 0, 0))
+        var centre := (size - 1) / 2.0
+        var radius := size / 2.0 - 1.0
+        for y in range(size):
+                for x in range(size):
+                        var d := Vector2(x - centre, y - centre).length()
+                        if d <= radius:
+                                var a := clampf(radius - d + 1.0, 0.0, 1.0)
+                                img.set_pixel(x, y, Color(color.r, color.g, color.b, color.a * a))
+        return ImageTexture.create_from_image(img)
 
 
 static func build() -> Theme:
@@ -180,6 +197,20 @@ static func build() -> Theme:
         t.set_font_size("font_size", "LineEdit", 16)
         t.set_constant("caret_width", "LineEdit", 2)
         t.set_constant("minimum_character_width", "LineEdit", 6)
+
+        # --- Sliders: the settings screen's volume controls ---
+        var track := _flat(Color("0e1224"), BTN_EDGE.darkened(0.2), 3, 0, 0, 0)
+        track.content_margin_top = 3
+        track.content_margin_bottom = 3
+        t.set_stylebox("slider", "HSlider", track)
+        var fill := _flat(ACCENT, ACCENT, 3, 0, 0, 0)
+        fill.content_margin_top = 3
+        fill.content_margin_bottom = 3
+        t.set_stylebox("grabber_area", "HSlider", fill)
+        t.set_stylebox("grabber_area_highlight", "HSlider", fill)
+        t.set_icon("grabber", "HSlider", _dot(ACCENT, 18))
+        t.set_icon("grabber_highlight", "HSlider", _dot(ACCENT.lightened(0.18), 20))
+        t.set_icon("grabber_disabled", "HSlider", _dot(INK_MUTE, 18))
 
         # --- Scrollbars: slim and unobtrusive ---
         t.set_stylebox("scroll", "VScrollBar", _flat(Color(0, 0, 0, 0), Color(0, 0, 0, 0), 6, 0, 0, 0))
