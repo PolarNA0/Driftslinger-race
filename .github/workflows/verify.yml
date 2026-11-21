@@ -65,7 +65,8 @@ jobs:
             verify_cars \
             verify_keys \
             verify_audio \
-            verify_hud
+            verify_hud \
+            verify_storage
           do
             echo "::group::$script"
             "$GODOT" --headless --path godot --script "res://tools/$script.gd" || exit 1

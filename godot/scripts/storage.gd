@@ -31,11 +31,22 @@ static func _read(name: String, fallback: Variant) -> Variant:
 
 
 static func _write(name: String, value: Variant) -> void:
-	var f := FileAccess.open(_path(name), FileAccess.WRITE)
+	_write_text(_path(name), JSON.stringify(value))
+
+
+# Write a sibling temp file, then rename it over the target. A crash mid-write
+# then leaves the previous save intact instead of a truncated JSON file.
+static func _write_text(path: String, text: String) -> void:
+	var tmp := path + ".tmp"
+	var f := FileAccess.open(tmp, FileAccess.WRITE)
 	if f == null:
 		return
-	f.store_string(JSON.stringify(value))
+	f.store_string(text)
 	f.close()
+	var dir := DirAccess.open("user://")
+	if dir == null:
+		return
+	dir.rename(tmp.get_file(), path.get_file())
 
 
 # --- endless: best distance per seed -----------------------------------------

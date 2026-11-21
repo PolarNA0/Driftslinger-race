@@ -213,14 +213,20 @@ job after it ships, and the job is red.
 
 ### A8. Quick wins found during the audit — S each
 
-- Fix the `0001_init.sql` comment that says `(players x 25)`.
+- Fix the `0001_init.sql` comment that says `(players x 25)`. **[x]** It now
+  says "players x playable tracks", so it cannot go stale again.
 - Remove or archive `supabase/functions/_shared/physics/physics.js` if it is not
   imported by anything (it re-exports `verify.js`; keep it only if a function
-  needs the barrel).
+  needs the barrel). **[x]** Nothing imported it, and it was not one of the five
+  synced files, so it could drift; removed.
 - Make `Storage` and `Account` writes atomic (write `*.tmp`, then rename) — this
   is small and belongs in Phase 0 because it protects every later feature.
+  **[x] shipped:** both write a sibling `.tmp` and rename it over the target;
+  `verify_storage.gd` proves a second write replaces the first, a stale temp is
+  ignored, and no temp file is left behind.
 - Add a `LICENSE` decision (currently only car art is credited). If the repo is
-  public, say what others may do.
+  public, say what others may do. **[x]** MIT for the code (`LICENSE`), with the
+  bundled art and audio staying CC0 and credited; the README says so.
 
 **Phase 0 exit gate:** `make check` green locally; CI green on a PR and on
 `main`; deploy blocked on red; no known false statement in the top-level docs.

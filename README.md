@@ -40,9 +40,13 @@ See [`AGENTS.md`](AGENTS.md) for the full picture.
 | `godot/` | **The game.** GDScript, scenes, assets, export presets, verifiers. |
 | `physics/` | The JS physics the server verifies runs with. Not a client. |
 | `supabase/` | Leaderboard schema and Edge Functions. |
-| `tools/` | `test.mjs` (physics + server verifier) and `sync-physics.mjs`. |
+| `tools/` | `test.mjs` (physics + server verifier), `sync-physics.mjs` and `version.mjs`. |
 | `AGENTS.md` | Working notes for this repo: architecture, gotchas, rules. |
+| `ROADMAP.md` | The forward plan, with acceptance tests and shipped notes. |
 
 ## Licensing
 
-Car sprites are CC0 — see [`godot/assets/cars/CREDITS.md`](godot/assets/cars/CREDITS.md).
+The code is MIT — see [`LICENSE`](LICENSE). Bundled art and audio are CC0 1.0:
+see [`godot/assets/cars/CREDITS.md`](godot/assets/cars/CREDITS.md) and
+[`godot/assets/audio/CREDITS.md`](godot/assets/audio/CREDITS.md).
+

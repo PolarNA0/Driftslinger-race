@@ -45,11 +45,7 @@ static func _write_session(s: Variant) -> void:
 	if s == null:
 		_delete(SESSION_NAME)
 		return
-	var f := FileAccess.open(_path(SESSION_NAME), FileAccess.WRITE)
-	if f == null:
-		return
-	f.store_string(JSON.stringify(s))
-	f.close()
+	_write_text(_path(SESSION_NAME), JSON.stringify(s))
 	var d: Dictionary = s
 	var user: Variant = d.get("user")
 	if user is Dictionary:
@@ -75,11 +71,22 @@ static func _read_json(name: String, fallback: Variant) -> Variant:
 
 
 static func _write_json(name: String, value: Variant) -> void:
-	var f := FileAccess.open(_path(name), FileAccess.WRITE)
+	_write_text(_path(name), JSON.stringify(value))
+
+
+# Write a sibling temp file, then rename it over the target, so a crash mid-write
+# leaves the previous save intact instead of a truncated JSON file.
+static func _write_text(path: String, text: String) -> void:
+	var tmp := path + ".tmp"
+	var f := FileAccess.open(tmp, FileAccess.WRITE)
 	if f == null:
 		return
-	f.store_string(JSON.stringify(value))
+	f.store_string(text)
 	f.close()
+	var dir := DirAccess.open("user://")
+	if dir == null:
+		return
+	dir.rename(tmp.get_file(), path.get_file())
 
 
 static func remember_id(user_id: String, name: String) -> void:

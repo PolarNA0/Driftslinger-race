@@ -45,7 +45,8 @@ create table public.runs (
 );
 
 -- One row per player per track: a board wants each player's best, and this keeps
--- the table bounded at (players x 25) rows no matter how many times they race.
+-- the table bounded at (players x playable tracks) rows no matter how many
+-- times they race.
 create unique index runs_one_best_per_user_track on public.runs (user_id, track);
 
 -- The board reads a track ordered by time, so index exactly that.
