@@ -194,8 +194,11 @@ func _ready() -> void:
 	_build_finish()
 	_build_replay_done()
 	_build_pause()
+	_build_tutorial()
 
 	_to_menu()
+	if not tutorial_done and DisplayServer.get_name() != "headless":
+		_show_only("tutorial")
 	_boot_account()
 
 	# A screenshot hook for headless visual checks: `--shot <path> [--shot-menu]`
@@ -227,6 +230,7 @@ func _capture_after(secs: float) -> void:
 			"board": _show_leaderboard(menu_seed)
 			"history": _show_history()
 			"account": _to_menu(); shell.select("account")
+			"tutorial": _show_tutorial()
 			"editor":
 				# The editor is the one screen whose whole point is how it looks, so it
 				# needs a headless shot like the menu has. A new track has no pieces,
@@ -1129,6 +1133,8 @@ func _settings_controls(c: VBoxContainer) -> void:
 	_key_row(c, "Play", "play", "Hold this key to swing.", input_key)
 	_key_row(c, "Reset", "reset", "Press this key to restart the current run.", reset_key)
 	_key_row(c, "Pause", "pause", "Press this key to pause and resume.", pause_key)
+	c.add_child(_section("Help"))
+	c.add_child(_button("How to play", _show_tutorial))
 
 
 # A labelled 0..1 slider. The percentage is its own label so the control reads at
@@ -1993,6 +1999,55 @@ func _build_replay_done() -> void:
 			_watch_steps(seed, str(watching["steps"]), str(watching["name"]), float(watching["time"]))))
 	col.add_child(_button("Leaderboard", func(): _show_leaderboard(game.seed_num)))
 	col.add_child(_button("Main menu", _to_menu))
+
+
+# The first-run lesson. It is deliberately short: one idea per card row, and the
+# primary button drops straight into a run so the player learns by doing.
+func _build_tutorial() -> void:
+	var col := _new_overlay("tutorial", "How to play")
+	var lead := _label("One button. Hold it to grab the next pole and swing round it; let go to fly to the next one. Leave the road and the run ends.", 15)
+	lead.add_theme_color_override("font_color", UiTheme.INK_DIM)
+	lead.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	col.add_child(lead)
+	_tutorial_step(col, "1", "Hold", "The car latches onto the pole at the distance it already had, then reels in toward the road. Holding is not free - reeling takes time.")
+	_tutorial_step(col, "2", "Release", "Let go as the arc ends. The car leaves on the tangent, so a release one frame late leaves the road a sliver off-line.")
+	_tutorial_step(col, "3", "Fly straight", "A small nudge steers the car home, but a clean line is still the fastest. A wide grab is never faster than a tight one.")
+	_tutorial_step(col, "4", "Find the rhythm", "Speedrun is a timed track; Endless is one road that gets faster and tighter. The HUD shows your PB and WR gap as you drive.")
+	col.add_child(_button("Try it now", _tutorial_start))
+	col.add_child(_button("Back to menu", _tutorial_back))
+
+
+func _tutorial_step(parent: VBoxContainer, number: String, title: String, body: String) -> void:
+	var row := _row(12)
+	parent.add_child(row)
+	var badge := _label(number, 20)
+	badge.add_theme_color_override("font_color", UiTheme.ACCENT)
+	badge.custom_minimum_size = Vector2(26, 0)
+	row.add_child(badge)
+	var c := _col(2)
+	c.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(c)
+	c.add_child(_label(title, 17))
+	var d := _label(body, 13)
+	d.add_theme_color_override("font_color", UiTheme.INK_DIM)
+	d.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	c.add_child(d)
+
+
+func _show_tutorial() -> void:
+	_show_only("tutorial")
+
+
+func _tutorial_start() -> void:
+	tutorial_done = true
+	Storage.set_pref("tutorialDone", true)
+	_start_run(menu_seed)
+
+
+func _tutorial_back() -> void:
+	tutorial_done = true
+	Storage.set_pref("tutorialDone", true)
+	_to_menu()
 
 
 func _build_pause() -> void:

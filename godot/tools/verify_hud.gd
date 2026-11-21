@@ -72,6 +72,16 @@ func _initialize() -> void:
         _check("focus out leaves a replay alone", app.game.state == "running")
         app.game.mode = "speedrun"
 
+        print("-- tutorial --")
+        app._show_tutorial()
+        _check("tutorial opens", app.overlay == "tutorial" and app.overlays["tutorial"].visible)
+        app._tutorial_back()
+        _check("tutorial back marks it seen", app.tutorial_done and app.overlay == "menu")
+        app._show_tutorial()
+        app._tutorial_start()
+        _check("tutorial start begins a run", app.overlay == "" and app.game.state == "running")
+        app.game.state = "paused"
+
         print("-- settings --")
         app._open_settings()
         _check("settings has a master slider", app.settings_master != null)

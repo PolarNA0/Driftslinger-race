@@ -169,6 +169,20 @@ func _check_size(vp: Vector2i) -> void:
 	if settings.visible:
 		_fail("settings overlay did not close")
 
+	# The first-run tutorial is a tall card on a phone, so it has to scroll and
+	# every button has to stay reachable.
+	app._show_tutorial()
+	await process_frame
+	var tutorial: Control = app.overlays["tutorial"]
+	if not tutorial.visible:
+		_fail("tutorial overlay did not open")
+	else:
+		_check_page("tutorial", tutorial, vp)
+	app._tutorial_back()
+	await process_frame
+	if tutorial.visible:
+		_fail("tutorial overlay did not close")
+
 	# The leaderboard opens in both modes and every row fits. Endless is the new
 	# board, so it is checked explicitly: a row wider than the card would be the
 	# phone-fit bug back on a new screen.
