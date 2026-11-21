@@ -116,7 +116,7 @@ preset fails `export`.
 **Then:** make the three deploy workflows depend on `verify` (reusable workflow
 with `workflow_call`, or a `needs:` job in each) so `main` cannot deploy red.
 
-### A2. One source of version truth — S
+### A2. One source of version truth — S — [x]
 
 Create `tools/version.mjs` (or `tools/version.sh`) that reads the version from
 one place and:
@@ -131,6 +131,12 @@ parsing GDScript.
 
 **Acceptance:** `node tools/version.mjs --check` is green on `main`; changing
 only one of the three fails.
+
+**Shipped:** `VERSION` at the repo root is the source. `node tools/version.mjs`
+prints where it is used, `--check` fails on any disagreement (the `physics` CI
+job runs it), and `--set 1.8` writes both copies and increments `version/code`.
+The build is `1.7` (version/code `4`).
+
 
 ### A3. Docs truth pass — S
 

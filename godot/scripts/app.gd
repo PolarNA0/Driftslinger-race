@@ -2,7 +2,7 @@ extends Control
 
 # Shown on the Settings screen so a player can tell which build they are running
 # (and a bug report can name it). Keep in step with the release tag.
-const VERSION := "1.6"
+const VERSION := "1.7"
 
 # The shell around the game: a full-screen, tabbed menu (Play / Garage / Editor /
 # Account, with Settings in the top bar), the track editor, the leaderboard, run

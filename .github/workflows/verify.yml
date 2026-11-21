@@ -29,6 +29,8 @@ jobs:
         run: node tools/test.mjs
       - name: Vendored physics is in step
         run: node tools/sync-physics.mjs --check
+      - name: Build version is consistent
+        run: node tools/version.mjs --check
 
   godot:
     name: Godot verifiers
