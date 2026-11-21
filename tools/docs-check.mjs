@@ -83,6 +83,15 @@ for (const [doc, base] of [
   }
 }
 
+// The endless tracker is server-only: no Godot verifier can see it. Check the
+// pieces that have to agree, so a refactor cannot silently drop the announcement.
+const runFn = read('supabase/functions/run/index.ts');
+const trackerFn = read('supabase/functions/_shared/tracker.ts');
+check('run announces endless improvements', runFn.includes('announceEndless({'));
+check('tracker has an endless position template', trackerFn.includes('DEFAULT_ENDLESS_MESSAGE'));
+check('tracker has an endless lead template', trackerFn.includes('DEFAULT_ENDLESS_RECORD_MESSAGE'));
+check('0007 adds the endless tracker columns', existsSync(join(root, 'supabase/migrations/0007_endless_tracker.sql')));
+
 // The top-level README must point at the two documents that keep the project
 // honest.
 const readme = read('README.md');

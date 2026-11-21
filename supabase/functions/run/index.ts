@@ -13,7 +13,9 @@ import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { json, preflight, bearer } from '../_shared/http.ts';
 import { replayRun } from '../_shared/physics/verify.js';
 import {
-  DEFAULT_POS_MESSAGE, DEFAULT_WR_MESSAGE, formatMessage, messageVars, postWebhook,
+  DEFAULT_ENDLESS_MESSAGE, DEFAULT_ENDLESS_RECORD_MESSAGE,
+  DEFAULT_POS_MESSAGE, DEFAULT_WR_MESSAGE,
+  endlessVars, formatMessage, messageVars, postWebhook,
 } from '../_shared/tracker.ts';
 
 // The service-role key bypasses RLS, which is the point: it is the only writer
@@ -76,6 +78,19 @@ Deno.serve(async (req) => {
     if (error) {
       if (error.code === '23503') return json({ error: 'no profile' }, 409);
       return json({ error: 'store failed' }, 500);
+    }
+
+    // A first run or a further distance is a new board entry, so it is announced
+    // exactly as a speedrun improvement is. The endless board is not verified, so
+    // the message names a distance and a rank, never a "record".
+    if (data.improved) {
+      await announceEndless({
+        userId: user.id,
+        seed,
+        metres: Number(data.metres),
+        rank: Number(data.rank),
+        total: Number(data.total),
+      });
     }
 
     return json({
@@ -183,6 +198,47 @@ async function announce(run: {
     rank: run.rank,
     wrBeforeTicks: run.wrBefore,
     wrAfterTicks: run.wrAfter,
+  });
+
+  await postWebhook(url, formatMessage(template, vars));
+}
+
+/**
+ * Post an endless improvement to the admin's Discord channel.
+ *
+ * The same webhook as the speedrun tracker, with its own two templates: a run
+ * that takes the lead gets the record template, every other improvement gets the
+ * position template. The endless board ranks highest-first and is not replayed,
+ * so the variables are a distance and a rank, not a time and a delta.
+ */
+async function announceEndless(run: {
+  userId: string; seed: number; metres: number; rank: number; total: number;
+}) {
+  const { data: cfg } = await admin
+    .from('tracker_config')
+    .select('webhook_url, endless_record_message, endless_message')
+    .eq('id', 1)
+    .maybeSingle();
+
+  const url = cfg?.webhook_url;
+  if (!url) return;                        // the tracker is off
+
+  const { data: prof } = await admin
+    .from('profiles')
+    .select('username')
+    .eq('id', run.userId)
+    .maybeSingle();
+
+  const template = run.rank === 1
+    ? (cfg?.endless_record_message || DEFAULT_ENDLESS_RECORD_MESSAGE)
+    : (cfg?.endless_message || DEFAULT_ENDLESS_MESSAGE);
+
+  const vars = endlessVars({
+    player: prof?.username ?? 'A player',
+    seed: run.seed,
+    metres: run.metres,
+    rank: run.rank,
+    total: run.total,
   });
 
   await postWebhook(url, formatMessage(template, vars));

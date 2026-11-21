@@ -25,6 +25,14 @@ export const DEFAULT_WR_MESSAGE =
 export const DEFAULT_POS_MESSAGE =
   '{player} took position {rank} on track {track} with {time}s [WR +{delta}]';
 
+/** The message a new endless lead posts, when the admin has not set their own. */
+export const DEFAULT_ENDLESS_RECORD_MESSAGE =
+  '{player} took the endless lead with {metres}m';
+
+/** The message any other endless improvement posts. */
+export const DEFAULT_ENDLESS_MESSAGE =
+  '{player} reached {metres}m on the endless board (rank {rank} of {total})';
+
 /**
  * Fill a message template.
  *
@@ -72,6 +80,26 @@ export function messageVars(opts: {
     rank: opts.rank,
     delta: fmtTime(delta),
     sign,
+  };
+}
+
+/**
+ * Build the variables an endless template needs.
+ *
+ * An endless score is a distance, so it has no tick clock and no record delta:
+ * `metres` is the whole number the board stores, and the rank/total are the ones
+ * `submit_endless_run` just computed. `seed` is the shared road, available for a
+ * template that wants to name it.
+ */
+export function endlessVars(opts: {
+  player: string; seed: number; metres: number; rank: number; total: number;
+}): Record<string, string | number> {
+  return {
+    player: opts.player,
+    seed: opts.seed,
+    metres: Math.round(opts.metres),
+    rank: opts.rank,
+    total: opts.total,
   };
 }
 

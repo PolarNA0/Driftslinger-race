@@ -34,6 +34,7 @@ end $$;
 \ir ../migrations/0004_reattach_tracks.sql
 \ir ../migrations/0005_endless.sql
 \ir ../migrations/0006_admin.sql
+\ir ../migrations/0007_endless_tracker.sql
 
 -- Two players: one ordinary, one admin. Profiles and the admin row are written
 -- by the service role, which is the only writer in the real system too.
@@ -82,6 +83,16 @@ begin
 end $$;
 
 do $$
+declare m text;
+begin
+  select endless_message into m from public.tracker_config;
+  if m is null or m = '' then
+    raise exception 'FAIL: a player cannot read the endless template';
+  end if;
+  raise notice 'ok: a player can read the endless template';
+end $$;
+
+do $$
 begin
   begin
     perform webhook_url from public.tracker_config;
@@ -99,19 +110,25 @@ reset role;
 set role authenticated;
 select set_config('request.jwt.claim.sub', '22222222-2222-2222-2222-222222222222', false);
 
-select public.set_tracker_config('https://discord.example/hook', 'wr {player}', 'pos {player}');
+select public.set_tracker_config(
+  'https://discord.example/hook', 'wr {player}', 'pos {player}',
+  'lead {player} {metres}', 'endless {player} {metres}'
+);
 
 reset role;
 
 do $$
-declare hook text; wr text; pos text;
+declare hook text; wr text; pos text; lead text; endless text;
 begin
-  select webhook_url, wr_message, pos_message into hook, wr, pos
+  select webhook_url, wr_message, pos_message, endless_record_message, endless_message
+    into hook, wr, pos, lead, endless
   from public.tracker_config where id = 1;
-  if hook <> 'https://discord.example/hook' or wr <> 'wr {player}' or pos <> 'pos {player}' then
-    raise exception 'FAIL: the admin write did not land (% / % / %)', hook, wr, pos;
+  if hook <> 'https://discord.example/hook' or wr <> 'wr {player}' or pos <> 'pos {player}'
+     or lead <> 'lead {player} {metres}' or endless <> 'endless {player} {metres}' then
+    raise exception 'FAIL: the admin write did not land (% / % / % / % / %)',
+      hook, wr, pos, lead, endless;
   end if;
-  raise notice 'ok: an admin can set the tracker through set_tracker_config';
+  raise notice 'ok: an admin can set the tracker and its endless templates';
 end $$;
 
 -- The service role keeps its direct write path (SQL and the Edge Function).
