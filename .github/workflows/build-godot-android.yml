@@ -20,7 +20,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  verify:
+    uses: ./.github/workflows/verify.yml
+
   build:
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -114,3 +118,20 @@ jobs:
             --title "Android (latest)" \
             --notes "Rolling build of the Godot Android app, updated on every push to main that touches godot/. Debug-signed, so it installs over earlier copies." \
             --prerelease
+
+  smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The rolling release is what /android points at, so a build that published
+      # nothing (or an empty asset) must turn this workflow red.
+      - name: The rolling APK release has the APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          size=$(gh release view android-latest --repo "$GITHUB_REPOSITORY" \
+            --json assets --jq '.assets[] | select(.name == "drift-slinger.apk") | .size')
+          test -n "$size"
+          test "$size" -gt 1000000

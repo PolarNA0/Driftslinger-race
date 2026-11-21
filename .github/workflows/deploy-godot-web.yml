@@ -23,7 +23,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  verify:
+    uses: ./.github/workflows/verify.yml
+
   deploy:
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -80,3 +84,16 @@ jobs:
           workingDirectory: godot
           wranglerVersion: '4'
           command: deploy
+
+  smoke:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # The deploy is only green if the shipped site answers, the wasm is real
+      # wasm (not a gzip blob with the wrong header) and /android still redirects.
+      - name: The deployed site answers
+        run: node tools/smoke.mjs web

@@ -175,6 +175,17 @@ commands and the toolchain the Android export needs.
   build. The web worker redirects `/android` there. It needs no extra secrets
   (it uses the default `GITHUB_TOKEN` with `contents: write`).
 
+**Every deploy is gated on `verify` and smoke-tested after it ships.** The three
+deploy workflows call `verify.yml` as a reusable workflow (`workflow_call`) and
+their deploy job `needs:` it, so `main` cannot deploy red. After the deploy a
+`smoke` job runs `node tools/smoke.mjs`: the web job checks `/` is 200 and names
+the game, `/index.wasm` is 200 `application/wasm` and starts with the wasm magic
+`00 61 73 6d` (the gzip trap), and `/android` still 302s to the release; the
+functions job checks both board modes return 200 with a `rows` array (the
+`steps`-on-the-view 500); the Android job checks the rolling release still has a
+non-trivial `drift-slinger.apk`. `tools/smoke.mjs web` and
+`tools/smoke.mjs board` also run by hand against the live site and project.
+
 ### The wasm is served gzipped to fit Cloudflare's 25 MiB asset cap
 
 A static asset on Cloudflare Workers may be at most 25 MiB, and the Godot web
@@ -943,12 +954,11 @@ supabase functions deploy board --remote=pleotpbgzeohxbuxffiq --yes
 
 A wrong deploy here does not degrade quietly. The board is what the game reads for
 real runs, so a function that 500s takes the whole leaderboard with it - which is
-exactly what the `steps`-on-the-view bug would have done. Check the endpoint after
-deploying:
+exactly what the `steps`-on-the-view bug would have done. The workflow's `smoke`
+job checks both boards after deploying; to check by hand:
 
 ```bash
-curl -s "https://pleotpbgzeohxbuxffiq.supabase.co/functions/v1/board?track=1" \
-  -H "apikey: <anon key>" | head -c 300
+node tools/smoke.mjs board
 ```
 
 ### The `leaderboard` view has no `steps`

@@ -107,14 +107,14 @@ the `godot` job; a stale `_shared/physics` copy fails `physics`; a broken export
 preset fails `export`.
 
 **Shipped:** `.github/workflows/verify.yml` runs `node tools/test.mjs`,
-`node tools/sync-physics.mjs --check`, and all thirteen Godot verifiers on
-`push` to `main`, every pull request, and manual dispatch. It downloads Godot
-4.5.2, imports the project, and runs each verifier in its own log group. The
-`export` job is still a follow-up, and the deploy workflows do not yet `needs:`
-`verify`; those are the next two guardrail tasks.
+`node tools/sync-physics.mjs --check`, `node tools/version.mjs --check`, the
+tracker SQL test, and all fourteen Godot verifiers on `push` to `main`, every
+pull request, and manual dispatch. It downloads Godot 4.5.2, imports the
+project, and runs each verifier in its own log group.
 
-**Then:** make the three deploy workflows depend on `verify` (reusable workflow
-with `workflow_call`, or a `needs:` job in each) so `main` cannot deploy red.
+The deploy gate is done: `verify.yml` is callable (`workflow_call`), and all
+three deploy workflows call it and set `deploy: needs: verify`, so `main` cannot
+deploy red. The `export` job is still a follow-up.
 
 ### A2. One source of version truth — S — [x]
 
@@ -213,7 +213,7 @@ tuning to a row), and why the goldens cannot catch every tunable.
 step 3 is one command. `.github/pull_request_template.md` carries the checklist
 and the row table.
 
-### A7. Post-deploy smoke tests — S
+### A7. Post-deploy smoke tests — S — [x]
 
 Extend `deploy-godot-web.yml` and `deploy-functions.yml` with a final job:
 
@@ -227,6 +227,14 @@ Extend `deploy-godot-web.yml` and `deploy-functions.yml` with a final job:
 
 **Acceptance:** a deliberately broken worker or board function fails the deploy
 job after it ships, and the job is red.
+
+**Shipped:** `tools/smoke.mjs` does both halves: `web` checks `/` is 200 and
+names the game, `/index.wasm` is 200 `application/wasm` and starts with
+`00 61 73 6d`, and `/android` 302s to the release; `board` checks both board
+modes return 200 with a `rows` array. Each deploy workflow has a `smoke` job that
+`needs:` its deploy. The Android build also smoke-checks that the rolling release
+still has a non-trivial APK. The web and board checks pass against the live site
+today.
 
 ### A8. Quick wins found during the audit — S each
 

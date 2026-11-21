@@ -14,7 +14,11 @@ on:
   workflow_dispatch:
 
 jobs:
+  verify:
+    uses: ./.github/workflows/verify.yml
+
   deploy:
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,3 +47,17 @@ jobs:
         run: |
           supabase functions deploy board --remote=pleotpbgzeohxbuxffiq --yes
           supabase functions deploy run   --remote=pleotpbgzeohxbuxffiq --yes
+
+  smoke:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # A deployed function is not up until both boards answer. The wrong select
+      # list on the leaderboard view once 500ed the whole board while the deploy
+      # itself was green.
+      - name: Both boards answer
+        run: node tools/smoke.mjs board
