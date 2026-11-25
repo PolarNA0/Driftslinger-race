@@ -42,6 +42,31 @@ const FINISH_LEN := 460.0
 const DEFAULT_RADIUS := 62.0
 const DEFAULT_LEN := 230.0
 
+# One grid cell is one piece. A straight is one cell long and a corner's arc is one
+# cell long, so the grid is the unit the road is built from rather than decoration
+# behind it. `TrackPreview.CELL` is the same number: a cell on screen and a cell of
+# road have to be the same thing, or a piece lands somewhere other than the cell that
+# was tapped.
+const CELL_LEN := 80.0
+
+# A pillar and a corner are two pieces, not one.
+#
+# A *corner* is a turn you sling round: the pole at its centre is what the button
+# grabs, and it is the only way round a turn that tight. A *bend* is a turn you steer
+# through with no pole at all. The physics decides which is which, and it is not a
+# style choice: `Car.centre` only steers a limited amount per second, so an arc whose
+# pivot is inside `Cfg.GRAB_RANGE` cannot be followed without the pole (measured: every
+# radius from 40 to 400px drives into the wall with no grab, while 900px and up drives
+# clean with no input at all). So a bend is an arc wide enough that its pivot is out of
+# reach - there is nothing to grab, and nothing to draw. A corner is the tight turn,
+# and its pole comes with it because that is the only way to take it.
+#
+# That is why a corner's pillar is not a separate thing you place: an 80px-radius turn
+# with no pole is not a road the car can drive, it is a wall with a curve painted on
+# it. The separation the editor offers is the one the game can honour - a wide bend
+# with no pole, or a tight corner with the pole that makes it possible.
+const BEND_RADIUS := 1200.0
+
 # --- colours -----------------------------------------------------------------
 # A custom track carries its own look: a road colour and a ground (background)
 # colour. The stripe and the pillars are derived from those two, so a player picks
@@ -222,8 +247,23 @@ static func make_finish(len: float = FINISH_LEN) -> Dictionary:
 	return {"t": "F", "len": clampf(len, MIN_LEN, MAX_LEN)}
 
 
-static func make_corner(deg: int, radius: float = DEFAULT_RADIUS, reattach: bool = false) -> Dictionary:
-	return {"t": "A", "deg": deg, "r": clampf(radius, MIN_RADIUS, MAX_RADIUS), "reattach": reattach}
+static func make_corner(deg: int, radius: float = DEFAULT_RADIUS, reattach: bool = false, pillar: bool = true) -> Dictionary:
+	# A pillarless turn is a bend, and a bend is wider than any corner: clamping it to the
+	# corner range would quietly turn it into a wall (see BEND_RADIUS).
+	var r := clampf(radius, MIN_RADIUS, MAX_RADIUS) if pillar else maxf(radius, BEND_RADIUS)
+	return {"t": "A", "deg": deg, "r": r, "reattach": reattach, "pillar": pillar}
+
+
+# A bend is a turn with no pillar: the road curves and the car steers through it. It is
+# wide by construction (`BEND_RADIUS`), because that is the only curvature the car can
+# follow without something to sling round.
+static func make_bend(deg: int, radius: float = BEND_RADIUS) -> Dictionary:
+	return {"t": "A", "deg": deg, "r": maxf(radius, BEND_RADIUS), "reattach": false, "pillar": false}
+
+
+# Does this corner have a pole to grab? A bend does not; every ordinary corner does.
+static func has_pillar(p: Dictionary) -> bool:
+	return bool(p.get("pillar", true))
 
 
 static func is_corner(p: Dictionary) -> bool:
@@ -256,7 +296,10 @@ static func describe(p: Dictionary) -> String:
 		return "Finish line \u00b7 %d" % int(p.get("len", FINISH_LEN))
 	if is_corner(p):
 		var deg := int(p.get("deg", 90))
-		var way := "Left" if deg > 0 else "Right"
+		# Positive `deg` exits to +X, which is a right turn on screen (see PieceIcon).
+		var way := "Right" if deg > 0 else "Left"
+		if not has_pillar(p):
+			return "Bend %s %d\u00b0 \u00b7 no pillar" % [way, absi(deg)]
 		var tag := " \u00b7 reattach" if bool(p.get("reattach", false)) else ""
 		return "%s %d\u00b0 \u00b7 r%d%s" % [way, absi(deg), int(p.get("r", DEFAULT_RADIUS)), tag]
 	return "Straight %d" % int(p.get("len", DEFAULT_LEN))
@@ -361,8 +404,14 @@ static func validate(ops: Array) -> Dictionary:
 			if absi(deg) not in ANGLES:
 				return {"ok": false, "error": "A corner must be 90, 180 or 270 degrees.", "corners": corners, "length": length}
 			var r := float(p.get("r", DEFAULT_RADIUS))
-			if r < MIN_RADIUS or r > MAX_RADIUS:
-				return {"ok": false, "error": "Corner radius must be %d-%d." % [int(MIN_RADIUS), int(MAX_RADIUS)], "corners": corners, "length": length}
+			if has_pillar(p):
+				if r < MIN_RADIUS or r > MAX_RADIUS:
+					return {"ok": false, "error": "Corner radius must be %d-%d." % [int(MIN_RADIUS), int(MAX_RADIUS)], "corners": corners, "length": length}
+			elif r < BEND_RADIUS:
+				# A pillarless turn narrower than a bend is a wall: the car cannot steer
+				# round it and there is no pole to grab. Refuse it rather than ship a road
+				# that kills every player at the same corner.
+				return {"ok": false, "error": "A turn with no pillar must be at least %d wide." % int(BEND_RADIUS), "corners": corners, "length": length}
 			corners += 1
 			length += r * absf(deg_to_rad(float(deg)))
 		else:
@@ -386,7 +435,7 @@ static func mirror(ops: Array) -> Array:
 		if is_finish(p):
 			out.append(make_finish(float(p["len"])))
 		elif is_corner(p):
-			out.append(make_corner(-int(p["deg"]), float(p["r"]), bool(p.get("reattach", false))))
+			out.append(_flip_corner(p))
 		else:
 			out.append(make_straight(float(p["len"])))
 	return out
@@ -405,11 +454,22 @@ static func reverse(ops: Array) -> Array:
 			# it is held back and appended last instead of being emitted here.
 			fin = float(p["len"])
 		elif is_corner(p):
-			out.append(make_corner(-int(p["deg"]), float(p["r"]), bool(p.get("reattach", false))))
+			out.append(_flip_corner(p))
 		else:
 			out.append(make_straight(float(p["len"])))
 	if fin > 0.0:
 		out.append(make_finish(fin))
+	return out
+
+
+# A corner with its direction flipped, keeping everything else that makes it the piece
+# it is. `mirror` and `reverse` both need this: rebuilding the corner from `make_corner`
+# alone drops the pillar flag, which would turn a wide bend into a tight turn with no
+# pole - a wall - and the transform is not supposed to change what a piece *is*, only
+# which way it turns.
+static func _flip_corner(p: Dictionary) -> Dictionary:
+	var out := make_corner(-int(p["deg"]), float(p["r"]), bool(p.get("reattach", false)),
+			has_pillar(p))
 	return out
 
 

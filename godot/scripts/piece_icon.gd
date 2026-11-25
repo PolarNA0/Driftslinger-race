@@ -45,9 +45,9 @@ class_name PieceIcon
 # `Track.build_ops` (positive `deg` exits to +X).
 static func turn_deg(key: String) -> int:
 	match key:
-		"90", "reattach":
+		"90", "reattach", "bend":
 			return 90
-		"-90", "reattach_l":
+		"-90", "reattach_l", "bend_l":
 			return -90
 		"180":
 			return 180
@@ -56,6 +56,12 @@ static func turn_deg(key: String) -> int:
 		"-270":
 			return -270
 	return 0
+
+
+# Is this palette key a turn with no pillar? A bend is drawn differently because it
+# behaves differently: there is no pole to sling round, so the car steers through it.
+static func is_bend(key: String) -> bool:
+	return key == "bend" or key == "bend_l"
 
 
 func _ready() -> void:
@@ -95,16 +101,24 @@ func _draw() -> void:
 # the entry tangent by `deg`; the exit leaves along that turned tangent. This
 # reproduces that in miniature so the picture cannot disagree with the road.
 func _turn(w: float, h: float, band: float, m: float, deg: int) -> void:
-	var pts := arc_points(deg, w, h, band, m)
+	var fr := arc_frame(deg, w, h, band, m)
+	var pts: PackedVector2Array = fr["pts"]
 	for i in range(pts.size() - 1):
 		_bar(pts[i], pts[i + 1], band)
 	_arrow(pts[pts.size() - 2], pts[pts.size() - 1], band)
+	# A corner is a turn you sling round, so its pole is part of the picture. A bend has
+	# no pole, and drawing one would promise a grab that is not there. This dot is the
+	# only difference the two tiles need: the road shape is honestly the same, and what
+	# changes is whether there is something at its centre to catch.
+	if not is_bend(kind):
+		draw_circle(fr["origin"], maxf(2.0, band * 0.34), road_color.darkened(0.45))
 
 
-# The corner's centreline in tile space, fitted to the tile. Split out from `_turn`
-# so the verifier can check the shape it draws rather than a copy of the arithmetic:
-# the picture and the check have to be the same code.
-static func arc_points(deg: int, w: float, h: float, band: float, m: float) -> PackedVector2Array:
+# The centreline in tile space plus the frame it was fitted in, so the pivot can be
+# drawn where the arc actually orbits. Split out from `_turn` so the verifier can check
+# the shape it draws rather than a copy of the arithmetic: the picture and the check
+# have to be the same code.
+static func arc_frame(deg: int, w: float, h: float, band: float, m: float) -> Dictionary:
 	var th := deg_to_rad(float(deg))
 	# The arc in units of its own radius. Which side the pivot sits on is what makes a
 	# turn a left or a right: a right turn orbits a pivot to the right of the entry, a
@@ -133,7 +147,12 @@ static func arc_points(deg: int, w: float, h: float, band: float, m: float) -> P
 	var pts := PackedVector2Array()
 	for p in unit:
 		pts.append(origin + p * r)
-	return pts
+	return {"pts": pts, "origin": origin, "r": r}
+
+
+# The corner's centreline only. Kept because the verifier reads it directly.
+static func arc_points(deg: int, w: float, h: float, band: float, m: float) -> PackedVector2Array:
+	return arc_frame(deg, w, h, band, m)["pts"]
 
 
 # A chevron at the exit, pointing the way the car leaves. Without it a 90 and a

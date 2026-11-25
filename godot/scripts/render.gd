@@ -253,6 +253,9 @@ func _draw_poles(t: Dictionary) -> void:
 	var items := []
 	for k in range(lo, hi + 1):
 		var f: Dictionary = track.fillets[k]
+		# A bend has no pillar: nothing to draw, nothing to grab.
+		if not bool(f.get("pillar", true)):
+			continue
 		var c: Vector2 = f["c"]
 		var p := _to_screen(c.x, c.y)
 		if p.x < -80.0 or p.x > _w + 80.0 or p.y < -80.0 or p.y > _h + 80.0:

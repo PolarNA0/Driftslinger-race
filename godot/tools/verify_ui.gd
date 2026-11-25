@@ -324,6 +324,11 @@ func _check_size(vp: Vector2i) -> void:
 				elif CustomTracks.is_corner(added) and int(added["deg"]) != PieceIcon.turn_deg(key):
 					# The tile is a picture of a turn: it must place that turn, not its mirror.
 					_fail("editor: '%s' placed deg=%d, want %d" % [key, int(added["deg"]), PieceIcon.turn_deg(key)])
+				elif CustomTracks.is_corner(added) and PieceIcon.is_bend(key) == CustomTracks.has_pillar(added):
+					# The bend tiles are the pillarless ones: a tile that says "no pillar"
+					# must place a turn with no pole, and a corner tile must bring the
+					# pole it is slung round.
+					_fail("editor: '%s' placed a piece with pillar=%s" % [key, str(CustomTracks.has_pillar(added))])
 			app.editor._arm(key)
 		# Exactly one finish, ever, and it is last: that is what makes the road finite.
 		var fins := 0

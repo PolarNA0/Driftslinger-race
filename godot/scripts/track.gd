@@ -129,6 +129,9 @@ func build_ops() -> void:
 				"s0": length, "s1": length + r * abs(th),
 				# A pillar you can re-grab after letting go early (see Car.release).
 				"reattach": false if no_reattach else bool(op.get("reattach", false)),
+				# A bend has no pillar: it is a curve the car steers through, so nothing
+				# is drawn at its centre and nothing can be grabbed there.
+				"pillar": bool(op.get("pillar", true)),
 			}
 			fillets.append(fil)
 			push_arc(fil)

@@ -452,6 +452,20 @@ func _init() -> void:
 		pole_ok = false
 	print("  every corner has a pole, drawn at %.1fpx: %s" % [pole_r, "OK" if pole_ok else "FAIL"])
 	pass_all = pole_ok and pass_all
+
+	# A bend has no pillar, so the map must not draw one. A dot at its centre would tell
+	# the player there is something to grab, and there is not.
+	var bend_pv := TrackPreview.new()
+	bend_pv.rebuild([
+		CustomTracks.make_straight(240.0),
+		CustomTracks.make_bend(90),
+		CustomTracks.make_finish(400.0),
+	])
+	var bend_no_pole: bool = bend_pv._poles.size() == 0 and bend_pv._spans.size() == 3
+	print("  a bend draws no pole on the map (poles=%d): %s"
+		% [bend_pv._poles.size(), "OK" if bend_no_pole else "FAIL"])
+	pass_all = bend_no_pole and pass_all
+	bend_pv.free()
 	# A palette tile must place exactly the piece it draws. The tile carries a signed
 	# angle and the op has to use that sign: a left tile that placed a right turn, or a
 	# 270 tile that placed a 90, is a picture that lies about the road it adds.
@@ -680,6 +694,112 @@ func _init() -> void:
 		pv._gui_input(_lift(1, Vector2(265.0, 100.0)))
 	pv.free()
 	Storage.save_custom_tracks([])
+
+	# --- one grid cell is one piece ----------------------------------------------
+	# The grid is the unit the road is built from, not decoration behind it: a tap on a
+	# cell places exactly one piece, and every piece is one cell long.
+	print("== a cell is a piece ==")
+	var cell_is_piece: bool = absf(CustomTracks.CELL_LEN - 80.0) < 0.001 \
+		and absf(float(TrackPreview.CELL) - float(CustomTracks.CELL_LEN)) < 0.001
+	print("  the grid cell and a piece are the same length (%.0f): %s"
+		% [CustomTracks.CELL_LEN, "OK" if cell_is_piece else "FAIL"])
+	pass_all = cell_is_piece and pass_all
+
+	# A straight piece is one cell long, whatever cell was tapped. Reading the length
+	# from the tap's distance made the grid decorative and the same tile a different
+	# road depending on where it landed.
+	var straight_len: float = float(CustomTracks.make_straight(CustomTracks.CELL_LEN)["len"])
+	var len_is_cell: bool = absf(straight_len - CustomTracks.CELL_LEN) < 0.001
+	print("  a straight piece is one cell long (%.0f): %s" % [straight_len, "OK" if len_is_cell else "FAIL"])
+	pass_all = len_is_cell and pass_all
+
+	# --- a pillar and a corner are two pieces -----------------------------------
+	# A bend is a turn with no pillar. It is wide because the car can only steer round a
+	# gentle curve with no pole to sling, and it has to be drivable with no input at all.
+	print("== a pillar is separate from a piece ==")
+	var bend := CustomTracks.make_bend(90)
+	var bend_has_no_pillar: bool = not CustomTracks.has_pillar(bend) \
+		and absf(float(bend["r"]) - CustomTracks.BEND_RADIUS) < 0.001
+	print("  a bend carries no pillar and is %d wide: %s"
+		% [int(CustomTracks.BEND_RADIUS), "OK" if bend_has_no_pillar else "FAIL"])
+	pass_all = bend_has_no_pillar and pass_all
+	var corner_has_pillar: bool = CustomTracks.has_pillar(CustomTracks.make_corner(90))
+	print("  an ordinary corner carries its pillar: %s" % ("OK" if corner_has_pillar else "FAIL"))
+	pass_all = corner_has_pillar and pass_all
+
+	# A pillarless turn narrower than a bend is a wall. Refusing it is the whole point:
+	# the editor must not let a player build a corner nobody can drive.
+	var tight_bend := {"t": "A", "deg": 90, "r": 62.0, "reattach": false, "pillar": false}
+	var tb_v := CustomTracks.validate([CustomTracks.make_straight(240.0), tight_bend, CustomTracks.make_finish(300.0)])
+	var tb_refused: bool = not bool(tb_v["ok"])
+	print("  a narrow turn with no pillar is refused: %s" % ("OK" if tb_refused else "FAIL"))
+	pass_all = tb_refused and pass_all
+
+	# The bend must be drivable with no input at all, or "no pillar" is a lie.
+	var bend_ops := [
+		CustomTracks.make_straight(240.0),
+		CustomTracks.make_bend(90),
+		CustomTracks.make_straight(240.0),
+		CustomTracks.make_bend(-90),
+		CustomTracks.make_finish(400.0),
+	]
+	var bend_v := CustomTracks.validate(bend_ops)
+	print("  a bend track validates: %s" % ("OK" if bool(bend_v["ok"]) else "FAIL"))
+	pass_all = bool(bend_v["ok"]) and pass_all
+	var bt := Track.new(0, CustomTracks.opts(bend_ops, {"road": "4a4a4a", "ground": "48d350"}))
+	var bcar := Car.new()
+	bcar.reset(bt)
+	var bi := 0
+	while bcar.alive and not bcar.finished and bi < 200000:
+		bi += 1
+		bcar.step(DT, false)
+	var bend_steers: bool = bcar.finished and bcar.max_off < Cfg.ROAD_HALF_WIDTH
+	print("  a bend drives clean with no input: finished=%s maxOff=%.1f %s"
+		% [str(bcar.finished), bcar.max_off, "OK" if bend_steers else "FAIL"])
+	pass_all = bend_steers and pass_all
+
+	# And there is nothing at a bend's centre to grab, so holding must not attach.
+	var grab_ok := false
+	if bt.fillets.size() > 0:
+		var bc2 := Car.new()
+		bc2.reset(bt)
+		var j := 0
+		while bc2.alive and not bc2.finished and j < 200000:
+			j += 1
+			bc2.step(DT, true)
+			if bc2.attached:
+				break
+		grab_ok = not bc2.attached
+	print("  holding the button never grabs a bend: %s" % ("OK" if grab_ok else "FAIL"))
+	pass_all = grab_ok and pass_all
+
+	# A transform changes which way a piece turns, never what it is. Rebuilding a corner
+	# from the raw fields dropped the pillar flag, which turned a wide bend into a tight
+	# pillarless turn - a wall - and `make_corner`'s corner-radius clamp would have
+	# shrunk it even if the flag survived.
+	var bend_only := [
+		CustomTracks.make_straight(240.0),
+		CustomTracks.make_bend(90),
+		CustomTracks.make_finish(400.0),
+	]
+	var m := CustomTracks.mirror(bend_only)
+	var rv := CustomTracks.reverse(bend_only)
+	var m_bend: Dictionary = m[1]
+	var r_bend: Dictionary = rv[0]
+	var m_kept: bool = not CustomTracks.has_pillar(m_bend) \
+		and absf(float(m_bend["r"]) - CustomTracks.BEND_RADIUS) < 0.001 \
+		and int(m_bend["deg"]) == -90
+	print("  mirror keeps a bend a bend (deg=%d r=%d pillar=%s): %s"
+		% [int(m_bend["deg"]), int(m_bend["r"]), str(CustomTracks.has_pillar(m_bend)),
+		   "OK" if m_kept else "FAIL"])
+	pass_all = m_kept and pass_all
+	var r_kept: bool = not CustomTracks.has_pillar(r_bend) \
+		and absf(float(r_bend["r"]) - CustomTracks.BEND_RADIUS) < 0.001
+	print("  reverse keeps a bend a bend (r=%d pillar=%s): %s"
+		% [int(r_bend["r"]), str(CustomTracks.has_pillar(r_bend)), "OK" if r_kept else "FAIL"])
+	pass_all = r_kept and pass_all
+	pass_all = _drivable(m, "a mirrored bend track") and pass_all
+
 
 	print("== the store is capped ==")
 	Storage.save_custom_tracks([])

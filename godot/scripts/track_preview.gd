@@ -55,8 +55,9 @@ const MIN_ZOOM := 0.05
 const MAX_ZOOM := 6.0
 const WHEEL_STEP := 1.15
 # One grid cell in world pixels. The editor snaps placement to this so a tap lands on
-# a cell rather than an arbitrary point.
-const CELL := 80.0
+# a cell rather than an arbitrary point, and it is the length of one piece
+# (`CustomTracks.CELL_LEN`): a cell on screen and a cell of road are the same unit.
+const CELL := CustomTracks.CELL_LEN
 const TAP_SLOP := 10.0
 # Pan gain. A finger of travel moves the map a little less than it travels. One-to-one
 # tracks the finger exactly, which on a phone reads as twitchy - a small finger
@@ -113,8 +114,10 @@ func _collect() -> void:
                         ln = maxf(0.0, _finish_s - s)
                 elif CustomTracks.is_corner(p):
                         ln = float(p["r"]) * absf(deg_to_rad(float(p["deg"])))
-                        var f: Dictionary = _track.fillets[_poles.size()]
-                        _poles.append({"op": i, "x": f["c"].x, "y": f["c"].y})
+                        # A bend has no pillar, so there is nothing to draw at its centre.
+                        if CustomTracks.has_pillar(p):
+                                var f: Dictionary = _track.fillets[_poles.size()]
+                                _poles.append({"op": i, "x": f["c"].x, "y": f["c"].y})
                 else:
                         ln = float(p["len"])
                 var mid := _track.point_at(s + ln * 0.5)
@@ -452,8 +455,8 @@ func _draw() -> void:
                 if ops.is_empty():
                         var f0 := ThemeDB.fallback_font
                         draw_string(f0, Vector2(12, h * 0.5),
-                        	"Tap a piece below, then tap the grid.",
-                        	HORIZONTAL_ALIGNMENT_CENTER, w - 24, 13, UiTheme.INK_MUTE)
+                                "Tap a piece below, then tap the grid.",
+                                HORIZONTAL_ALIGNMENT_CENTER, w - 24, 13, UiTheme.INK_MUTE)
                 return
 
         var colors := CustomTracks.theme_colors(_entry())

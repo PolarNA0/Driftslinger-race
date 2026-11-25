@@ -154,6 +154,12 @@ func try_grab() -> bool:
 	var f := _fillet()
 	if spent_corners.has(corner):
 		return false
+	# A bend has no pillar, so there is nothing here to catch. Its pivot is far outside
+	# `GRAB_RANGE` by construction (`CustomTracks.BEND_RADIUS`), so the distance test
+	# below would already refuse it; this states the intent rather than relying on the
+	# geometry to keep a pole that is not drawn from being grabbed.
+	if not bool(f.get("pillar", true)):
+		return false
 	var c: Vector2 = f["c"]
 	var d := U.dist(c.x, c.y, x, y)
 	# Catching the same pole again after a bail reaches further than a fresh grab:

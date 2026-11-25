@@ -217,18 +217,21 @@ func _build_palette() -> void:
 	# different roads, and the tile's art is generated from the signed angle, so what
 	# is drawn is the way the piece will actually turn.
 	#
-	# There is no separate "pillar" tile. A pillar IS the turn: the pole the car
-	# slings around sits at the centre of the arc. The old tile built the identical
-	# op to "90", so choosing a curve and choosing a pillar did the same thing,
-	# which read as both of them placing at once. The reattach turn is a real
-	# difference - its pole stays live after an early release.
+	# There is no separate "pillar" tile, because a pillar is not a thing you place on
+	# its own: it is the pole at the centre of a turn, and a tight turn without one is a
+	# wall the car cannot steer round. The separation the tiles make is the one the
+	# physics can honour - a *bend* is a turn with no pillar (wide enough to steer
+	# through, nothing to grab), and every corner is a turn *with* its pillar. The two
+	# bend tiles are the pillarless ones; the dot on a corner tile is the pole it brings.
 	var items := [
 		["straight", "Straight"],
-		["90", "Right 90\u00b0"],
-		["-90", "Left 90\u00b0"],
+		["90", "Right 90\u00b0 (pillar)"],
+		["-90", "Left 90\u00b0 (pillar)"],
 		["180", "Hairpin 180\u00b0"],
 		["270", "Right loop 270\u00b0"],
 		["-270", "Left loop 270\u00b0"],
+		["bend", "Right bend 90\u00b0 (no pillar)"],
+		["bend_l", "Left bend 90\u00b0 (no pillar)"],
 		["reattach", "Right reattach 90\u00b0"],
 		["reattach_l", "Left reattach 90\u00b0"],
 		["finish", "Finish line"],
@@ -299,8 +302,9 @@ func _on_cell_tapped(cell: Vector2i) -> void:
 		var fi := CustomTracks.finish_index(ops)
 		if has_finish:
 			ops.remove_at(fi)
-		var d := w.distance_to(preview.growth_point(ops.size()))
-		ops.append(CustomTracks.make_finish(clampf(d, CustomTracks.MIN_LEN, CustomTracks.MAX_LEN)))
+		# One cell, one piece: the finish is one cell long too. Its length is not read
+		# from the tap, because a tap names a cell and every cell is the same size.
+		ops.append(CustomTracks.make_finish(CustomTracks.CELL_LEN))
 		selected = ops.size() - 1
 		_armed = ""
 		preview.armed = Callable()
@@ -330,10 +334,11 @@ func _on_cell_tapped(cell: Vector2i) -> void:
 func _place_armed(w: Vector2, start: Vector2) -> void:
 	match _armed:
 		"straight":
-			# The tapped cell sets the length: the distance from where the road ends
-			# now to the cell the player pointed at.
-			var d := w.distance_to(start)
-			ops.append(CustomTracks.make_straight(clampf(d, CustomTracks.MIN_LEN, CustomTracks.MAX_LEN)))
+			# One cell, one piece: a straight is exactly one cell long. The tap names the
+			# cell, not the length - a length read from the tap's distance to the end of
+			# the road gave two different roads for two taps on the same cell, and made
+			# the grid decorative instead of the unit the track is built from.
+			ops.append(CustomTracks.make_straight(CustomTracks.CELL_LEN))
 		_:
 			# A turn is exactly the tile that was picked, including its direction. It
 			# does not depend on where the grid was tapped: the player has already chosen
@@ -341,8 +346,15 @@ func _place_armed(w: Vector2, start: Vector2) -> void:
 			var deg := PieceIcon.turn_deg(_armed)
 			if deg == 0:
 				return
-			ops.append(CustomTracks.make_corner(deg, CustomTracks.DEFAULT_RADIUS,
-					_armed.begins_with("reattach")))
+			if PieceIcon.is_bend(_armed):
+				# A bend is the pillarless half of the separation: the road curves and the
+				# car steers through it, with nothing at its centre to grab. It has to be
+				# wide (see `CustomTracks.BEND_RADIUS`) because a tight curve without a pole
+				# is a wall, so its radius is not the corner radius.
+				ops.append(CustomTracks.make_bend(deg))
+			else:
+				ops.append(CustomTracks.make_corner(deg, CustomTracks.DEFAULT_RADIUS,
+						_armed.begins_with("reattach")))
 
 
 # --- the sheet ---------------------------------------------------------------
@@ -440,8 +452,13 @@ func _build_inspect(target: VBoxContainer, i: int) -> void:
 			b.pressed.connect(func(): _set_deg(i, ang))
 			row.add_child(b)
 
-		target.add_child(_slider_row("Radius", float(p["r"]), CustomTracks.MIN_RADIUS,
-			CustomTracks.MAX_RADIUS, CustomTracks.RADIUS_STEP, func(v): _set_radius(i, v), []))
+		# A bend's radius starts where a corner's ends: below it the car cannot steer
+		# round without a pole, so the slider must not offer those values.
+		var pillar := CustomTracks.has_pillar(p)
+		var r_lo := CustomTracks.MIN_RADIUS if pillar else CustomTracks.BEND_RADIUS
+		var r_hi := CustomTracks.MAX_RADIUS if pillar else CustomTracks.BEND_RADIUS * 2.0
+		target.add_child(_slider_row("Radius", float(p["r"]), r_lo,
+				r_hi, CustomTracks.RADIUS_STEP, func(v): _set_radius(i, v), []))
 
 		var dir_row := HBoxContainer.new()
 		dir_row.add_theme_constant_override("separation", 6)
@@ -525,7 +542,13 @@ func _remove_at(i: int) -> void:
 func _set_radius(i: int, value: float) -> void:
 	if i < 0 or i >= ops.size():
 		return
-	ops[i]["r"] = clampf(value, CustomTracks.MIN_RADIUS, CustomTracks.MAX_RADIUS)
+	# A bend's radius is not a free choice: below `BEND_RADIUS` the car cannot steer round
+	# it and there is no pole to grab, so the road becomes a wall. The slider must not be
+	# able to make a track nobody can drive.
+	if CustomTracks.has_pillar(ops[i]):
+		ops[i]["r"] = clampf(value, CustomTracks.MIN_RADIUS, CustomTracks.MAX_RADIUS)
+	else:
+		ops[i]["r"] = maxf(value, CustomTracks.BEND_RADIUS)
 	_apply_live(i)
 
 
